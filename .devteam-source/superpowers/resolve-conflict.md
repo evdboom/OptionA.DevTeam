@@ -26,7 +26,7 @@ For each conflicted file, read the full file content. Look for the conflict mark
 (current branch — orchestrator's version)
 =======
 (incoming branch — agent's version)
->>>>>>> ralph-<agentId>
+>>>>>>> devteam-<agentId>
 ```
 
 ### 3. Resolve Each File

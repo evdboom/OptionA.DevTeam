@@ -1,6 +1,3 @@
-# Ralph ephemeral state (per-run, not tracked)
-.ralph/.ralph-state/
-
 # DevTeam runtime workspace
 .devteam/
 

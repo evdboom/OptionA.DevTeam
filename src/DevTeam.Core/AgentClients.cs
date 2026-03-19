@@ -8,6 +8,7 @@ public sealed class AgentInvocationRequest
 {
     public string Prompt { get; init; } = "";
     public string? Model { get; init; }
+    public string? SessionId { get; init; }
     public string WorkingDirectory { get; init; } = Directory.GetCurrentDirectory();
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(20);
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
@@ -16,6 +17,7 @@ public sealed class AgentInvocationRequest
 public sealed class AgentInvocationResult
 {
     public string BackendName { get; init; } = "";
+    public string SessionId { get; init; } = "";
     public int ExitCode { get; init; }
     public string StdOut { get; init; } = "";
     public string StdErr { get; init; } = "";
@@ -133,6 +135,7 @@ public sealed class CopilotCliAgentClient(ICommandRunner? runner = null) : IAgen
         return new AgentInvocationResult
         {
             BackendName = Name,
+            SessionId = request.SessionId ?? "",
             ExitCode = result.ExitCode,
             StdOut = result.StdOut,
             StdErr = result.StdErr
@@ -169,6 +172,7 @@ public sealed class CopilotSdkAgentClient : IAgentClient
         {
             ClientName = "devteam-runtime",
             Model = request.Model,
+            SessionId = request.SessionId,
             OnPermissionRequest = PermissionHandler.ApproveAll,
             WorkingDirectory = request.WorkingDirectory,
             Streaming = true,
@@ -205,6 +209,7 @@ public sealed class CopilotSdkAgentClient : IAgentClient
         return new AgentInvocationResult
         {
             BackendName = Name,
+            SessionId = session.SessionId,
             ExitCode = stderr.Length == 0 ? 0 : 1,
             StdOut = stdout.ToString(),
             StdErr = stderr.ToString()
@@ -215,7 +220,7 @@ public sealed class CopilotSdkAgentClient : IAgentClient
     {
         var repoRoot = FindRepoRoot(workingDirectory);
         var paths = new List<string>();
-        foreach (var relative in new[] { ".devteam-source\\superpowers", ".ralph-source\\superpowers" })
+        foreach (var relative in new[] { ".devteam-source\\superpowers" })
         {
             var fullPath = Path.Combine(repoRoot, relative);
             if (Directory.Exists(fullPath))
@@ -231,8 +236,7 @@ public sealed class CopilotSdkAgentClient : IAgentClient
         var current = new DirectoryInfo(Path.GetFullPath(workingDirectory));
         while (current is not null)
         {
-            if (Directory.Exists(Path.Combine(current.FullName, ".devteam-source"))
-                || Directory.Exists(Path.Combine(current.FullName, ".ralph-source")))
+            if (Directory.Exists(Path.Combine(current.FullName, ".devteam-source")))
             {
                 return current.FullName;
             }

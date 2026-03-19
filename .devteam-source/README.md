@@ -8,7 +8,7 @@ The new DevTeam runtime treats this directory as the primary home for prompt ass
 - `superpowers/` contains reusable process/skill instructions as markdown files.
 - `MODELS.json` defines model metadata used for role/model policy and budgeting.
 
-At runtime, DevTeam loads assets from `.devteam-source/` first and falls back to `.ralph-source/` when a file has not been migrated yet.
+At runtime, DevTeam loads assets from `.devteam-source/`.
 
 ## Markdown format
 

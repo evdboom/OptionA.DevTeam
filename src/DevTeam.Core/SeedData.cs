@@ -5,9 +5,9 @@ namespace DevTeam.Core;
 
 internal static partial class SeedData
 {
-    private static readonly string[] RoleDirectoryCandidates = [".devteam-source\\roles", ".ralph-source\\roles"];
-    private static readonly string[] SuperpowerDirectoryCandidates = [".devteam-source\\superpowers", ".ralph-source\\superpowers"];
-    private static readonly string[] ModelFileCandidates = [".devteam-source\\MODELS.json", ".ralph-source\\MODELS.json"];
+    private static readonly string[] RoleDirectoryCandidates = [".devteam-source\\roles"];
+    private static readonly string[] SuperpowerDirectoryCandidates = [".devteam-source\\superpowers"];
+    private static readonly string[] ModelFileCandidates = [".devteam-source\\MODELS.json"];
 
     private static readonly Dictionary<string, RoleModelPolicy> DefaultPolicies = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -40,6 +40,40 @@ internal static partial class SeedData
         state.Roles = LoadRoles(repoRoot);
         state.Superpowers = LoadSuperpowers(repoRoot);
         return state;
+    }
+
+    public static bool HydrateMissingWorkspaceMetadata(WorkspaceState state)
+    {
+        var repoRoot = string.IsNullOrWhiteSpace(state.RepoRoot)
+            ? Directory.GetCurrentDirectory()
+            : Path.GetFullPath(state.RepoRoot);
+        var changed = false;
+
+        if (state.Models.Count == 0)
+        {
+            state.Models = LoadModels(repoRoot);
+            changed = true;
+        }
+
+        if (state.Roles.Count == 0)
+        {
+            state.Roles = LoadRoles(repoRoot);
+            changed = true;
+        }
+
+        if (state.Superpowers.Count == 0)
+        {
+            state.Superpowers = LoadSuperpowers(repoRoot);
+            changed = true;
+        }
+
+        if (!string.Equals(state.RepoRoot, repoRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            state.RepoRoot = repoRoot;
+            changed = true;
+        }
+
+        return changed;
     }
 
     public static RoleModelPolicy GetPolicy(WorkspaceState state, string roleSlug)
@@ -193,12 +227,15 @@ internal static partial class SeedData
 
     private static string ResolveFirstDirectory(string repoRoot, IEnumerable<string> candidates)
     {
-        foreach (var candidate in candidates)
+        foreach (var root in EnumerateAssetRoots(repoRoot))
         {
-            var fullPath = Path.Combine(repoRoot, candidate);
-            if (Directory.Exists(fullPath))
+            foreach (var candidate in candidates)
             {
-                return fullPath;
+                var fullPath = Path.Combine(root, candidate);
+                if (Directory.Exists(fullPath))
+                {
+                    return fullPath;
+                }
             }
         }
         return Path.Combine(repoRoot, candidates.First());
@@ -206,15 +243,37 @@ internal static partial class SeedData
 
     private static string ResolveFirstFile(string repoRoot, IEnumerable<string> candidates)
     {
-        foreach (var candidate in candidates)
+        foreach (var root in EnumerateAssetRoots(repoRoot))
         {
-            var fullPath = Path.Combine(repoRoot, candidate);
-            if (File.Exists(fullPath))
+            foreach (var candidate in candidates)
             {
-                return fullPath;
+                var fullPath = Path.Combine(root, candidate);
+                if (File.Exists(fullPath))
+                {
+                    return fullPath;
+                }
             }
         }
         return Path.Combine(repoRoot, candidates.First());
+    }
+
+    private static IEnumerable<string> EnumerateAssetRoots(string repoRoot)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var root in new[] { repoRoot, AppContext.BaseDirectory })
+        {
+            var current = new DirectoryInfo(Path.GetFullPath(root));
+            while (current is not null)
+            {
+                if (seen.Add(current.FullName))
+                {
+                    yield return current.FullName;
+                }
+
+                current = current.Parent;
+            }
+        }
     }
 
     private sealed record MarkdownAsset(string Body, List<string> RequiredTools);

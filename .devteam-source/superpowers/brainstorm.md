@@ -13,9 +13,8 @@ Use this when designing features, making architectural decisions, or starting ne
 ## Steps
 
 ### 1. Gather Context
-- Read GOAL.md, ROADMAP.md, and relevant issues
+- Read the active goal, roadmap items, open issues, recent decisions, and open questions provided by the runtime
 - Check existing code structure (`src/` directory)
-- Read recent decisions in `.ralph/.ralph-project/decisions/`
 - Understand what exists before proposing what's new
 
 ### 2. Explore 2-3 Approaches
@@ -33,22 +32,11 @@ Don't skip this. Even "obvious" solutions have alternatives worth considering.
 - Will this break existing functionality?
 
 ### 4. Document the Decision
-Write a decision record to `.ralph/.ralph-project/decisions/NNNN-title.md`:
-```markdown
-# Decision NNNN: Title
-**Status:** accepted
-**Context:** What problem are we solving?
-**Options Considered:**
-1. Option A — pros/cons
-2. Option B — pros/cons
-**Decision:** Which option and why
-**Consequences:** What follows from this decision
-```
+Put the decision in the response summary so the runtime can persist it as part of the current plan or run artifact.
 
 ### 5. Create Actionable Issues
 Break the chosen approach into implementable issues:
 - Each issue should be closeable in 1-2 iterations
-- Include acceptance criteria in each issue
 - Note dependencies between issues
 
 ## Anti-Patterns

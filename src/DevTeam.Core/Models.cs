@@ -5,12 +5,15 @@ namespace DevTeam.Core;
 public sealed class WorkspaceState
 {
     public string RepoRoot { get; set; } = "";
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public WorkflowPhase Phase { get; set; } = WorkflowPhase.Planning;
     public BudgetState Budget { get; set; } = new();
     public GoalState? ActiveGoal { get; set; }
     public List<RoadmapItem> Roadmap { get; set; } = [];
     public List<IssueItem> Issues { get; set; } = [];
     public List<QuestionItem> Questions { get; set; } = [];
     public List<AgentRun> AgentRuns { get; set; } = [];
+    public List<DecisionRecord> Decisions { get; set; } = [];
     public List<ModelDefinition> Models { get; set; } = [];
     public List<RoleDefinition> Roles { get; set; } = [];
     public List<SuperpowerDefinition> Superpowers { get; set; } = [];
@@ -18,6 +21,7 @@ public sealed class WorkspaceState
     public int NextIssueId { get; set; } = 1;
     public int NextQuestionId { get; set; } = 1;
     public int NextRunId { get; set; } = 1;
+    public int NextDecisionId { get; set; } = 1;
 }
 
 public sealed class BudgetState
@@ -49,6 +53,8 @@ public sealed class IssueItem
     public int Id { get; set; }
     public string Title { get; set; } = "";
     public string Detail { get; set; } = "";
+    public string Area { get; set; } = "";
+    public bool IsPlanningIssue { get; set; }
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public ItemStatus Status { get; set; } = ItemStatus.Open;
     public string RoleSlug { get; set; } = "developer";
@@ -73,10 +79,25 @@ public sealed class AgentRun
     public int IssueId { get; set; }
     public string RoleSlug { get; set; } = "";
     public string ModelName { get; set; } = "";
+    public string SessionId { get; set; } = "";
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public AgentRunStatus Status { get; set; } = AgentRunStatus.Queued;
     public string Summary { get; set; } = "";
+    public List<string> SuperpowersUsed { get; set; } = [];
+    public List<string> ToolsUsed { get; set; } = [];
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class DecisionRecord
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = "";
+    public string Detail { get; set; } = "";
+    public string Source { get; set; } = "";
+    public int? IssueId { get; set; }
+    public int? RunId { get; set; }
+    public string SessionId { get; set; } = "";
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class ModelDefinition
@@ -119,6 +140,7 @@ public sealed class QueuedRunInfo
     public int IssueId { get; init; }
     public string Title { get; init; } = "";
     public string RoleSlug { get; init; } = "";
+    public string Area { get; init; } = "";
     public string ModelName { get; init; } = "";
 }
 
@@ -135,6 +157,23 @@ public sealed class StatusReport
     public BudgetState Budget { get; init; } = new();
     public IReadOnlyList<AgentRun> QueuedRuns { get; init; } = [];
     public IReadOnlyList<QuestionItem> OpenQuestions { get; init; } = [];
+    public IReadOnlyList<DecisionRecord> RecentDecisions { get; init; } = [];
+}
+
+public sealed class ProposedQuestion
+{
+    public string Text { get; init; } = "";
+    public bool IsBlocking { get; init; }
+}
+
+public sealed class GeneratedIssueProposal
+{
+    public string Title { get; init; } = "";
+    public string Detail { get; init; } = "";
+    public string RoleSlug { get; init; } = "developer";
+    public string Area { get; init; } = "";
+    public int Priority { get; init; } = 50;
+    public IReadOnlyList<int> DependsOnIssueIds { get; init; } = [];
 }
 
 public enum ItemStatus
@@ -158,5 +197,11 @@ public enum AgentRunStatus
     Completed,
     Failed,
     Blocked
+}
+
+public enum WorkflowPhase
+{
+    Planning,
+    Execution
 }
 

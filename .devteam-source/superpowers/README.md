@@ -1,12 +1,12 @@
 # Superpowers
 
-Reusable skill instructions that any Ralph agent can load when needed.
+Reusable skill instructions that any DevTeam agent can load when needed.
 Inspired by [obra/superpowers](https://github.com/obra/superpowers).
 
 ## Usage
 
 When your task requires a specific skill, **read the relevant file** before starting work.
-Reference: `.ralph/.ralph-source/superpowers/<skill>.md`
+Reference: `.devteam-source/superpowers/<skill>.md`
 
 ## Available Skills
 
