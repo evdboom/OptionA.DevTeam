@@ -1,0 +1,225 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+
+namespace DevTeam.Core;
+
+internal static partial class SeedData
+{
+    private static readonly string[] RoleDirectoryCandidates = [".devteam-source\\roles", ".ralph-source\\roles"];
+    private static readonly string[] SuperpowerDirectoryCandidates = [".devteam-source\\superpowers", ".ralph-source\\superpowers"];
+    private static readonly string[] ModelFileCandidates = [".devteam-source\\MODELS.json", ".ralph-source\\MODELS.json"];
+
+    private static readonly Dictionary<string, RoleModelPolicy> DefaultPolicies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["orchestrator"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["architect"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
+        ["developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["backend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["frontend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["fullstack-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["tester"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["reviewer"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
+        ["ux"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["user"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false }
+    };
+
+    public static WorkspaceState BuildInitialState(string repoRoot, double totalCreditCap, double premiumCreditCap)
+    {
+        repoRoot = Path.GetFullPath(repoRoot);
+        var state = new WorkspaceState
+        {
+            RepoRoot = repoRoot,
+            Budget = new BudgetState
+            {
+                TotalCreditCap = totalCreditCap,
+                PremiumCreditCap = premiumCreditCap
+            }
+        };
+
+        state.Models = LoadModels(repoRoot);
+        state.Roles = LoadRoles(repoRoot);
+        state.Superpowers = LoadSuperpowers(repoRoot);
+        return state;
+    }
+
+    public static RoleModelPolicy GetPolicy(WorkspaceState state, string roleSlug)
+    {
+        var defaultModel = state.Models.FirstOrDefault(model => model.IsDefault)?.Name ?? "gpt-5-mini";
+        if (DefaultPolicies.TryGetValue(roleSlug, out var policy))
+        {
+            return policy;
+        }
+
+        var suggested = state.Roles.FirstOrDefault(role => role.Slug == roleSlug)?.SuggestedModel;
+        return new RoleModelPolicy
+        {
+            PrimaryModel = string.IsNullOrWhiteSpace(suggested) ? defaultModel : suggested,
+            FallbackModel = defaultModel,
+            AllowPremium = false
+        };
+    }
+
+    private static List<ModelDefinition> LoadModels(string repoRoot)
+    {
+        var modelsPath = ResolveFirstFile(repoRoot, ModelFileCandidates);
+        if (!File.Exists(modelsPath))
+        {
+            return
+            [
+                new ModelDefinition { Name = "claude-opus-4.6", Cost = 3, IsPremium = true },
+                new ModelDefinition { Name = "claude-sonnet-4.6", Cost = 1 },
+                new ModelDefinition { Name = "gpt-5.4", Cost = 1 },
+                new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }
+            ];
+        }
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(modelsPath));
+        var models = new List<ModelDefinition>();
+        foreach (var element in doc.RootElement.EnumerateArray())
+        {
+            var cost = element.GetProperty("Cost").GetDouble();
+            models.Add(new ModelDefinition
+            {
+                Name = element.GetProperty("Name").GetString() ?? "",
+                Cost = cost,
+                IsDefault = element.TryGetProperty("Default", out var isDefault) && isDefault.GetBoolean(),
+                IsPremium = cost > 1
+            });
+        }
+
+        return models;
+    }
+
+    private static List<RoleDefinition> LoadRoles(string repoRoot)
+    {
+        var rolesDir = ResolveFirstDirectory(repoRoot, RoleDirectoryCandidates);
+        if (!Directory.Exists(rolesDir))
+        {
+            return [];
+        }
+
+        var roles = new List<RoleDefinition>();
+        foreach (var path in Directory.GetFiles(rolesDir, "*.md").OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var asset = ParseMarkdownAsset(path);
+            var firstLine = asset.Body.Split('\n', StringSplitOptions.None).FirstOrDefault()?.Trim() ?? "";
+            var suggestedMatch = SuggestedModelRegex().Match(asset.Body);
+            roles.Add(new RoleDefinition
+            {
+                Slug = Path.GetFileNameWithoutExtension(path),
+                Name = firstLine.Replace("# Role:", "", StringComparison.Ordinal).Trim(),
+                SuggestedModel = suggestedMatch.Success ? suggestedMatch.Groups[1].Value : "",
+                SourcePath = Path.GetRelativePath(repoRoot, path),
+                Body = asset.Body,
+                RequiredTools = asset.RequiredTools
+            });
+        }
+
+        return roles;
+    }
+
+    private static List<SuperpowerDefinition> LoadSuperpowers(string repoRoot)
+    {
+        var directory = ResolveFirstDirectory(repoRoot, SuperpowerDirectoryCandidates);
+        if (!Directory.Exists(directory))
+        {
+            return [];
+        }
+
+        var items = new List<SuperpowerDefinition>();
+        foreach (var path in Directory.GetFiles(directory, "*.md").OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var asset = ParseMarkdownAsset(path);
+            var firstLine = asset.Body.Split('\n', StringSplitOptions.None).FirstOrDefault()?.Trim() ?? "";
+            items.Add(new SuperpowerDefinition
+            {
+                Slug = Path.GetFileNameWithoutExtension(path),
+                Name = firstLine.TrimStart('#', ' ').Trim(),
+                SourcePath = Path.GetRelativePath(repoRoot, path),
+                Body = asset.Body,
+                RequiredTools = asset.RequiredTools
+            });
+        }
+
+        return items;
+    }
+
+    private static MarkdownAsset ParseMarkdownAsset(string path)
+    {
+        var raw = File.ReadAllText(path);
+        var requiredTools = new List<string>();
+        if (!raw.StartsWith("---", StringComparison.Ordinal))
+        {
+            return new MarkdownAsset(raw, requiredTools);
+        }
+
+        var lines = raw.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        if (lines.Length < 3 || lines[0] != "---")
+        {
+            return new MarkdownAsset(raw, requiredTools);
+        }
+
+        var endIndex = Array.FindIndex(lines, 1, line => line == "---");
+        if (endIndex < 0)
+        {
+            return new MarkdownAsset(raw, requiredTools);
+        }
+
+        for (var index = 1; index < endIndex; index++)
+        {
+            var line = lines[index].Trim();
+            if (line.StartsWith("tools:", StringComparison.OrdinalIgnoreCase))
+            {
+                var inline = line["tools:".Length..].Trim();
+                if (!string.IsNullOrWhiteSpace(inline))
+                {
+                    requiredTools.AddRange(ParseToolList(inline));
+                }
+                continue;
+            }
+
+            if (line.StartsWith("-", StringComparison.Ordinal))
+            {
+                requiredTools.Add(line.TrimStart('-', ' ').Trim());
+            }
+        }
+
+        var body = string.Join('\n', lines.Skip(endIndex + 1)).TrimStart();
+        return new MarkdownAsset(body, requiredTools.Where(tool => !string.IsNullOrWhiteSpace(tool)).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+    }
+
+    private static IEnumerable<string> ParseToolList(string inline) =>
+        inline.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string ResolveFirstDirectory(string repoRoot, IEnumerable<string> candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            var fullPath = Path.Combine(repoRoot, candidate);
+            if (Directory.Exists(fullPath))
+            {
+                return fullPath;
+            }
+        }
+        return Path.Combine(repoRoot, candidates.First());
+    }
+
+    private static string ResolveFirstFile(string repoRoot, IEnumerable<string> candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            var fullPath = Path.Combine(repoRoot, candidate);
+            if (File.Exists(fullPath))
+            {
+                return fullPath;
+            }
+        }
+        return Path.Combine(repoRoot, candidates.First());
+    }
+
+    private sealed record MarkdownAsset(string Body, List<string> RequiredTools);
+
+    [GeneratedRegex(@"(?m)^## Suggested Model\s*\r?\n\s*`([a-zA-Z0-9][\w.\-]*)`")]
+    private static partial Regex SuggestedModelRegex();
+}
+

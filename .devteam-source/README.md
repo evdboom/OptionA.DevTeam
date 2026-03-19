@@ -1,0 +1,34 @@
+# DevTeam prompt assets
+
+The new DevTeam runtime treats this directory as the primary home for prompt assets.
+
+## Layout
+
+- `roles/` contains role definitions as markdown files.
+- `superpowers/` contains reusable process/skill instructions as markdown files.
+- `MODELS.json` defines model metadata used for role/model policy and budgeting.
+
+At runtime, DevTeam loads assets from `.devteam-source/` first and falls back to `.ralph-source/` when a file has not been migrated yet.
+
+## Markdown format
+
+These files are plain markdown so they stay editable without recompiling the runtime.
+
+Optional frontmatter is supported for tool requirements:
+
+```md
+---
+tools: rg, git, dotnet
+---
+# Superpower: Toolsmith
+
+Use the registered tools above when this skill is active.
+```
+
+The runtime strips the frontmatter before sending the body to agents and stores the declared tool list as metadata. That gives roles and superpowers a place to express tool expectations while still staying markdown-first.
+
+## Notes
+
+- Roles remain the source of behavioral guidance.
+- Superpowers remain reusable process instructions.
+- Tool availability still comes from the runtime/session configuration; markdown declares intent, not implementation.

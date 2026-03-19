@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DevTeam.Cli/DevTeam.Cli.csproj" />
+    <Project Path="src/DevTeam.Core/DevTeam.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DevTeam.SmokeTests/DevTeam.SmokeTests.csproj" />
+  </Folder>
+</Solution>
