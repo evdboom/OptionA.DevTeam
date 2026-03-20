@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\DevTeam.Cli\DevTeam.Cli.csproj" />
     <ProjectReference Include="..\..\src\DevTeam.Core\DevTeam.Core.csproj" />
   </ItemGroup>
 

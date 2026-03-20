@@ -10,6 +10,7 @@ public sealed class LoopExecutionOptions
     public TimeSpan AgentTimeout { get; set; } = TimeSpan.FromMinutes(10);
     public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(10);
     public LoopVerbosity Verbosity { get; set; } = LoopVerbosity.Normal;
+    public Action<IReadOnlyList<RunProgressSnapshot>>? ProgressReporter { get; set; }
 }
 
 public enum LoopVerbosity
@@ -48,13 +49,24 @@ public sealed class LoopExecutor(
             cancellationToken.ThrowIfCancellationRequested();
             iterations = iteration;
             var created = Array.Empty<string>();
+            var gitStatusBeforeIteration = GitWorkspace.TryCaptureStatus(state.RepoRoot);
             var runsToExecute = GetPendingRuns(state, options.MaxSubagents);
             if (runsToExecute.Count == 0)
             {
-                var result = _runtime.RunOnce(state, options.MaxSubagents);
-                finalState = result.State;
-                created = result.Created.ToArray();
-                runsToExecute = result.QueuedRuns.ToList();
+                if (state.Phase == WorkflowPhase.Execution)
+                {
+                    created = _runtime.PrepareForLoop(state).ToArray();
+                    var orchestration = await OrchestrateExecutionBatchAsync(state, options, log, cancellationToken);
+                    finalState = orchestration.State;
+                    runsToExecute = orchestration.QueuedRuns.ToList();
+                }
+                else
+                {
+                    var result = _runtime.RunOnce(state, options.MaxSubagents);
+                    finalState = result.State;
+                    created = result.Created.ToArray();
+                    runsToExecute = result.QueuedRuns.ToList();
+                }
             }
             else
             {
@@ -68,6 +80,7 @@ public sealed class LoopExecutor(
             }
 
             Log(log, options.Verbosity, $"  Phase: {state.Phase}");
+            LogQueuedPipelines(state, runsToExecute, log, options.Verbosity);
 
             if (finalState != "queued")
             {
@@ -75,7 +88,6 @@ public sealed class LoopExecutor(
                 break;
             }
 
-            var gitStatusBeforeIteration = GitWorkspace.TryCaptureStatus(state.RepoRoot);
             var pendingRuns = new List<PendingAgentRun>();
             foreach (var queuedRun in runsToExecute)
             {
@@ -143,6 +155,14 @@ public sealed class LoopExecutor(
                         Log(log, options.Verbosity, $"    Error:\n{completed.Response.StdErr.Trim()}");
                     }
                 }
+                else if (completed.Outcome is "failed" or "blocked")
+                {
+                    Log(log, options.Verbosity, $"    Detail: {completed.Summary}");
+                    if (!string.IsNullOrWhiteSpace(completed.Response.StdErr))
+                    {
+                        Log(log, options.Verbosity, $"    Error: {completed.Response.StdErr.Trim()}");
+                    }
+                }
             }
 
             var stagedPaths = GitWorkspace.StagePathsChangedSince(state.RepoRoot, gitStatusBeforeIteration);
@@ -179,11 +199,18 @@ public sealed class LoopExecutor(
                 return await ((Task<AgentExecutionResult>)completionTask);
             }
 
-            foreach (var item in pendingRuns.Where(item => !item.Task.IsCompleted))
+            var running = pendingRuns.Where(item => !item.Task.IsCompleted).ToList();
+            if (options.ProgressReporter is null)
             {
-                var elapsed = DateTimeOffset.UtcNow - item.StartedAtUtc;
-                log?.Invoke($"    Still running issue #{item.Run.IssueId} ({elapsed.TotalSeconds:0}s elapsed)...");
+                foreach (var item in running)
+                {
+                    var elapsed = DateTimeOffset.UtcNow - item.StartedAtUtc;
+                    log?.Invoke($"    Still running issue #{item.Run.IssueId} ({elapsed.TotalSeconds:0}s elapsed)...");
+                }
             }
+            options.ProgressReporter?.Invoke(running
+                .Select(item => new RunProgressSnapshot(item.Run.IssueId, item.Run.RoleSlug, item.Run.Title, DateTimeOffset.UtcNow - item.StartedAtUtc))
+                .ToList());
         }
     }
 
@@ -192,6 +219,28 @@ public sealed class LoopExecutor(
         if (verbosity != LoopVerbosity.Quiet)
         {
             log?.Invoke(message);
+        }
+    }
+
+    private static void LogQueuedPipelines(
+        WorkspaceState state,
+        IReadOnlyList<QueuedRunInfo> runsToExecute,
+        Action<string>? log,
+        LoopVerbosity verbosity)
+    {
+        if (verbosity == LoopVerbosity.Quiet || runsToExecute.Count == 0)
+        {
+            return;
+        }
+
+        Log(log, verbosity, "  Planned pipelines:");
+        foreach (var run in runsToExecute)
+        {
+            var issue = state.Issues.First(item => item.Id == run.IssueId);
+            var pipelineText = issue.PipelineId is null
+                ? "standalone"
+                : $"pipeline #{issue.PipelineId} stage {issue.PipelineStageIndex?.ToString() ?? "?"}";
+            Log(log, verbosity, $"    - {pipelineText}: {run.RoleSlug} on issue #{run.IssueId} {run.Title}");
         }
     }
 
@@ -384,6 +433,123 @@ public sealed class LoopExecutor(
         }
     }
 
+    private async Task<LoopResult> OrchestrateExecutionBatchAsync(
+        WorkspaceState state,
+        LoopExecutionOptions options,
+        Action<string>? log,
+        CancellationToken cancellationToken)
+    {
+        var candidates = _runtime.GetExecutionCandidatesPreview(state);
+        if (candidates.Count == 0)
+        {
+            return new LoopResult
+            {
+                State = _runtime.GetLoopStateWhenNoReadyWork(state)
+            };
+        }
+
+        _runtime.ClearExecutionSelection(state);
+        var orchestratorSession = _runtime.GetOrCreateExecutionOrchestratorSession(state);
+        var prompt = AgentPromptBuilder.BuildOrchestratorPrompt(state, candidates, options.MaxSubagents);
+        var client = _agentClientFactory(options.Backend);
+        Log(log, options.Verbosity, $"  Running execution orchestrator via {options.Backend} (session {orchestratorSession.SessionId}, candidates {candidates.Count}, max {options.MaxSubagents})");
+        var response = await client.InvokeAsync(new AgentInvocationRequest
+        {
+            Prompt = prompt,
+            Model = SeedData.GetPolicy(state, "orchestrator").PrimaryModel,
+            SessionId = orchestratorSession.SessionId,
+            WorkingDirectory = state.RepoRoot,
+            WorkspacePath = _store.WorkspacePath,
+            Timeout = options.AgentTimeout,
+            EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
+            WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName
+        }, cancellationToken);
+        var parsed = AgentPromptBuilder.ParseResponse(response);
+        _runtime.MergeWorkspaceAdditions(state, _store.Load());
+        if (parsed.Questions.Count > 0)
+        {
+            _runtime.AddQuestions(state, parsed.Questions);
+        }
+        if (parsed.Issues.Count > 0)
+        {
+            var roadmapIssue = state.Issues.FirstOrDefault(item => !item.IsPlanningIssue)
+                ?? state.Issues.First();
+            _runtime.AddGeneratedIssues(state, roadmapIssue.Id, parsed.Issues);
+        }
+        var selectedIssueIds = parsed.SelectedIssueIds.Count > 0
+            ? parsed.SelectedIssueIds
+            : ExtractSelectedIssueIds(response.StdOut);
+        if (state.ExecutionSelection.SelectedIssueIds.Count == 0 && selectedIssueIds.Count > 0)
+        {
+            _runtime.SetExecutionSelection(state, selectedIssueIds, parsed.Summary, orchestratorSession.SessionId, options.MaxSubagents);
+        }
+
+        if (parsed.Outcome is "failed" or "blocked")
+        {
+            _runtime.RecordDecision(state, "Execution orchestrator did not select a batch", parsed.Summary, "execution-orchestrator", sessionId: orchestratorSession.SessionId);
+        }
+
+        _store.Save(state);
+        if (state.ExecutionSelection.SelectedIssueIds.Count == 0)
+        {
+            var fallbackSelection = _runtime.GetReadyIssuesPreview(state, options.MaxSubagents)
+                .Select(item => item.Id)
+                .ToList();
+            if (fallbackSelection.Count > 0)
+            {
+                Log(log, options.Verbosity, "  Orchestrator did not persist a batch. Falling back to heuristic selection.");
+                _runtime.SetExecutionSelection(
+                    state,
+                    fallbackSelection,
+                    string.IsNullOrWhiteSpace(parsed.Summary)
+                        ? "Fallback heuristic selection because the orchestrator did not choose a batch."
+                        : parsed.Summary,
+                    orchestratorSession.SessionId,
+                    options.MaxSubagents);
+            }
+            else
+            {
+                return new LoopResult
+                {
+                    State = state.Questions.Any(item => item.Status == QuestionStatus.Open && item.IsBlocking)
+                        ? "waiting-for-user"
+                        : "idle"
+                };
+            }
+        }
+
+        var queued = _runtime.QueueExecutionSelection(state);
+        _store.Save(state);
+        return queued;
+    }
+
+    private static IReadOnlyList<int> ExtractSelectedIssueIds(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return [];
+        }
+
+        var match = Regex.Match(
+            output.Replace("\r\n", "\n", StringComparison.Ordinal),
+            @"SELECTED_ISSUES:\s*(?<body>.*?)(?:\n[A-Z_]+:|$)",
+            RegexOptions.Singleline | RegexOptions.CultureInvariant);
+        if (!match.Success)
+        {
+            return [];
+        }
+
+        return match.Groups["body"].Value
+            .Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith("-", StringComparison.Ordinal))
+            .Select(line => line[1..].Trim())
+            .Select(value => int.TryParse(value, out var parsed) ? parsed : 0)
+            .Where(value => value > 0)
+            .Distinct()
+            .ToList();
+    }
+
     private static List<QueuedRunInfo> GetPendingRuns(WorkspaceState state, int maxSubagents)
     {
         var candidateRuns = state.AgentRuns
@@ -432,6 +598,7 @@ internal static class AgentPromptBuilder
     private static readonly Dictionary<string, string[]> RoleSuperpowerMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["orchestrator"] = ["brainstorm", "plan"],
+        ["planner"] = ["brainstorm", "plan"],
         ["architect"] = ["brainstorm", "plan"],
         ["developer"] = ["plan", "tdd", "verify"],
         ["backend-developer"] = ["plan", "tdd", "verify"],
@@ -440,7 +607,9 @@ internal static class AgentPromptBuilder
         ["tester"] = ["tdd", "debug", "verify"],
         ["reviewer"] = ["review", "verify"],
         ["ux"] = ["verify"],
-        ["user"] = ["verify"]
+        ["user"] = ["verify"],
+        ["game-designer"] = ["brainstorm", "review", "verify"],
+        ["conflict-resolver"] = ["resolve-conflict"]
     };
 
     public static string BuildPrompt(WorkspaceState state, IssueItem issue)
@@ -537,23 +706,83 @@ internal static class AgentPromptBuilder
         """;
     }
 
+    public static string BuildOrchestratorPrompt(WorkspaceState state, IReadOnlyList<IssueItem> candidates, int maxSubagents)
+    {
+        var role = state.Roles.FirstOrDefault(item => string.Equals(item.Slug, "orchestrator", StringComparison.OrdinalIgnoreCase));
+        var roleBody = role?.Body ?? "# Role: Orchestrator";
+        var superpowers = ResolveSuperpowers(state, "orchestrator");
+        var superpowerBlock = string.Join(
+            "\n\n---\n\n",
+            superpowers.Select(item => item.Body.Trim()));
+
+        return $"""
+        You are working inside the DevTeam runtime.
+
+        Current phase:
+        {state.Phase}
+
+        Active goal:
+        {state.ActiveGoal?.GoalText ?? "(no active goal)"}
+
+        Task:
+        Choose the next execution batch for the runtime. Select at most {maxSubagents} ready issue leads. Prefer architect-first sequencing when architecture is still unresolved, keep conflicting areas out of the same batch, and choose the smallest safe batch that keeps progress moving. Use the workspace MCP tools to inspect the workspace and persist your selection with `select_execution_batch`. Also repeat the selected issue ids under SELECTED_ISSUES for compatibility.
+
+        Role instructions:
+        {roleBody.Trim()}
+
+        Relevant superpowers:
+        {superpowerBlock}
+
+        Execution candidates:
+        {BuildCandidateBlock(candidates)}
+
+        Open questions:
+        {BuildQuestionBlock(state)}
+
+        Recent decisions:
+        {BuildDecisionBlock(state)}
+
+        Reply in exactly this shape:
+        OUTCOME: completed|blocked|failed
+        SUMMARY:
+        <short orchestration summary>
+        SELECTED_ISSUES:
+        - <issue id>
+        If no issues should run, write `(none)` under SELECTED_ISSUES.
+        ISSUES:
+        - role=<role>; area=<shared-work-area-or-none>; priority=<1-100>; depends=<comma-separated existing issue ids or none>; title=<title>; detail=<detail>
+        If no issues should be created, write `(none)` under ISSUES.
+        SUPERPOWERS_USED:
+        - <superpower slug>
+        If none, write `(none)`.
+        TOOLS_USED:
+        - <tool name or command>
+        If none, write `(none)`.
+        QUESTIONS:
+        - [blocking] <question text>
+        - [non-blocking] <question text>
+        If none, write `(none)`.
+        """;
+    }
+
     public static ParsedAgentResponse ParseResponse(AgentInvocationResult response)
     {
         if (!response.Success)
         {
             var error = string.IsNullOrWhiteSpace(response.StdErr) ? "Agent invocation failed." : response.StdErr.Trim();
-            return new ParsedAgentResponse("failed", error, [], [], [], []);
+            return new ParsedAgentResponse("failed", error, [], [], [], [], []);
         }
 
         var text = NormalizeStructuredResponse(response.StdOut).Trim();
         if (string.IsNullOrWhiteSpace(text))
         {
-            return new ParsedAgentResponse("completed", "Agent returned no summary.", [], [], [], []);
+            return new ParsedAgentResponse("completed", "Agent returned no summary.", [], [], [], [], []);
         }
 
         var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         var outcomeLine = lines.FirstOrDefault(line => line.StartsWith("OUTCOME:", StringComparison.OrdinalIgnoreCase));
         var summaryIndex = Array.FindIndex(lines, line => line.StartsWith("SUMMARY:", StringComparison.OrdinalIgnoreCase));
+        var selectedIssuesIndex = Array.FindIndex(lines, line => line.StartsWith("SELECTED_ISSUES:", StringComparison.OrdinalIgnoreCase));
         var issuesIndex = Array.FindIndex(lines, line => line.StartsWith("ISSUES:", StringComparison.OrdinalIgnoreCase));
         var superpowersIndex = Array.FindIndex(lines, line => line.StartsWith("SUPERPOWERS_USED:", StringComparison.OrdinalIgnoreCase));
         var toolsIndex = Array.FindIndex(lines, line => line.StartsWith("TOOLS_USED:", StringComparison.OrdinalIgnoreCase));
@@ -591,6 +820,7 @@ internal static class AgentPromptBuilder
             summary = text;
         }
 
+        var selectedIssueIds = ParseSelectedIssueIds(lines, selectedIssuesIndex, issuesIndex, superpowersIndex, toolsIndex, questionsIndex);
         var issues = ParseIssues(lines, issuesIndex, questionsIndex);
         var superpowersUsed = ParseSimpleList(lines, superpowersIndex, toolsIndex, questionsIndex);
         var toolsUsed = ParseSimpleList(lines, toolsIndex, questionsIndex);
@@ -598,6 +828,7 @@ internal static class AgentPromptBuilder
         return new ParsedAgentResponse(
             outcome,
             string.IsNullOrWhiteSpace(summary) ? "No summary provided." : summary,
+            selectedIssueIds,
             issues,
             superpowersUsed,
             toolsUsed,
@@ -612,7 +843,7 @@ internal static class AgentPromptBuilder
         }
 
         var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
-        foreach (var header in new[] { "OUTCOME:", "SUMMARY:", "ISSUES:", "SUPERPOWERS_USED:", "TOOLS_USED:", "QUESTIONS:" })
+        foreach (var header in new[] { "OUTCOME:", "SUMMARY:", "SELECTED_ISSUES:", "ISSUES:", "SUPERPOWERS_USED:", "TOOLS_USED:", "QUESTIONS:" })
         {
             normalized = Regex.Replace(
                 normalized,
@@ -663,6 +894,19 @@ internal static class AgentPromptBuilder
         return string.Join(
             "\n",
             recentDecisions.Select(item => $"- #{item.Id} [{item.Source}] {item.Title}: {item.Detail}"));
+    }
+
+    private static string BuildCandidateBlock(IReadOnlyList<IssueItem> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            return "(none)";
+        }
+
+        return string.Join(
+            "\n",
+            candidates.Select(item =>
+                $"- #{item.Id} [{item.RoleSlug}] {item.Title} | priority={item.Priority} | area={(string.IsNullOrWhiteSpace(item.Area) ? "none" : item.Area)} | pipeline={(item.PipelineId?.ToString() ?? "none")} | stage={(item.PipelineStageIndex?.ToString() ?? "none")} | depends={(item.DependsOnIssueIds.Count == 0 ? "none" : string.Join(", ", item.DependsOnIssueIds))}"));
     }
 
     private static string BuildPipelineContextBlock(WorkspaceState state, IssueItem issue)
@@ -779,6 +1023,44 @@ internal static class AgentPromptBuilder
             .ToList();
     }
 
+    private static IReadOnlyList<int> ParseSelectedIssueIds(string[] lines, int sectionIndex, params int[] otherSectionIndexes)
+    {
+        if (sectionIndex < 0)
+        {
+            return [];
+        }
+
+        var endIndex = otherSectionIndexes
+            .Where(index => index >= 0 && index > sectionIndex)
+            .DefaultIfEmpty(lines.Length)
+            .Min();
+        var result = new List<int>();
+        foreach (var rawLine in lines.Skip(sectionIndex + 1).Take(endIndex - sectionIndex - 1))
+        {
+            var line = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(line) || string.Equals(line, "(none)", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!line.StartsWith("-", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var body = line[1..].Trim();
+            if (int.TryParse(body, out var parsed))
+            {
+                result.Add(parsed);
+            }
+        }
+
+        return result
+            .Where(item => item > 0)
+            .Distinct()
+            .ToList();
+    }
+
     private static IReadOnlyList<GeneratedIssueProposal> ParseIssues(string[] lines, int issuesIndex, int questionsIndex)
     {
         if (issuesIndex < 0)
@@ -872,9 +1154,16 @@ internal sealed record PendingAgentRun(
     Task<AgentExecutionResult> Task,
     DateTimeOffset StartedAtUtc);
 
+public sealed record RunProgressSnapshot(
+    int IssueId,
+    string RoleSlug,
+    string Title,
+    TimeSpan Elapsed);
+
 internal sealed record ParsedAgentResponse(
     string Outcome,
     string Summary,
+    IReadOnlyList<int> SelectedIssueIds,
     IReadOnlyList<GeneratedIssueProposal> Issues,
     IReadOnlyList<string> SuperpowersUsed,
     IReadOnlyList<string> ToolsUsed,

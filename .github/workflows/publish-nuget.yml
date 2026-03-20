@@ -1,0 +1,54 @@
+name: Publish NuGet tool
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE_OUTPUT: ./nupkg
+      TOOL_PROJECT: ./src/DevTeam.Cli/DevTeam.Cli.csproj
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore ./DevTeam.slnx
+
+      - name: Build
+        run: dotnet build ./DevTeam.slnx --configuration Release --no-restore
+
+      - name: Run smoke tests
+        run: dotnet run --project ./tests/DevTeam.SmokeTests/DevTeam.SmokeTests.csproj --configuration Release --no-build
+
+      - name: Pack tool
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:PACKAGE_OUTPUT | Out-Null
+          dotnet pack $env:TOOL_PROJECT --configuration Release --no-build --output $env:PACKAGE_OUTPUT
+
+      - name: Publish to NuGet
+        run: |
+          Get-ChildItem -Path $env:PACKAGE_OUTPUT -Filter *.nupkg | ForEach-Object {
+            Write-Host "Publishing $($_.Name)"
+            $output = dotnet nuget push $_.FullName --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate 2>&1
+            Write-Host $output
+            if ($output -match 'already exists') {
+              Write-Host "::warning::Package $($_.Name) already exists on NuGet — skipped."
+            }
+          }

@@ -58,16 +58,6 @@
     "Default": false
   },
   {
-    "Name": "gemini-3-pro-preview",
-    "Provider": "Google",
-    "Context": "173K",
-    "Description": "Google large model. Strong reasoning, long context.",
-    "Strengths": ["Architect", "Tester", "Game Designer"],
-    "BestFor": "Codebase analysis, architecture review, creative design",
-    "Cost": 1,
-    "Default": false
-  },
-  {
     "Name": "gemini-3-flash-preview",
     "Provider": "Google",
     "Context": "173K",

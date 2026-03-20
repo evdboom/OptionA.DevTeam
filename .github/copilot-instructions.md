@@ -10,6 +10,8 @@
   - `dotnet run --project .\src\DevTeam.Cli\DevTeam.Cli.csproj -- agent-invoke --prompt "Reply with READY and nothing else."`
 - Run the autonomous loop with the default runtime verbosity:
   - `dotnet run --project .\src\DevTeam.Cli\DevTeam.Cli.csproj -- run-loop --workspace .devteam --max-iterations 4 --verbosity normal`
+- After meaningful changes, update the package version and pack the tool locally:
+  - `dotnet pack .\src\DevTeam.Cli\DevTeam.Cli.csproj -c Release -o .\nupkg`
 
 ## High-level architecture
 

@@ -101,7 +101,17 @@ public sealed class WorkspaceMcpServer(string workspacePath)
         {
             "get_workspace_summary" => BuildToolResult(WithWorkspace((runtime, state) => runtime.BuildWorkspaceSnapshot(state))),
             "list_ready_issues" => BuildToolResult(WithWorkspace((runtime, state) =>
-                runtime.GetReadyIssuesPreview(state, GetInt(arguments, "maxSubagents", 3)))),
+                runtime.GetExecutionCandidatesPreview(state))),
+            "select_execution_batch" => BuildToolResult(WithWorkspace((runtime, state) =>
+            {
+                var selection = runtime.SetExecutionSelection(
+                    state,
+                    GetIntList(arguments, "issueIds"),
+                    GetRequiredString(arguments, "rationale"),
+                    GetOptionalString(arguments, "sessionId"),
+                    GetInt(arguments, "maxSubagents", 1));
+                return new { selection.SelectedIssueIds, selection.Rationale, selection.SessionId };
+            }, save: true)),
             "create_issue" => BuildToolResult(WithWorkspace((runtime, state) =>
             {
                 var issue = runtime.AddIssue(
@@ -164,12 +174,27 @@ public sealed class WorkspaceMcpServer(string workspacePath)
                     ["type"] = "object",
                     ["properties"] = new JsonObject
                     {
-                        ["maxSubagents"] = new JsonObject
-                        {
-                            ["type"] = "integer",
-                            ["minimum"] = 1
-                        }
                     },
+                    ["additionalProperties"] = false
+                }),
+            BuildToolDefinition(
+                "select_execution_batch",
+                "Persist the orchestrator's selected ready issue leads for the next execution batch.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject
+                    {
+                        ["issueIds"] = new JsonObject
+                        {
+                            ["type"] = "array",
+                            ["items"] = IntegerSchema()
+                        },
+                        ["rationale"] = StringSchema(),
+                        ["sessionId"] = StringSchema(),
+                        ["maxSubagents"] = IntegerSchema()
+                    },
+                    ["required"] = new JsonArray("issueIds", "rationale"),
                     ["additionalProperties"] = false
                 }),
             BuildToolDefinition(
@@ -328,7 +353,7 @@ public sealed class WorkspaceMcpServer(string workspacePath)
             }
         }
 
-        if (contentLength <= 0)
+        if (contentLength <= 0 || contentLength > 10_000_000)
         {
             return null;
         }
@@ -344,6 +369,11 @@ public sealed class WorkspaceMcpServer(string workspacePath)
             }
 
             read += chunk;
+        }
+
+        if (read != contentLength)
+        {
+            return null;
         }
 
         return new string(buffer, 0, read);

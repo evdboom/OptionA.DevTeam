@@ -1,8 +1,9 @@
-﻿using DevTeam.Core;
+﻿using DevTeam.Cli;
+using DevTeam.Core;
 
 var tests = new List<(string Name, Action Run)>
 {
-    ("RunOnce bootstraps and queues orchestrator work", TestRunOnceBootstrapsAndQueues),
+    ("RunOnce bootstraps and queues planner work", TestRunOnceBootstrapsAndQueues),
     ("Completed run unlocks dependent architect work", TestCompleteRunUnlocksDependency),
     ("Planning phase waits for plan approval", TestPlanningPhaseRequiresApproval),
     ("Blocking questions only halt when no ready work exists", TestBlockingQuestionWaitState),
@@ -10,14 +11,19 @@ var tests = new List<(string Name, Action Run)>
     ("Role suggested model overrides default policy", TestRoleSuggestedModelOverridesDefaultPolicy),
     ("CLI agent client builds a copilot invocation", TestCliAgentClientInvocationShape),
     ("SDK agent client is the default integration backend", TestSdkAgentClientFactory),
+    ("Tool update check detects newer stable versions", TestToolUpdateCheckDetectsNewerStableVersions),
+    ("Tool update command targets the global package", TestToolUpdateCommandTargetsGlobalPackage),
     ("SDK session config wires workspace MCP server", TestSdkSessionConfigWiresWorkspaceMcp),
-    ("Orchestrator session is reused across planning retries", TestOrchestratorSessionIsReusedAcrossPlanningRetries),
+    ("Planning session is reused across planning retries", TestPlanningSessionIsReusedAcrossPlanningRetries),
     ("Issue retries reuse the same session", TestIssueRetriesReuseTheSameSession),
     ("Parallel pipelines keep isolated sessions", TestParallelPipelinesKeepIsolatedSessions),
+    ("Plan workflow generates plan when missing", TestPlanWorkflowGeneratesPlanWhenMissing),
+    ("Plan workflow blocks run before planning", TestPlanWorkflowBlocksRunBeforePlanning),
     ("Workspace loads default modes", TestWorkspaceLoadsModes),
     ("Set mode updates active mode and pipeline defaults", TestSetModeUpdatesRuntimeConfiguration),
     ("DevTeam assets load from .devteam-source first", TestPromptAssetsPreferDevTeamSource),
     ("Run-loop executes queued work with normal verbosity", TestRunLoopExecutesWork),
+    ("Execution loop uses orchestrator-selected batch", TestExecutionLoopUsesOrchestratorSelectedBatch),
     ("Run-loop resumes previously queued runs", TestRunLoopResumesQueuedRuns),
     ("Run-loop persists agent questions for user input", TestRunLoopPersistsQuestions),
     ("Planning run writes plan artifact for approval", TestPlanningRunWritesPlanArtifact),
@@ -30,6 +36,7 @@ var tests = new List<(string Name, Action Run)>
     ("Parallel loop executes independent areas concurrently", TestParallelLoopExecutesIndependentAreas),
     ("Conflict prevention avoids same-area parallel runs", TestConflictPreventionAvoidsSameAreaRuns),
     ("Architect pipeline completion creates developer follow-up", TestArchitectPipelineCompletionCreatesDeveloperFollowUp),
+    ("Architect work gates non-architect execution", TestArchitectWorkGatesNonArchitectExecution),
     ("Priority gap can reduce pipeline concurrency", TestPriorityGapReducesPipelineConcurrency),
     ("Mode guardrails appear in agent prompt", TestModeGuardrailsAppearInPrompt),
     ("Pipeline handoff appears in agent prompt", TestPipelineHandoffAppearsInPrompt),
@@ -83,7 +90,7 @@ static void TestRunOnceBootstrapsAndQueues()
 
     AssertEqual("queued", result.State, "Loop state");
     AssertEqual(1, result.QueuedRuns.Count, "Queued run count");
-    AssertEqual("orchestrator", result.QueuedRuns[0].RoleSlug, "Queued role");
+    AssertEqual("planner", result.QueuedRuns[0].RoleSlug, "Queued role");
     AssertEqual(1, harness.State.Roadmap.Count, "Roadmap count");
     AssertEqual(2, harness.State.Issues.Count, "Issue count");
 }
@@ -173,6 +180,23 @@ static void TestSdkAgentClientFactory()
     AssertEqual("copilot-sdk", client.Name, "SDK backend name");
 }
 
+static void TestToolUpdateCheckDetectsNewerStableVersions()
+{
+    var status = ToolUpdateService.EvaluateVersions("0.1.18+abc123", ["0.1.17", "0.1.18", "0.1.19", "0.2.0-preview.1"]);
+
+    AssertTrue(status.IsUpdateAvailable, "A newer stable package version should be detected.");
+    AssertEqual("0.1.18", status.CurrentVersion, "Build metadata should be ignored in the installed version.");
+    AssertEqual("0.1.19", status.LatestVersion, "Prerelease versions should not win over the newest stable release.");
+}
+
+static void TestToolUpdateCommandTargetsGlobalPackage()
+{
+    var arguments = ToolUpdateService.BuildGlobalUpdateArguments("0.1.19");
+
+    AssertTrue(arguments.SequenceEqual(["tool", "update", "--global", "OptionA.DevTeam", "--version", "0.1.19"]),
+        "The update command should target the global OptionA.DevTeam tool package.");
+}
+
 static void TestSdkSessionConfigWiresWorkspaceMcp()
 {
     using var harness = new TestHarness();
@@ -208,7 +232,7 @@ static void TestWorkspaceLoadsModes()
     AssertEqual("develop", harness.State.Runtime.ActiveModeSlug, "Develop should be the default active mode.");
 }
 
-static void TestOrchestratorSessionIsReusedAcrossPlanningRetries()
+static void TestPlanningSessionIsReusedAcrossPlanningRetries()
 {
     using var harness = new TestHarness();
     harness.Runtime.SetGoal(harness.State, "Build a reusable planning workflow.");
@@ -241,8 +265,8 @@ static void TestOrchestratorSessionIsReusedAcrossPlanningRetries()
             Verbosity = LoopVerbosity.Normal
         }).GetAwaiter().GetResult();
 
-    AssertEqual(2, agent.Requests.Count, "Expected two orchestrator invocations.");
-    AssertEqual(agent.Requests[0].SessionId, agent.Requests[1].SessionId, "Planning retries should reuse the orchestrator session.");
+    AssertEqual(2, agent.Requests.Count, "Expected two planner invocations.");
+    AssertEqual(agent.Requests[0].SessionId, agent.Requests[1].SessionId, "Planning retries should reuse the planning session.");
 }
 
 static void TestIssueRetriesReuseTheSameSession()
@@ -276,8 +300,11 @@ static void TestIssueRetriesReuseTheSameSession()
             Verbosity = LoopVerbosity.Normal
         }).GetAwaiter().GetResult();
 
-    AssertEqual(2, agent.Requests.Count, "Expected two issue invocations.");
-    AssertEqual(agent.Requests[0].SessionId, agent.Requests[1].SessionId, "Issue retries should stay on the same session.");
+    var workerRequests = agent.Requests
+        .Where(item => item.Prompt.Contains("Current issue:", StringComparison.Ordinal))
+        .ToList();
+    AssertEqual(2, workerRequests.Count, "Expected two worker issue invocations.");
+    AssertEqual(workerRequests[0].SessionId, workerRequests[1].SessionId, "Issue retries should stay on the same session.");
 }
 
 static void TestParallelPipelinesKeepIsolatedSessions()
@@ -300,9 +327,44 @@ static void TestParallelPipelinesKeepIsolatedSessions()
             Verbosity = LoopVerbosity.Normal
         }).GetAwaiter().GetResult();
 
-    AssertEqual(2, agent.Requests.Count, "Expected two parallel invocations.");
-    AssertTrue(agent.Requests.Select(item => item.SessionId).Distinct(StringComparer.Ordinal).Count() == 2,
+    var workerRequests = agent.Requests
+        .Where(item => item.Prompt.Contains("Current issue:", StringComparison.Ordinal))
+        .ToList();
+    AssertEqual(2, workerRequests.Count, "Expected two worker invocations after orchestration.");
+    AssertTrue(workerRequests.Select(item => item.SessionId).Distinct(StringComparer.Ordinal).Count() == 2,
         "Separate pipelines should not share a session.");
+}
+
+static void TestPlanWorkflowGeneratesPlanWhenMissing()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a plan-first shell.");
+    harness.Store.Save(harness.State);
+
+    var result = PlanWorkflow.EnsurePlanAsync(
+        harness.Store,
+        harness.State,
+        _ =>
+        {
+            File.WriteAllText(PlanWorkflow.GetPlanPath(harness.Store), "# Plan\n\nGenerated.");
+            return Task.FromResult(new LoopExecutionReport { IterationsExecuted = 1, FinalState = "awaiting-plan-approval" });
+        }).GetAwaiter().GetResult();
+
+    AssertEqual(PlanPreparationStatus.Generated, result.Status, "Missing plan should be generated.");
+    AssertTrue(PlanWorkflow.HasPlan(harness.Store), "Generated plan should be written to disk.");
+}
+
+static void TestPlanWorkflowBlocksRunBeforePlanning()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a plan-first shell.");
+    harness.Store.Save(harness.State);
+
+    AssertTrue(PlanWorkflow.RequiresPlanningBeforeRun(harness.State, harness.Store), "Run commands should be blocked until a plan exists.");
+
+    File.WriteAllText(PlanWorkflow.GetPlanPath(harness.Store), "# Plan\n\nReady for review.");
+
+    AssertTrue(!PlanWorkflow.RequiresPlanningBeforeRun(harness.State, harness.Store), "Run commands should stop blocking once a plan exists.");
 }
 
 static void TestSetModeUpdatesRuntimeConfiguration()
@@ -366,6 +428,59 @@ static void TestRunLoopExecutesWork()
         "Runs should record session ids.");
     AssertTrue(Directory.GetFiles(Path.Combine(harness.Store.WorkspacePath, "decisions"), "decision-*.md").Length > 0,
         "Decision artifacts should be written to the workspace.");
+}
+
+static void TestExecutionLoopUsesOrchestratorSelectedBatch()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    var selectedIssue = harness.Runtime.AddIssue(harness.State, "Gameplay UI", "", "frontend-developer", 90, null, [], "ui");
+    var skippedIssue = harness.Runtime.AddIssue(harness.State, "Gameplay audio", "", "frontend-developer", 100, null, [], "audio");
+    harness.Store.Save(harness.State);
+    var client = new RecordingAgentClient(
+        $"""
+OUTCOME: completed
+SUMMARY:
+Run the UI first.
+SELECTED_ISSUES:
+- {selectedIssue.Id}
+ISSUES:
+(none)
+SUPERPOWERS_USED:
+- plan
+TOOLS_USED:
+- list_ready_issues
+QUESTIONS:
+(none)
+""",
+        """
+OUTCOME: completed
+SUMMARY:
+Done.
+ISSUES:
+(none)
+SUPERPOWERS_USED:
+(none)
+TOOLS_USED:
+(none)
+QUESTIONS:
+(none)
+""");
+    var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => client);
+
+    var report = executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 1,
+            MaxSubagents = 1,
+            Verbosity = LoopVerbosity.Normal
+        }).GetAwaiter().GetResult();
+
+    AssertEqual("queued", report.FinalState, "Loop should queue and run the orchestrator-selected batch.");
+    AssertTrue(harness.State.AgentRuns.Any(run => run.IssueId == selectedIssue.Id), "Selected issue should be queued.");
+    AssertTrue(harness.State.AgentRuns.All(run => run.IssueId != skippedIssue.Id), "Non-selected issue should remain unqueued.");
 }
 
 static void TestRunLoopResumesQueuedRuns()
@@ -488,7 +603,7 @@ static void TestInitClearsLegacyArtifacts()
     }
     finally
     {
-        // Leave the temp repo behind to avoid flaky Windows file locking on .git objects during teardown.
+        TryCleanupTempRepo(tempRoot);
     }
 }
 
@@ -667,6 +782,19 @@ static void TestArchitectPipelineCompletionCreatesDeveloperFollowUp()
     AssertTrue(developerIssue.PipelineId == architectIssue.PipelineId, "Follow-up should stay in the same pipeline.");
 }
 
+static void TestArchitectWorkGatesNonArchitectExecution()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    harness.Runtime.AddIssue(harness.State, "Architecture pass", "", "architect", 80, null, [], "shared");
+    harness.Runtime.AddIssue(harness.State, "Frontend implementation", "", "frontend-developer", 100, null, [], "ui");
+
+    var result = harness.Runtime.RunOnce(harness.State, 2);
+
+    AssertEqual(1, result.QueuedRuns.Count, "Architect gating should reduce the batch to architect work.");
+    AssertEqual("architect", result.QueuedRuns.Single().RoleSlug, "Architect work should run before non-architect execution.");
+}
+
 static void TestPriorityGapReducesPipelineConcurrency()
 {
     using var harness = new TestHarness();
@@ -837,7 +965,7 @@ static void TestLegacyWorkspaceHydratesMetadata()
     }
     finally
     {
-        // Leave the temp repo behind to avoid flaky Windows file locking on .git objects during teardown.
+        TryCleanupTempRepo(tempRoot);
     }
 }
 
@@ -889,7 +1017,7 @@ static void TestGitHelperInitializesRepository()
     }
     finally
     {
-        // Leave the temp repo behind to avoid flaky Windows file locking on .git objects during teardown.
+        TryCleanupTempRepo(tempRoot);
     }
 }
 
@@ -954,7 +1082,7 @@ static void TestLoopStagesChangedFilesAfterIteration()
     }
     finally
     {
-        // Leave the temp repo behind to avoid flaky Windows file locking on .git objects during teardown.
+        TryCleanupTempRepo(tempRoot);
     }
 }
 
@@ -1083,6 +1211,28 @@ static string RunGit(string workingDirectory, params string[] arguments)
     return stdout;
 }
 
+/// <summary>
+/// Best-effort cleanup for temp git repos. On Windows, .git object locking can cause
+/// flaky failures, so we retry but never fail the test. On Linux/CI, cleanup should
+/// succeed reliably and avoid accumulating temp dirs.
+/// </summary>
+static void TryCleanupTempRepo(string path)
+{
+    if (!Directory.Exists(path))
+    {
+        return;
+    }
+
+    try
+    {
+        TestFileSystem.DeleteDirectoryWithRetries(path);
+    }
+    catch
+    {
+        // Best-effort: on Windows, .git object files can remain locked.
+    }
+}
+
 file sealed class TestHarness : IDisposable
 {
     public TestHarness()
@@ -1151,6 +1301,22 @@ file sealed class FakeAgentClient(string output) : IAgentClient
             BackendName = Name,
             ExitCode = 0,
             StdOut = output
+        });
+    }
+}
+
+file sealed class SwitchingAgentClient(Func<AgentInvocationRequest, string> selector) : IAgentClient
+{
+    public string Name => "switching-agent";
+
+    public Task<AgentInvocationResult> InvokeAsync(AgentInvocationRequest request, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(new AgentInvocationResult
+        {
+            BackendName = Name,
+            SessionId = request.SessionId ?? "",
+            ExitCode = 0,
+            StdOut = selector(request)
         });
     }
 }

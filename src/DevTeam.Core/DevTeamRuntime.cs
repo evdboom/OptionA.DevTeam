@@ -135,6 +135,7 @@ public sealed class DevTeamRuntime
             Issues = state.Issues.OrderBy(item => item.Id).ToList(),
             Questions = state.Questions.OrderBy(item => item.Id).ToList(),
             AgentSessions = state.AgentSessions.OrderBy(item => item.ScopeKey).ToList(),
+            ExecutionSelection = state.ExecutionSelection,
             Decisions = state.Decisions.OrderByDescending(item => item.CreatedAtUtc).Take(20).ToList(),
             Pipelines = state.Pipelines.OrderBy(item => item.Id).ToList()
         };
@@ -144,6 +145,30 @@ public sealed class DevTeamRuntime
     {
         EnsurePipelineAssignments(state);
         return GetReadyIssues(state, maxSubagents);
+    }
+
+    public IReadOnlyList<string> PrepareForLoop(WorkspaceState state)
+    {
+        var created = EnsureBootstrapPlan(state);
+        EnsurePipelineAssignments(state);
+        return created;
+    }
+
+    public string GetLoopStateWhenNoReadyWork(WorkspaceState state)
+    {
+        if (state.Phase == WorkflowPhase.Planning
+            && state.Issues.Any(issue => issue.IsPlanningIssue && issue.Status == ItemStatus.Done))
+        {
+            return HasBlockingQuestions(state) ? "waiting-for-user" : "awaiting-plan-approval";
+        }
+
+        return HasBlockingQuestions(state) ? "waiting-for-user" : "idle";
+    }
+
+    public IReadOnlyList<IssueItem> GetExecutionCandidatesPreview(WorkspaceState state)
+    {
+        EnsurePipelineAssignments(state);
+        return GetReadyIssueCandidates(state);
     }
 
     public DecisionRecord RecordDecision(
@@ -171,6 +196,11 @@ public sealed class DevTeamRuntime
         foreach (var session in externalState.AgentSessions.Where(item => state.AgentSessions.All(existing => !string.Equals(existing.ScopeKey, item.ScopeKey, StringComparison.OrdinalIgnoreCase))))
         {
             state.AgentSessions.Add(session);
+        }
+
+        if (externalState.ExecutionSelection.SelectedIssueIds.Count > 0 || !string.IsNullOrWhiteSpace(externalState.ExecutionSelection.Rationale))
+        {
+            state.ExecutionSelection = externalState.ExecutionSelection;
         }
 
         foreach (var decision in externalState.Decisions.Where(item => state.Decisions.All(existing => existing.Id != item.Id)))
@@ -218,6 +248,117 @@ public sealed class DevTeamRuntime
         binding.LastRunId = runId;
         binding.UpdatedAtUtc = DateTimeOffset.UtcNow;
         return binding;
+    }
+
+    public AgentSession GetOrCreateExecutionOrchestratorSession(WorkspaceState state)
+    {
+        var binding = state.AgentSessions.FirstOrDefault(item => string.Equals(item.ScopeKey, "workspace:execution-orchestrator", StringComparison.OrdinalIgnoreCase));
+        if (binding is null)
+        {
+            binding = new AgentSession
+            {
+                ScopeKey = "workspace:execution-orchestrator",
+                ScopeKind = "workspace",
+                RoleSlug = "orchestrator",
+                SessionId = BuildSessionId(state.RepoRoot, "workspace:execution-orchestrator", "orchestrator"),
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            state.AgentSessions.Add(binding);
+        }
+
+        binding.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        return binding;
+    }
+
+    public void ClearExecutionSelection(WorkspaceState state)
+    {
+        state.ExecutionSelection = new ExecutionSelectionState();
+    }
+
+    public ExecutionSelectionState SetExecutionSelection(
+        WorkspaceState state,
+        IEnumerable<int> issueIds,
+        string rationale,
+        string? sessionId = null,
+        int maxSubagents = 1)
+    {
+        EnsurePipelineAssignments(state);
+        var candidates = GetReadyIssueCandidates(state);
+        var candidateMap = candidates.ToDictionary(item => item.Id);
+        var selected = issueIds
+            .Distinct()
+            .ToList();
+        if (selected.Count > Math.Max(1, maxSubagents))
+        {
+            throw new InvalidOperationException($"Execution batch can select at most {Math.Max(1, maxSubagents)} issue(s).");
+        }
+
+        foreach (var issueId in selected)
+        {
+            if (!candidateMap.ContainsKey(issueId))
+            {
+                throw new InvalidOperationException($"Issue #{issueId} is not a ready execution candidate.");
+            }
+        }
+
+        var selectedIssues = selected.Select(id => candidateMap[id]).ToList();
+        var duplicateAreas = selectedIssues
+            .Where(item => !string.IsNullOrWhiteSpace(item.Area))
+            .GroupBy(item => item.Area, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateAreas is not null)
+        {
+            throw new InvalidOperationException($"Execution batch cannot select multiple issues in area '{duplicateAreas.Key}'.");
+        }
+
+        var duplicatePipelines = selectedIssues
+            .Where(item => item.PipelineId is not null)
+            .GroupBy(item => item.PipelineId!.Value)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicatePipelines is not null)
+        {
+            throw new InvalidOperationException($"Execution batch cannot select multiple leads from pipeline #{duplicatePipelines.Key}.");
+        }
+
+        state.ExecutionSelection = new ExecutionSelectionState
+        {
+            SelectedIssueIds = selected,
+            Rationale = rationale.Trim(),
+            SessionId = sessionId?.Trim() ?? "",
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+        RememberDecision(
+            state,
+            "Selected execution batch",
+            state.ExecutionSelection.SelectedIssueIds.Count == 0
+                ? (string.IsNullOrWhiteSpace(state.ExecutionSelection.Rationale) ? "No execution issues selected." : state.ExecutionSelection.Rationale)
+                : $"Issues: {string.Join(", ", state.ExecutionSelection.SelectedIssueIds)}\n\n{state.ExecutionSelection.Rationale}".Trim(),
+            "execution-orchestrator",
+            sessionId: state.ExecutionSelection.SessionId);
+        return state.ExecutionSelection;
+    }
+
+    public LoopResult QueueExecutionSelection(WorkspaceState state)
+    {
+        if (state.ExecutionSelection.SelectedIssueIds.Count == 0)
+        {
+            return new LoopResult
+            {
+                State = HasBlockingQuestions(state) ? "waiting-for-user" : "idle"
+            };
+        }
+
+        var selectedIssues = state.ExecutionSelection.SelectedIssueIds
+            .Select(issueId => state.Issues.FirstOrDefault(item => item.Id == issueId)
+                ?? throw new InvalidOperationException($"Issue #{issueId} was not found."))
+            .ToList();
+        var queued = QueueIssues(state, selectedIssues);
+        ClearExecutionSelection(state);
+        return new LoopResult
+        {
+            State = "queued",
+            QueuedRuns = queued
+        };
     }
 
     public IReadOnlyList<string> GetKnownRoleSlugs(WorkspaceState state)
@@ -372,24 +513,13 @@ public sealed class DevTeamRuntime
 
     public LoopResult RunOnce(WorkspaceState state, int maxSubagents = 3)
     {
-        var created = EnsureBootstrapPlan(state);
-        EnsurePipelineAssignments(state);
+        var created = PrepareForLoop(state).ToList();
         var readyIssues = GetReadyIssues(state, maxSubagents);
         if (readyIssues.Count == 0)
         {
-            if (state.Phase == WorkflowPhase.Planning
-                && state.Issues.Any(issue => issue.IsPlanningIssue && issue.Status == ItemStatus.Done))
-            {
-                return new LoopResult
-                {
-                    State = HasBlockingQuestions(state) ? "waiting-for-user" : "awaiting-plan-approval",
-                    Created = created
-                };
-            }
-
             return new LoopResult
             {
-                State = HasBlockingQuestions(state) ? "waiting-for-user" : "idle",
+                State = GetLoopStateWhenNoReadyWork(state),
                 Created = created
             };
         }
@@ -544,7 +674,7 @@ public sealed class DevTeamRuntime
                 Title = "Run the planning session and split the work",
                 Detail = "Generate the first roadmap detail, identify missing information, and decompose the goal into small issues.",
                 IsPlanningIssue = true,
-                RoleSlug = "orchestrator",
+                RoleSlug = "planner",
                 Priority = 100,
                 RoadmapItemId = roadmapId
             };
@@ -567,12 +697,10 @@ public sealed class DevTeamRuntime
 
     private static List<IssueItem> GetReadyIssues(WorkspaceState state, int maxSubagents)
     {
+        var readyLeads = GetReadyIssueCandidates(state);
         var activeRuns = state.AgentRuns
             .Where(run => run.Status is AgentRunStatus.Queued or AgentRunStatus.Running)
             .ToList();
-        var queuedIssueIds = activeRuns
-            .Select(run => run.IssueId)
-            .ToHashSet();
         var reservedAreas = activeRuns
             .Select(run => state.Issues.FirstOrDefault(issue => issue.Id == run.IssueId)?.Area)
             .Where(area => !string.IsNullOrWhiteSpace(area))
@@ -582,31 +710,6 @@ public sealed class DevTeamRuntime
             .Where(id => id is not null)
             .Select(id => id!.Value)
             .ToHashSet();
-
-        var ready = state.Issues
-            .Where(issue => issue.Status == ItemStatus.Open)
-            .Where(issue => !queuedIssueIds.Contains(issue.Id))
-            .Where(issue => state.Phase == WorkflowPhase.Planning ? issue.IsPlanningIssue : !issue.IsPlanningIssue)
-            .Where(issue => issue.DependsOnIssueIds.All(depId => state.Issues.Any(dep => dep.Id == depId && dep.Status == ItemStatus.Done)))
-            .OrderByDescending(issue => issue.Priority)
-            .ThenBy(issue => issue.Id)
-            .ToList();
-
-        foreach (var issue in ready)
-        {
-            EnsurePipelineForIssue(state, issue);
-        }
-
-        var readyLeads = ready
-            .GroupBy(issue => issue.PipelineId ?? issue.Id)
-            .Select(group => group
-                .OrderByDescending(item => item.Priority)
-                .ThenBy(item => item.Id)
-                .First())
-            .OrderByDescending(issue => issue.Priority)
-            .ThenBy(issue => issue.Id)
-            .ToList();
-
         var desiredConcurrency = DeterminePipelineConcurrency(state, readyLeads, maxSubagents);
 
         var selected = new List<IssueItem>();
@@ -639,6 +742,49 @@ public sealed class DevTeamRuntime
         }
 
         return selected;
+    }
+
+    private static List<IssueItem> GetReadyIssueCandidates(WorkspaceState state)
+    {
+        var activeRuns = state.AgentRuns
+            .Where(run => run.Status is AgentRunStatus.Queued or AgentRunStatus.Running)
+            .ToList();
+        var queuedIssueIds = activeRuns
+            .Select(run => run.IssueId)
+            .ToHashSet();
+
+        var ready = state.Issues
+            .Where(issue => issue.Status == ItemStatus.Open)
+            .Where(issue => !queuedIssueIds.Contains(issue.Id))
+            .Where(issue => state.Phase == WorkflowPhase.Planning ? issue.IsPlanningIssue : !issue.IsPlanningIssue)
+            .Where(issue => issue.DependsOnIssueIds.All(depId => state.Issues.Any(dep => dep.Id == depId && dep.Status == ItemStatus.Done)))
+            .OrderByDescending(issue => issue.Priority)
+            .ThenBy(issue => issue.Id)
+            .ToList();
+
+        foreach (var issue in ready)
+        {
+            EnsurePipelineForIssue(state, issue);
+        }
+
+        if (state.Phase == WorkflowPhase.Execution
+            && ready.Any(issue => string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase)))
+        {
+            ready = ready
+                .Where(issue => string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        var readyLeads = ready
+            .GroupBy(issue => issue.PipelineId ?? issue.Id)
+            .Select(group => group
+                .OrderByDescending(item => item.Priority)
+                .ThenBy(item => item.Id)
+                .First())
+            .OrderByDescending(issue => issue.Priority)
+            .ThenBy(issue => issue.Id)
+            .ToList();
+        return readyLeads;
     }
 
     private static bool HasBlockingQuestions(WorkspaceState state) =>
@@ -877,11 +1023,45 @@ public sealed class DevTeamRuntime
         return record;
     }
 
+    private static List<QueuedRunInfo> QueueIssues(WorkspaceState state, IReadOnlyList<IssueItem> issues)
+    {
+        var queued = new List<QueuedRunInfo>();
+        foreach (var issue in issues)
+        {
+            var model = SelectModelForRole(state, issue.RoleSlug);
+            var run = new AgentRun
+            {
+                Id = state.NextRunId++,
+                IssueId = issue.Id,
+                RoleSlug = issue.RoleSlug,
+                ModelName = model.Name,
+                Status = AgentRunStatus.Queued,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            issue.Status = ItemStatus.InProgress;
+            state.AgentRuns.Add(run);
+            CommitCredits(state, model);
+            queued.Add(new QueuedRunInfo
+            {
+                RunId = run.Id,
+                IssueId = issue.Id,
+                Title = issue.Title,
+                RoleSlug = issue.RoleSlug,
+                Area = issue.Area,
+                ModelName = model.Name
+            });
+        }
+
+        return queued;
+    }
+
     private static (string ScopeKey, string ScopeKind, int? IssueId, int? PipelineId) DescribeSessionScope(IssueItem issue)
     {
-        if (issue.IsPlanningIssue || string.Equals(issue.RoleSlug, "orchestrator", StringComparison.OrdinalIgnoreCase))
+        if (issue.IsPlanningIssue
+            || string.Equals(issue.RoleSlug, "planner", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(issue.RoleSlug, "orchestrator", StringComparison.OrdinalIgnoreCase))
         {
-            return ("workspace:orchestrator", "workspace", issue.Id, null);
+            return ("workspace:planning", "workspace", issue.Id, null);
         }
 
         if (issue.PipelineId is not null)
@@ -895,6 +1075,8 @@ public sealed class DevTeamRuntime
     private static string BuildSessionId(string repoRoot, string scopeKey, string roleSlug)
     {
         var normalizedRole = NormalizeArea(roleSlug);
+        // 12 hex chars = 6 bytes = 2^48 possible values. Collision risk is negligible
+        // for the expected scale (tens of sessions per workspace, not millions).
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{Path.GetFullPath(repoRoot)}|{scopeKey}")))
             .ToLowerInvariant()[..12];
         return $"devteam-{normalizedRole}-{hash}";

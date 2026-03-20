@@ -15,6 +15,7 @@ public sealed class WorkspaceState
     public List<QuestionItem> Questions { get; set; } = [];
     public List<AgentRun> AgentRuns { get; set; } = [];
     public List<AgentSession> AgentSessions { get; set; } = [];
+    public ExecutionSelectionState ExecutionSelection { get; set; } = new();
     public List<DecisionRecord> Decisions { get; set; } = [];
     public List<PipelineState> Pipelines { get; set; } = [];
     public List<ModelDefinition> Models { get; set; } = [];
@@ -120,6 +121,14 @@ public sealed class AgentSession
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class ExecutionSelectionState
+{
+    public List<int> SelectedIssueIds { get; set; } = [];
+    public string Rationale { get; set; } = "";
+    public string SessionId { get; set; } = "";
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class DecisionRecord
 {
     public int Id { get; set; }
@@ -215,6 +224,7 @@ public sealed class WorkspaceSnapshot
     public IReadOnlyList<IssueItem> Issues { get; init; } = [];
     public IReadOnlyList<QuestionItem> Questions { get; init; } = [];
     public IReadOnlyList<AgentSession> AgentSessions { get; init; } = [];
+    public ExecutionSelectionState ExecutionSelection { get; init; } = new();
     public IReadOnlyList<DecisionRecord> Decisions { get; init; } = [];
     public IReadOnlyList<PipelineState> Pipelines { get; init; } = [];
 }

@@ -13,6 +13,7 @@ internal static partial class SeedData
     private static readonly Dictionary<string, RoleModelPolicy> DefaultPolicies = new(StringComparer.OrdinalIgnoreCase)
     {
         ["orchestrator"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["planner"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
         ["architect"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
         ["developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
         ["backend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
@@ -21,7 +22,8 @@ internal static partial class SeedData
         ["tester"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
         ["reviewer"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
         ["ux"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["user"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false }
+        ["user"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["game-designer"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gpt-5-mini", AllowPremium = false }
     };
 
     public static WorkspaceState BuildInitialState(string repoRoot, double totalCreditCap, double premiumCreditCap)
@@ -91,6 +93,12 @@ internal static partial class SeedData
         if (state.AgentSessions is null)
         {
             state.AgentSessions = [];
+            changed = true;
+        }
+
+        if (state.ExecutionSelection is null)
+        {
+            state.ExecutionSelection = new ExecutionSelectionState();
             changed = true;
         }
 

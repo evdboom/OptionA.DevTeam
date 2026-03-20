@@ -130,6 +130,7 @@ public sealed class WorkspaceStore
             Questions = ReadCollection<QuestionItem>(manifest.QuestionsFile),
             AgentRuns = ReadCollection<AgentRun>(manifest.RunsFile),
             AgentSessions = ReadCollection<AgentSession>(manifest.AgentSessionsFile),
+            ExecutionSelection = manifest.ExecutionSelection ?? new ExecutionSelectionState(),
             Decisions = ReadCollection<DecisionRecord>(manifest.DecisionsFile),
             Pipelines = ReadCollection<PipelineState>(manifest.PipelinesFile),
             NextRoadmapId = manifest.NextRoadmapId,
@@ -151,6 +152,7 @@ public sealed class WorkspaceStore
             Budget = state.Budget,
             Runtime = state.Runtime,
             ActiveGoal = state.ActiveGoal,
+            ExecutionSelection = state.ExecutionSelection,
             RoadmapFile = "roadmap.json",
             IssuesFile = "issues.json",
             QuestionsFile = "questions.json",
@@ -369,6 +371,7 @@ public sealed class WorkspaceStore
         public BudgetState Budget { get; init; } = new();
         public RuntimeConfiguration? Runtime { get; init; }
         public GoalState? ActiveGoal { get; init; }
+        public ExecutionSelectionState? ExecutionSelection { get; init; }
         public string RoadmapFile { get; init; } = "roadmap.json";
         public string IssuesFile { get; init; } = "issues.json";
         public string QuestionsFile { get; init; } = "questions.json";

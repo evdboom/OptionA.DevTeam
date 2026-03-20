@@ -1,4 +1,6 @@
+using System.Net.Http;
 using System.Text;
+using DevTeam.Cli;
 using DevTeam.Core;
 
 var command = NormalizeCommand(args.Length == 0 ? "help" : args[0]);
@@ -7,13 +9,20 @@ var workspacePath = GetOption(options, "workspace") ?? ".devteam";
 var store = new WorkspaceStore(workspacePath);
 var runtime = new DevTeamRuntime();
 var loopExecutor = new LoopExecutor(runtime, store);
+using var toolUpdateService = new ToolUpdateService();
 
 try
 {
     switch (command)
     {
         case "start":
-            return await RunInteractiveShellAsync(store, runtime, loopExecutor);
+            return await RunInteractiveShellAsync(store, runtime, loopExecutor, toolUpdateService);
+
+        case "check-update":
+            return await CheckForToolUpdatesAsync(toolUpdateService);
+
+        case "update":
+            return await ScheduleToolUpdateAsync(toolUpdateService, interactiveShell: false);
 
         case "workspace-mcp":
         {
@@ -52,6 +61,14 @@ try
             {
                 Console.WriteLine($"Active goal saved: {goal}");
             }
+            return 0;
+        }
+
+        case "customize":
+        {
+            var target = Path.Combine(Environment.CurrentDirectory, ".devteam-source");
+            var force = GetBoolOption(options, "force", false);
+            CopyPackagedAssets(target, force);
             return 0;
         }
 
@@ -155,6 +172,11 @@ try
         case "run-once":
         {
             var state = store.Load();
+            if (PlanWorkflow.RequiresPlanningBeforeRun(state, store))
+            {
+                Console.WriteLine("No plan has been written yet. Run `plan` first.");
+                return 1;
+            }
             var maxSubagents = GetIntOption(options, "max-subagents", 3);
             var result = runtime.RunOnce(state, maxSubagents);
             store.Save(state);
@@ -166,6 +188,11 @@ try
         case "run":
         {
             var state = store.Load();
+            if (PlanWorkflow.RequiresPlanningBeforeRun(state, store))
+            {
+                Console.WriteLine("No plan has been written yet. Run `plan` first.");
+                return 1;
+            }
             var report = await RunLoopAsync(store, runtime, loopExecutor, state, options);
             Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
             PrintBudget(state.Budget);
@@ -196,8 +223,11 @@ try
         }
 
         case "plan":
-            PrintPlan(store);
+        {
+            var state = store.Load();
+            await ShowPlanAsync(store, runtime, loopExecutor, state, options, interactive: false);
             return 0;
+        }
 
         case "budget":
         {
@@ -221,7 +251,7 @@ try
                 : [];
 
             var client = AgentClientFactory.Create(backend);
-            var result = client.InvokeAsync(new AgentInvocationRequest
+            var result = await client.InvokeAsync(new AgentInvocationRequest
             {
                 Prompt = prompt,
                 Model = model,
@@ -231,7 +261,7 @@ try
                 WorkspacePath = Path.GetFullPath(workspacePath),
                 EnableWorkspaceMcp = GetBoolOption(options, "workspace-mcp", false),
                 ToolHostPath = System.Reflection.Assembly.GetEntryAssembly()?.Location
-            }).GetAwaiter().GetResult();
+            });
 
             Console.WriteLine($"Backend: {result.BackendName}");
             Console.WriteLine($"Exit code: {result.ExitCode}");
@@ -260,11 +290,13 @@ catch (Exception ex)
 static async Task<int> RunInteractiveShellAsync(
     WorkspaceStore store,
     DevTeamRuntime runtime,
-    LoopExecutor loopExecutor)
+    LoopExecutor loopExecutor,
+    ToolUpdateService toolUpdateService)
 {
     Console.WriteLine("DevTeam interactive shell");
     Console.WriteLine($"Workspace: {store.WorkspacePath}");
     Console.WriteLine("Type /help for commands. Type /exit to quit.");
+    await NotifyAboutAvailableUpdateAsync(toolUpdateService);
 
     while (true)
     {
@@ -312,7 +344,7 @@ static async Task<int> RunInteractiveShellAsync(
                 runtime.RecordPlanningFeedback(state, line);
                 store.Save(state);
                 Console.WriteLine("Captured planning feedback. Revising plan...");
-                var report = await RunLoopAsync(store, runtime, loopExecutor, state, ParseOptions(["--max-iterations", "2"]));
+                var report = await RunLoopAsync(store, runtime, loopExecutor, state, ParseOptions(["--max-iterations", "2"]), interactiveShell: true);
                 Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
                 Console.WriteLine("Use /plan to inspect the revised plan, or /approve to continue.");
                 continue;
@@ -339,6 +371,21 @@ static async Task<int> RunInteractiveShellAsync(
                 case "help":
                     PrintInteractiveHelp();
                     break;
+
+                case "check-update":
+                    await CheckForToolUpdatesAsync(toolUpdateService);
+                    break;
+
+                case "update":
+                    return await ScheduleToolUpdateAsync(toolUpdateService, interactiveShell: true);
+
+                case "customize":
+                {
+                    var target = Path.Combine(Environment.CurrentDirectory, ".devteam-source");
+                    var force = GetBoolOption(options, "force", false);
+                    CopyPackagedAssets(target, force);
+                    break;
+                }
 
                 case "init":
                 {
@@ -397,8 +444,11 @@ static async Task<int> RunInteractiveShellAsync(
                     break;
 
                 case "plan":
-                    PrintPlan(store);
+                {
+                    var current = store.Load();
+                    await ShowPlanAsync(store, runtime, loopExecutor, current, options, interactive: true);
                     break;
+                }
 
                 case "goal":
                 case "set-goal":
@@ -440,7 +490,7 @@ static async Task<int> RunInteractiveShellAsync(
                     runtime.RecordPlanningFeedback(current, feedback);
                     store.Save(current);
                     Console.WriteLine("Captured planning feedback. Revising plan...");
-                    var report = await RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions(["--max-iterations", "2"]));
+                    var report = await RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions(["--max-iterations", "2"]), interactiveShell: true);
                     Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
                     Console.WriteLine("Use /plan to inspect the revised plan, or /approve to continue.");
                     break;
@@ -466,7 +516,17 @@ static async Task<int> RunInteractiveShellAsync(
                 case "run-loop":
                 {
                     var current = store.Load();
-                    var report = await RunLoopAsync(store, runtime, loopExecutor, current, options);
+                    if (PlanWorkflow.RequiresPlanningBeforeRun(current, store))
+                    {
+                        Console.WriteLine("No plan has been written yet. Run /plan first.");
+                        break;
+                    }
+                    if (PlanWorkflow.IsAwaitingApproval(current, store))
+                    {
+                        Console.WriteLine("A plan is ready. Use /plan to review, type feedback to revise, or /approve to continue.");
+                        break;
+                    }
+                    var report = await RunLoopAsync(store, runtime, loopExecutor, current, options, interactiveShell: true);
                     Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
                     PrintBudget(current.Budget);
                     if (report.FinalState == "waiting-for-user")
@@ -483,6 +543,11 @@ static async Task<int> RunInteractiveShellAsync(
                 case "run-once":
                 {
                     var current = store.Load();
+                    if (PlanWorkflow.RequiresPlanningBeforeRun(current, store))
+                    {
+                        Console.WriteLine("No plan has been written yet. Run /plan first.");
+                        break;
+                    }
                     var result = runtime.RunOnce(current, GetIntOption(options, "max-subagents", 3));
                     store.Save(current);
                     PrintLoopResult(result);
@@ -516,26 +581,99 @@ static async Task<LoopExecutionReport> RunLoopAsync(
     DevTeamRuntime runtime,
     LoopExecutor loopExecutor,
     WorkspaceState state,
-    Dictionary<string, List<string>> options)
+    Dictionary<string, List<string>> options,
+    bool interactiveShell = false)
 {
     var backend = GetOption(options, "backend") ?? "sdk";
     var maxSubagents = GetIntOption(options, "max-subagents", 1);
     var maxIterations = GetIntOption(options, "max-iterations", 10);
-    var timeoutSeconds = GetIntOption(options, "timeout-seconds", 180);
+    var timeoutSeconds = GetIntOption(options, "timeout-seconds", 600);
     var verbosity = ParseVerbosity(GetOption(options, "verbosity"));
+    using var renderer = interactiveShell && !Console.IsOutputRedirected
+        ? new LoopConsoleRenderer()
+        : null;
+    Action<IReadOnlyList<RunProgressSnapshot>>? progressReporter = renderer is null ? null : snapshots => renderer.ReportProgress(snapshots);
+    Action<string> logger = renderer is null ? Console.WriteLine : message => renderer.Log(message);
+    var executionOptions = new LoopExecutionOptions
+    {
+        Backend = backend,
+        MaxSubagents = maxSubagents,
+        MaxIterations = maxIterations,
+        AgentTimeout = TimeSpan.FromSeconds(timeoutSeconds),
+        HeartbeatInterval = interactiveShell ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(10),
+        Verbosity = verbosity,
+        ProgressReporter = progressReporter
+    };
     var report = await loopExecutor.RunAsync(
         state,
-        new LoopExecutionOptions
-        {
-            Backend = backend,
-            MaxSubagents = maxSubagents,
-            MaxIterations = maxIterations,
-            AgentTimeout = TimeSpan.FromSeconds(timeoutSeconds),
-            Verbosity = verbosity
-        },
-        Console.WriteLine);
+        executionOptions,
+        logger);
     store.Save(state);
     return report;
+}
+
+static async Task ShowPlanAsync(
+    WorkspaceStore store,
+    DevTeamRuntime runtime,
+    LoopExecutor loopExecutor,
+    WorkspaceState state,
+    Dictionary<string, List<string>> options,
+    bool interactive)
+{
+    var result = await PlanWorkflow.EnsurePlanAsync(
+        store,
+        state,
+        planningState =>
+        {
+            Console.WriteLine(interactive
+                ? "No plan has been written yet. Running the planner..."
+                : "No plan has been written yet. Running the planner first...");
+            return RunLoopAsync(store, runtime, loopExecutor, planningState, BuildPlanningOptions(options));
+        });
+
+    switch (result.Status)
+    {
+        case PlanPreparationStatus.MissingGoal:
+            Console.WriteLine(interactive
+                ? "No active goal is set yet. Use /goal or /init --goal first."
+                : "No active goal is set yet. Use `goal` or `init --goal` first.");
+            return;
+        case PlanPreparationStatus.Failed:
+            Console.WriteLine("The planner ran, but no plan file was written yet.");
+            if (result.Report?.FinalState == "waiting-for-user")
+            {
+                Console.WriteLine($"Check {Path.Combine(store.WorkspacePath, "questions.md")} and answer the open questions first.");
+            }
+            return;
+        case PlanPreparationStatus.Generated:
+            Console.WriteLine("Plan generated.");
+            break;
+    }
+
+    PrintPlan(store);
+    if (state.Phase == WorkflowPhase.Planning)
+    {
+        Console.WriteLine(interactive
+            ? "Reply with feedback as plain text or use /approve when the plan looks good."
+            : "Review the plan, provide feedback with `feedback`, or use `approve-plan` when it looks good.");
+    }
+}
+
+static Dictionary<string, List<string>> BuildPlanningOptions(Dictionary<string, List<string>> options)
+{
+    var result = options.ToDictionary(
+        pair => pair.Key,
+        pair => pair.Value.ToList(),
+        StringComparer.OrdinalIgnoreCase);
+    if (!result.ContainsKey("max-iterations"))
+    {
+        result["max-iterations"] = ["1"];
+    }
+    if (!result.ContainsKey("max-subagents"))
+    {
+        result["max-subagents"] = ["1"];
+    }
+    return result;
 }
 
 static void PrintStatus(WorkspaceState state, DevTeamRuntime runtime)
@@ -669,6 +807,7 @@ static void PrintHelp()
     Console.WriteLine("Commands (plain or slash-prefixed, for example `/init`):");
     Console.WriteLine("  start [--workspace PATH]");
     Console.WriteLine("  init [--workspace PATH] [--goal TEXT] [--mode SLUG] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false]");
+    Console.WriteLine("  customize [--force]                Copy default roles, modes, and superpowers to .devteam-source/ for editing");
     Console.WriteLine("  set-goal <TEXT> [--workspace PATH]");
     Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
     Console.WriteLine("  add-roadmap <TITLE> [--detail TEXT] [--priority N] [--workspace PATH]");
@@ -680,6 +819,8 @@ static void PrintHelp()
     Console.WriteLine("  questions [--workspace PATH]");
     Console.WriteLine("  plan [--workspace PATH]");
     Console.WriteLine("  budget [--total N] [--premium N] [--workspace PATH]");
+    Console.WriteLine("  check-update");
+    Console.WriteLine("  update");
     Console.WriteLine("  run-once [--max-subagents N] [--workspace PATH]");
     Console.WriteLine("  run-loop [--backend sdk|cli] [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--verbosity quiet|normal|detailed] [--workspace PATH]");
     Console.WriteLine("  complete-run --run-id N --outcome completed|failed|blocked --summary TEXT [--workspace PATH]");
@@ -692,12 +833,15 @@ static void PrintInteractiveHelp()
 {
     Console.WriteLine("Interactive commands:");
     Console.WriteLine("  /init \"goal text\" [--mode SLUG]");
+    Console.WriteLine("  /customize [--force]    Copy default assets to .devteam-source/ for editing");
     Console.WriteLine("  /status");
     Console.WriteLine("  /mode <slug>");
     Console.WriteLine("  /add-issue \"title\" --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]]");
     Console.WriteLine("  /plan");
     Console.WriteLine("  /questions");
     Console.WriteLine("  /budget [--total N] [--premium N]");
+    Console.WriteLine("  /check-update");
+    Console.WriteLine("  /update");
     Console.WriteLine("  /run [--max-iterations N] [--timeout-seconds N]");
     Console.WriteLine("  /feedback <text>");
     Console.WriteLine("  /approve [note]");
@@ -706,6 +850,7 @@ static void PrintInteractiveHelp()
     Console.WriteLine("  /exit");
     Console.WriteLine("If exactly one question is open, you can type a plain answer without `/answer`.");
     Console.WriteLine("While a plan is awaiting approval, plain text is treated as planning feedback and re-runs planning.");
+    Console.WriteLine("If no plan exists yet, `/plan` runs the planner and then shows the generated plan.");
 }
 
 static Dictionary<string, List<string>> ParseOptions(string[] tokens)
@@ -784,7 +929,7 @@ static string NormalizeCommand(string value) =>
     value.Trim().TrimStart('/').ToLowerInvariant();
 
 static string? GetOption(Dictionary<string, List<string>> options, string key) =>
-    options.TryGetValue(key, out var values) && values.Count > 0 ? string.Join(" ", values) : null;
+    ResolveOptionValues(options, key) is { Count: > 0 } values ? string.Join(" ", values) : null;
 
 static int GetIntOption(Dictionary<string, List<string>> options, string key, int fallback) =>
     int.TryParse(GetOption(options, key), out var value) ? value : fallback;
@@ -812,9 +957,23 @@ static int? GetNullableIntOption(Dictionary<string, List<string>> options, strin
     int.TryParse(GetOption(options, key), out var value) ? value : null;
 
 static IReadOnlyList<int> GetMultiIntOption(Dictionary<string, List<string>> options, string key) =>
-    options.TryGetValue(key, out var values)
+    ResolveOptionValues(options, key) is { Count: > 0 } values
         ? values.Select(int.Parse).ToList()
         : [];
+
+static List<string>? ResolveOptionValues(Dictionary<string, List<string>> options, string key)
+{
+    if (options.TryGetValue(key, out var values))
+    {
+        return values;
+    }
+
+    return key switch
+    {
+        "max-iterations" when options.TryGetValue("max-iteration", out var aliasValues) => aliasValues,
+        _ => null
+    };
+}
 
 static string? GetPositionalValue(Dictionary<string, List<string>> options) =>
     options.TryGetValue("__positional", out var values) && values.Count > 0 ? string.Join(" ", values) : null;
@@ -830,10 +989,255 @@ static LoopVerbosity ParseVerbosity(string? value) =>
         _ => LoopVerbosity.Normal
     };
 
+static async Task NotifyAboutAvailableUpdateAsync(ToolUpdateService toolUpdateService)
+{
+    var status = await TryCheckForToolUpdatesAsync(toolUpdateService, TimeSpan.FromSeconds(3));
+    if (status?.IsUpdateAvailable == true)
+    {
+        Console.WriteLine($"Update available: {status.LatestVersion} (current {status.CurrentVersion}). Run /update to install it.");
+    }
+}
+
+static async Task<ToolUpdateStatus?> TryCheckForToolUpdatesAsync(ToolUpdateService toolUpdateService, TimeSpan timeout)
+{
+    using var timeoutCts = new CancellationTokenSource(timeout);
+    try
+    {
+        return await toolUpdateService.CheckAsync(timeoutCts.Token);
+    }
+    catch (ToolUpdateUnavailableException)
+    {
+        return null;
+    }
+    catch (HttpRequestException)
+    {
+        return null;
+    }
+    catch (TaskCanceledException)
+    {
+        return null;
+    }
+}
+
+static async Task<int> CheckForToolUpdatesAsync(ToolUpdateService toolUpdateService)
+{
+    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    ToolUpdateStatus status;
+    try
+    {
+        status = await toolUpdateService.CheckAsync(timeoutCts.Token);
+    }
+    catch (ToolUpdateUnavailableException ex)
+    {
+        Console.WriteLine(ex.Message);
+        return 0;
+    }
+    catch (HttpRequestException)
+    {
+        Console.WriteLine("Update check is unavailable right now.");
+        return 0;
+    }
+    catch (TaskCanceledException)
+    {
+        Console.WriteLine("Update check timed out.");
+        return 0;
+    }
+
+    if (status.IsUpdateAvailable)
+    {
+        Console.WriteLine($"Update available: {status.LatestVersion} (current {status.CurrentVersion}).");
+        Console.WriteLine($"Run `devteam update` or `/update` in the shell to install it.");
+        return 0;
+    }
+
+    Console.WriteLine($"OptionA.DevTeam is up to date ({status.CurrentVersion}).");
+    return 0;
+}
+
+static async Task<int> ScheduleToolUpdateAsync(ToolUpdateService toolUpdateService, bool interactiveShell)
+{
+    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    ToolUpdateStatus status;
+    try
+    {
+        status = await toolUpdateService.CheckAsync(timeoutCts.Token);
+    }
+    catch (ToolUpdateUnavailableException ex)
+    {
+        Console.WriteLine(ex.Message);
+        return 0;
+    }
+    catch (HttpRequestException)
+    {
+        Console.WriteLine("Update check is unavailable right now.");
+        return 0;
+    }
+    catch (TaskCanceledException)
+    {
+        Console.WriteLine("Update check timed out.");
+        return 0;
+    }
+
+    if (!status.IsUpdateAvailable)
+    {
+        Console.WriteLine($"OptionA.DevTeam is already up to date ({status.CurrentVersion}).");
+        return 0;
+    }
+
+    var launch = toolUpdateService.ScheduleGlobalUpdate(status.LatestVersion);
+    Console.WriteLine($"Scheduling update to {status.LatestVersion} (current {status.CurrentVersion}).");
+    Console.WriteLine($"If the updater does not complete, run `{launch.ManualCommand}`.");
+    if (interactiveShell)
+    {
+        Console.WriteLine("Closing the shell so the updater can replace the installed tool.");
+    }
+
+    return 0;
+}
+
 static void UpdateBudget(WorkspaceState state, Dictionary<string, List<string>> options)
 {
     var total = GetDoubleOption(options, "total", state.Budget.TotalCreditCap);
     var premium = GetDoubleOption(options, "premium", state.Budget.PremiumCreditCap);
     state.Budget.TotalCreditCap = total;
     state.Budget.PremiumCreditCap = premium;
+}
+
+static void CopyPackagedAssets(string targetRoot, bool force)
+{
+    // Walk up from the tool install directory to find packaged .devteam-source,
+    // matching the same resolution logic SeedData uses via EnumerateAssetRoots.
+    string? sourceRoot = null;
+    var current = new DirectoryInfo(AppContext.BaseDirectory);
+    while (current is not null)
+    {
+        var candidate = Path.Combine(current.FullName, ".devteam-source");
+        if (Directory.Exists(candidate) &&
+            !string.Equals(Path.GetFullPath(candidate), Path.GetFullPath(targetRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            sourceRoot = candidate;
+            break;
+        }
+        current = current.Parent;
+    }
+
+    if (sourceRoot is null)
+    {
+        throw new InvalidOperationException(
+            "No packaged assets found. " +
+            "This command copies the built-in roles, modes, and superpowers so you can customize them.");
+    }
+
+    var created = 0;
+    var skipped = 0;
+    var overwritten = 0;
+
+    foreach (var sourceFile in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+    {
+        var relativePath = Path.GetRelativePath(sourceRoot, sourceFile);
+        var targetFile = Path.Combine(targetRoot, relativePath);
+        var targetDir = Path.GetDirectoryName(targetFile)!;
+
+        if (!Directory.Exists(targetDir))
+        {
+            Directory.CreateDirectory(targetDir);
+        }
+
+        if (File.Exists(targetFile) && !force)
+        {
+            skipped++;
+            continue;
+        }
+
+        if (File.Exists(targetFile))
+        {
+            overwritten++;
+        }
+        else
+        {
+            created++;
+        }
+
+        File.Copy(sourceFile, targetFile, overwrite: true);
+    }
+
+    Console.WriteLine($"Copied assets to {Path.GetFullPath(targetRoot)}");
+    Console.WriteLine($"  {created} created, {overwritten} overwritten, {skipped} skipped (use --force to overwrite)");
+    Console.WriteLine("Edit these files to customize roles, modes, superpowers, and model policies.");
+}
+
+file sealed class LoopConsoleRenderer : IDisposable
+{
+    private readonly object _gate = new();
+    private int _progressLineCount;
+    private bool _disposed;
+
+    public void Log(string message)
+    {
+        lock (_gate)
+        {
+            ClearProgressBlock();
+            Console.WriteLine(message);
+        }
+    }
+
+    public void ReportProgress(IReadOnlyList<RunProgressSnapshot> snapshots)
+    {
+        lock (_gate)
+        {
+            ClearProgressBlock();
+            foreach (var snapshot in snapshots.OrderBy(item => item.IssueId))
+            {
+                Console.WriteLine(
+                    $"Running {snapshot.RoleSlug,-12} issue #{snapshot.IssueId,-3} [{Truncate(snapshot.Title, 48)}] {snapshot.Elapsed.TotalSeconds,4:0}s");
+            }
+            _progressLineCount = snapshots.Count;
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            ClearProgressBlock();
+            _disposed = true;
+        }
+    }
+
+    private void ClearProgressBlock()
+    {
+        if (_progressLineCount <= 0)
+        {
+            return;
+        }
+
+        for (var index = 0; index < _progressLineCount; index++)
+        {
+            var targetTop = Console.CursorTop - 1;
+            if (targetTop < 0)
+            {
+                break;
+            }
+
+            Console.SetCursorPosition(0, targetTop);
+            Console.Write(new string(' ', Math.Max(1, Console.BufferWidth - 1)));
+            Console.SetCursorPosition(0, targetTop);
+        }
+
+        _progressLineCount = 0;
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return value[..Math.Max(0, maxLength - 1)] + "…";
+    }
 }

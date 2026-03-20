@@ -139,7 +139,11 @@ public static class GitWorkspace
 
         var stdout = process.StandardOutput.ReadToEnd();
         var stderr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        if (!process.WaitForExit(30_000))
+        {
+            try { process.Kill(); } catch { }
+            throw new InvalidOperationException("Git command timed out after 30 seconds.");
+        }
         if (process.ExitCode != 0)
         {
             throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "Git command failed." : stderr.Trim());
