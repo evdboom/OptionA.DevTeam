@@ -8,13 +8,17 @@ public sealed class WorkspaceState
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public WorkflowPhase Phase { get; set; } = WorkflowPhase.Planning;
     public BudgetState Budget { get; set; } = new();
+    public RuntimeConfiguration Runtime { get; set; } = RuntimeConfiguration.CreateDefault();
     public GoalState? ActiveGoal { get; set; }
     public List<RoadmapItem> Roadmap { get; set; } = [];
     public List<IssueItem> Issues { get; set; } = [];
     public List<QuestionItem> Questions { get; set; } = [];
     public List<AgentRun> AgentRuns { get; set; } = [];
+    public List<AgentSession> AgentSessions { get; set; } = [];
     public List<DecisionRecord> Decisions { get; set; } = [];
+    public List<PipelineState> Pipelines { get; set; } = [];
     public List<ModelDefinition> Models { get; set; } = [];
+    public List<ModeDefinition> Modes { get; set; } = [];
     public List<RoleDefinition> Roles { get; set; } = [];
     public List<SuperpowerDefinition> Superpowers { get; set; } = [];
     public int NextRoadmapId { get; set; } = 1;
@@ -22,6 +26,18 @@ public sealed class WorkspaceState
     public int NextQuestionId { get; set; } = 1;
     public int NextRunId { get; set; } = 1;
     public int NextDecisionId { get; set; } = 1;
+    public int NextPipelineId { get; set; } = 1;
+}
+
+public sealed class RuntimeConfiguration
+{
+    public string ActiveModeSlug { get; set; } = "develop";
+    public bool WorkspaceMcpEnabled { get; set; } = true;
+    public bool PipelineSchedulingEnabled { get; set; } = true;
+    public string WorkspaceMcpServerName { get; set; } = "devteam-workspace";
+    public List<string> DefaultPipelineRoles { get; set; } = ["architect", "developer", "tester"];
+
+    public static RuntimeConfiguration CreateDefault() => new();
 }
 
 public sealed class BudgetState
@@ -54,6 +70,7 @@ public sealed class IssueItem
     public string Title { get; set; } = "";
     public string Detail { get; set; } = "";
     public string Area { get; set; } = "";
+    public string FamilyKey { get; set; } = "";
     public bool IsPlanningIssue { get; set; }
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public ItemStatus Status { get; set; } = ItemStatus.Open;
@@ -61,6 +78,9 @@ public sealed class IssueItem
     public int Priority { get; set; } = 50;
     public int? RoadmapItemId { get; set; }
     public List<int> DependsOnIssueIds { get; set; } = [];
+    public int? ParentIssueId { get; set; }
+    public int? PipelineId { get; set; }
+    public int? PipelineStageIndex { get; set; }
 }
 
 public sealed class QuestionItem
@@ -88,6 +108,18 @@ public sealed class AgentRun
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class AgentSession
+{
+    public string ScopeKey { get; set; } = "";
+    public string ScopeKind { get; set; } = "";
+    public string RoleSlug { get; set; } = "";
+    public int? IssueId { get; set; }
+    public int? PipelineId { get; set; }
+    public int? LastRunId { get; set; }
+    public string SessionId { get; set; } = "";
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class DecisionRecord
 {
     public int Id { get; set; }
@@ -98,6 +130,20 @@ public sealed class DecisionRecord
     public int? RunId { get; set; }
     public string SessionId { get; set; } = "";
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class PipelineState
+{
+    public int Id { get; set; }
+    public int RootIssueId { get; set; }
+    public string FamilyKey { get; set; } = "";
+    public string Area { get; set; } = "";
+    public List<string> RoleSequence { get; set; } = [];
+    public List<int> IssueIds { get; set; } = [];
+    public int? ActiveIssueId { get; set; }
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public PipelineStatus Status { get; set; } = PipelineStatus.Open;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class ModelDefinition
@@ -116,6 +162,14 @@ public sealed class RoleDefinition
     public string SourcePath { get; set; } = "";
     public string Body { get; set; } = "";
     public List<string> RequiredTools { get; set; } = [];
+}
+
+public sealed class ModeDefinition
+{
+    public string Slug { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string SourcePath { get; set; } = "";
+    public string Body { get; set; } = "";
 }
 
 public sealed class SuperpowerDefinition
@@ -149,6 +203,20 @@ public sealed class LoopResult
     public string State { get; init; } = "idle";
     public IReadOnlyList<string> Created { get; init; } = [];
     public IReadOnlyList<QueuedRunInfo> QueuedRuns { get; init; } = [];
+}
+
+public sealed class WorkspaceSnapshot
+{
+    public string RepoRoot { get; init; } = "";
+    public WorkflowPhase Phase { get; init; }
+    public GoalState? ActiveGoal { get; init; }
+    public RuntimeConfiguration Runtime { get; init; } = RuntimeConfiguration.CreateDefault();
+    public IReadOnlyList<ModeDefinition> Modes { get; init; } = [];
+    public IReadOnlyList<IssueItem> Issues { get; init; } = [];
+    public IReadOnlyList<QuestionItem> Questions { get; init; } = [];
+    public IReadOnlyList<AgentSession> AgentSessions { get; init; } = [];
+    public IReadOnlyList<DecisionRecord> Decisions { get; init; } = [];
+    public IReadOnlyList<PipelineState> Pipelines { get; init; } = [];
 }
 
 public sealed class StatusReport
@@ -196,6 +264,14 @@ public enum AgentRunStatus
     Running,
     Completed,
     Failed,
+    Blocked
+}
+
+public enum PipelineStatus
+{
+    Open,
+    Running,
+    Completed,
     Blocked
 }
 

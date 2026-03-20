@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Text;
 using GitHub.Copilot.SDK;
 
@@ -10,8 +11,12 @@ public sealed class AgentInvocationRequest
     public string? Model { get; init; }
     public string? SessionId { get; init; }
     public string WorkingDirectory { get; init; } = Directory.GetCurrentDirectory();
+    public string? WorkspacePath { get; init; }
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(20);
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
+    public bool EnableWorkspaceMcp { get; init; }
+    public string WorkspaceMcpServerName { get; init; } = "devteam-workspace";
+    public string? ToolHostPath { get; init; }
 }
 
 public sealed class AgentInvocationResult
@@ -22,6 +27,144 @@ public sealed class AgentInvocationResult
     public string StdOut { get; init; } = "";
     public string StdErr { get; init; } = "";
     public bool Success => ExitCode == 0;
+}
+
+public sealed class LocalMcpCommandSpec
+{
+    public string Command { get; init; } = "";
+    public IReadOnlyList<string> Arguments { get; init; } = [];
+    public string WorkingDirectory { get; init; } = Directory.GetCurrentDirectory();
+}
+
+public static class WorkspaceMcpSessionConfigFactory
+{
+    public static SessionConfig BuildSessionConfig(AgentInvocationRequest request)
+    {
+        var sessionConfig = new SessionConfig
+        {
+            ClientName = "devteam-runtime",
+            Model = request.Model,
+            SessionId = request.SessionId,
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            WorkingDirectory = request.WorkingDirectory,
+            Streaming = true,
+            SkillDirectories = ResolveSkillDirectories(request.WorkingDirectory)
+        };
+
+        var mcpConfig = CreateLocalMcpServerConfig(request);
+        if (mcpConfig is not null)
+        {
+            sessionConfig.McpServers = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            {
+                [request.WorkspaceMcpServerName] = mcpConfig
+            };
+        }
+
+        return sessionConfig;
+    }
+
+    public static McpLocalServerConfig? CreateLocalMcpServerConfig(AgentInvocationRequest request)
+    {
+        if (!request.EnableWorkspaceMcp || string.IsNullOrWhiteSpace(request.WorkspacePath))
+        {
+            return null;
+        }
+
+        var command = BuildLocalCommandSpec(request);
+        return new McpLocalServerConfig
+        {
+            Type = "local",
+            Command = command.Command,
+            Args = command.Arguments.ToList(),
+            Cwd = command.WorkingDirectory,
+            Tools = ["*"],
+            Timeout = Math.Max(30000, (int)Math.Ceiling(request.Timeout.TotalMilliseconds))
+        };
+    }
+
+    public static LocalMcpCommandSpec BuildLocalCommandSpec(AgentInvocationRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.WorkspacePath))
+        {
+            throw new InvalidOperationException("WorkspacePath is required when workspace MCP is enabled.");
+        }
+
+        var toolHostPath = ResolveToolHostPath(request.ToolHostPath);
+        var workingDirectory = Path.GetDirectoryName(toolHostPath) ?? request.WorkingDirectory;
+        if (toolHostPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            return new LocalMcpCommandSpec
+            {
+                Command = "dotnet",
+                Arguments =
+                [
+                    toolHostPath,
+                    "workspace-mcp",
+                    "--workspace",
+                    request.WorkspacePath
+                ],
+                WorkingDirectory = workingDirectory
+            };
+        }
+
+        return new LocalMcpCommandSpec
+        {
+            Command = toolHostPath,
+            Arguments =
+            [
+                "workspace-mcp",
+                "--workspace",
+                request.WorkspacePath
+            ],
+            WorkingDirectory = workingDirectory
+        };
+    }
+
+    private static string ResolveToolHostPath(string? explicitPath)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitPath))
+        {
+            return Path.GetFullPath(explicitPath);
+        }
+
+        var entryAssemblyPath = Assembly.GetEntryAssembly()?.Location;
+        if (!string.IsNullOrWhiteSpace(entryAssemblyPath))
+        {
+            return Path.GetFullPath(entryAssemblyPath);
+        }
+
+        throw new InvalidOperationException("Unable to resolve the DevTeam CLI host path for the workspace MCP server.");
+    }
+
+    private static List<string> ResolveSkillDirectories(string workingDirectory)
+    {
+        var repoRoot = FindRepoRoot(workingDirectory);
+        var paths = new List<string>();
+        foreach (var relative in new[] { ".devteam-source\\superpowers" })
+        {
+            var fullPath = Path.Combine(repoRoot, relative);
+            if (Directory.Exists(fullPath))
+            {
+                paths.Add(fullPath);
+            }
+        }
+        return paths;
+    }
+
+    private static string FindRepoRoot(string workingDirectory)
+    {
+        var current = new DirectoryInfo(Path.GetFullPath(workingDirectory));
+        while (current is not null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, ".devteam-source")))
+            {
+                return current.FullName;
+            }
+            current = current.Parent;
+        }
+
+        return Path.GetFullPath(workingDirectory);
+    }
 }
 
 public sealed class CommandExecutionSpec
@@ -168,16 +311,7 @@ public sealed class CopilotSdkAgentClient : IAgentClient
         await using var client = new CopilotClient(clientOptions);
         await client.StartAsync(cancellationToken);
 
-        var sessionConfig = new SessionConfig
-        {
-            ClientName = "devteam-runtime",
-            Model = request.Model,
-            SessionId = request.SessionId,
-            OnPermissionRequest = PermissionHandler.ApproveAll,
-            WorkingDirectory = request.WorkingDirectory,
-            Streaming = true,
-            SkillDirectories = ResolveSkillDirectories(request.WorkingDirectory)
-        };
+        var sessionConfig = WorkspaceMcpSessionConfigFactory.BuildSessionConfig(request);
 
         await using var session = await client.CreateSessionAsync(sessionConfig, cancellationToken);
         using var subscription = session.On(evt =>
@@ -214,36 +348,6 @@ public sealed class CopilotSdkAgentClient : IAgentClient
             StdOut = stdout.ToString(),
             StdErr = stderr.ToString()
         };
-    }
-
-    private static List<string> ResolveSkillDirectories(string workingDirectory)
-    {
-        var repoRoot = FindRepoRoot(workingDirectory);
-        var paths = new List<string>();
-        foreach (var relative in new[] { ".devteam-source\\superpowers" })
-        {
-            var fullPath = Path.Combine(repoRoot, relative);
-            if (Directory.Exists(fullPath))
-            {
-                paths.Add(fullPath);
-            }
-        }
-        return paths;
-    }
-
-    private static string FindRepoRoot(string workingDirectory)
-    {
-        var current = new DirectoryInfo(Path.GetFullPath(workingDirectory));
-        while (current is not null)
-        {
-            if (Directory.Exists(Path.Combine(current.FullName, ".devteam-source")))
-            {
-                return current.FullName;
-            }
-            current = current.Parent;
-        }
-
-        return Path.GetFullPath(workingDirectory);
     }
 }
 

@@ -6,6 +6,7 @@ namespace DevTeam.Core;
 internal static partial class SeedData
 {
     private static readonly string[] RoleDirectoryCandidates = [".devteam-source\\roles"];
+    private static readonly string[] ModeDirectoryCandidates = [".devteam-source\\modes"];
     private static readonly string[] SuperpowerDirectoryCandidates = [".devteam-source\\superpowers"];
     private static readonly string[] ModelFileCandidates = [".devteam-source\\MODELS.json"];
 
@@ -29,6 +30,7 @@ internal static partial class SeedData
         var state = new WorkspaceState
         {
             RepoRoot = repoRoot,
+            Runtime = RuntimeConfiguration.CreateDefault(),
             Budget = new BudgetState
             {
                 TotalCreditCap = totalCreditCap,
@@ -37,6 +39,7 @@ internal static partial class SeedData
         };
 
         state.Models = LoadModels(repoRoot);
+        state.Modes = LoadModes(repoRoot);
         state.Roles = LoadRoles(repoRoot);
         state.Superpowers = LoadSuperpowers(repoRoot);
         return state;
@@ -61,6 +64,12 @@ internal static partial class SeedData
             changed = true;
         }
 
+        if (state.Modes.Count == 0)
+        {
+            state.Modes = LoadModes(repoRoot);
+            changed = true;
+        }
+
         if (state.Superpowers.Count == 0)
         {
             state.Superpowers = LoadSuperpowers(repoRoot);
@@ -73,18 +82,53 @@ internal static partial class SeedData
             changed = true;
         }
 
+        if (state.Runtime is null)
+        {
+            state.Runtime = RuntimeConfiguration.CreateDefault();
+            changed = true;
+        }
+
+        if (state.AgentSessions is null)
+        {
+            state.AgentSessions = [];
+            changed = true;
+        }
+
+        if (state.Runtime.DefaultPipelineRoles.Count == 0)
+        {
+            state.Runtime.DefaultPipelineRoles = RuntimeConfiguration.CreateDefault().DefaultPipelineRoles;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(state.Runtime.ActiveModeSlug))
+        {
+            state.Runtime.ActiveModeSlug = RuntimeConfiguration.CreateDefault().ActiveModeSlug;
+            changed = true;
+        }
+
+        if (state.Modes.Count > 0 && state.Modes.All(mode => !string.Equals(mode.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase)))
+        {
+            state.Runtime.ActiveModeSlug = state.Modes.First().Slug;
+            changed = true;
+        }
+
         return changed;
     }
 
     public static RoleModelPolicy GetPolicy(WorkspaceState state, string roleSlug)
     {
         var defaultModel = state.Models.FirstOrDefault(model => model.IsDefault)?.Name ?? "gpt-5-mini";
+        var suggested = state.Roles.FirstOrDefault(role => role.Slug == roleSlug)?.SuggestedModel;
         if (DefaultPolicies.TryGetValue(roleSlug, out var policy))
         {
-            return policy;
+            return new RoleModelPolicy
+            {
+                PrimaryModel = string.IsNullOrWhiteSpace(suggested) ? policy.PrimaryModel : suggested,
+                FallbackModel = policy.FallbackModel,
+                AllowPremium = policy.AllowPremium
+            };
         }
 
-        var suggested = state.Roles.FirstOrDefault(role => role.Slug == roleSlug)?.SuggestedModel;
         return new RoleModelPolicy
         {
             PrimaryModel = string.IsNullOrWhiteSpace(suggested) ? defaultModel : suggested,
@@ -150,6 +194,69 @@ internal static partial class SeedData
         }
 
         return roles;
+    }
+
+    private static List<ModeDefinition> LoadModes(string repoRoot)
+    {
+        var modesDir = ResolveFirstDirectory(repoRoot, ModeDirectoryCandidates);
+        if (!Directory.Exists(modesDir))
+        {
+            return
+            [
+                new ModeDefinition
+                {
+                    Slug = "develop",
+                    Name = "Develop",
+                    SourcePath = ".devteam-source\\modes\\develop.md",
+                    Body = """
+                    # Mode: Develop
+
+                    Deliver working software, not just plausible code.
+
+                    Guardrails:
+                    - Always build the changed project or solution before declaring the work done.
+                    - Add thorough tests for the delivered behavior: unit tests, integration tests when relevant, and end-to-end tests when the user-facing flow matters.
+                    - If the repository cannot currently test the behavior, create the minimum missing test harness or automation needed so the behavior can be verified safely.
+                    - Prefer closing the loop on actual runtime behavior instead of stopping at static implementation.
+                    - Update user-facing or maintainer-facing documentation when the feature, workflow, or validation story changes.
+                    """
+                },
+                new ModeDefinition
+                {
+                    Slug = "creative-writing",
+                    Name = "Creative Writing",
+                    SourcePath = ".devteam-source\\modes\\creative-writing.md",
+                    Body = """
+                    # Mode: Creative Writing
+
+                    Optimize for voice, coherence, revision quality, and reader experience.
+
+                    Guardrails:
+                    - Preserve tone, point of view, and narrative continuity.
+                    - Revise in deliberate passes: structure first, then language, then polish.
+                    - Surface gaps in character motivation, pacing, or clarity instead of glossing over them.
+                    - When useful, propose follow-on editorial work as focused issues rather than broad rewrites.
+                    - Keep supporting notes and documentation aligned with the latest draft direction.
+                    """
+                }
+            ];
+        }
+
+        var modes = new List<ModeDefinition>();
+        foreach (var path in Directory.GetFiles(modesDir, "*.md").OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var asset = ParseMarkdownAsset(path);
+            var firstLine = asset.Body.Split('\n', StringSplitOptions.None).FirstOrDefault()?.Trim() ?? "";
+            modes.Add(new ModeDefinition
+            {
+                Slug = Path.GetFileNameWithoutExtension(path),
+                Name = firstLine.Replace("# Mode:", "", StringComparison.Ordinal).Trim(),
+                SourcePath = Path.GetRelativePath(repoRoot, path),
+                Body = asset.Body
+            });
+        }
+
+        return modes;
     }
 
     private static List<SuperpowerDefinition> LoadSuperpowers(string repoRoot)

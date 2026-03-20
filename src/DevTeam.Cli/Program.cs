@@ -15,19 +15,39 @@ try
         case "start":
             return await RunInteractiveShellAsync(store, runtime, loopExecutor);
 
+        case "workspace-mcp":
+        {
+            var workspace = GetOption(options, "workspace") ?? ".devteam";
+            var server = new WorkspaceMcpServer(workspace);
+            await server.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
+            return 0;
+        }
+
         case "init":
         {
             var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
             var premiumCap = GetDoubleOption(options, "premium-credit-cap", 6);
             var goal = GetOption(options, "goal") ?? GetPositionalValue(options);
+            var gitInitialized = GitWorkspace.EnsureRepository(Environment.CurrentDirectory);
             var state = store.Initialize(Environment.CurrentDirectory, totalCap, premiumCap);
+            var mode = GetOption(options, "mode");
+            state.Runtime.WorkspaceMcpEnabled = GetBoolOption(options, "workspace-mcp", true);
+            state.Runtime.PipelineSchedulingEnabled = GetBoolOption(options, "pipeline-scheduling", true);
+            if (!string.IsNullOrWhiteSpace(mode))
+            {
+                runtime.SetMode(state, mode);
+            }
             if (!string.IsNullOrWhiteSpace(goal))
             {
                 runtime.SetGoal(state, goal);
-                store.Save(state);
             }
+            store.Save(state);
 
             Console.WriteLine($"Initialized devteam workspace at {Path.GetFullPath(workspacePath)}");
+            if (gitInitialized)
+            {
+                Console.WriteLine($"Initialized git repository at {Path.GetFullPath(Environment.CurrentDirectory)}");
+            }
             if (!string.IsNullOrWhiteSpace(goal))
             {
                 Console.WriteLine($"Active goal saved: {goal}");
@@ -43,6 +63,17 @@ try
             runtime.SetGoal(state, goal);
             store.Save(state);
             Console.WriteLine("Updated active goal.");
+            return 0;
+        }
+
+        case "set-mode":
+        case "mode":
+        {
+            var state = store.Load();
+            var mode = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing mode slug.");
+            runtime.SetMode(state, mode);
+            store.Save(state);
+            Console.WriteLine($"Updated active mode to {state.Runtime.ActiveModeSlug}.");
             return 0;
         }
 
@@ -196,7 +227,10 @@ try
                 Model = model,
                 WorkingDirectory = Path.GetFullPath(workingDirectory),
                 Timeout = TimeSpan.FromSeconds(timeoutSeconds),
-                ExtraArguments = extraArgs
+                ExtraArguments = extraArgs,
+                WorkspacePath = Path.GetFullPath(workspacePath),
+                EnableWorkspaceMcp = GetBoolOption(options, "workspace-mcp", false),
+                ToolHostPath = System.Reflection.Assembly.GetEntryAssembly()?.Location
             }).GetAwaiter().GetResult();
 
             Console.WriteLine($"Backend: {result.BackendName}");
@@ -311,13 +345,25 @@ static async Task<int> RunInteractiveShellAsync(
                     var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
                     var premiumCap = GetDoubleOption(options, "premium-credit-cap", 6);
                     var goal = GetOption(options, "goal") ?? GetPositionalValue(options);
+                    var gitInitialized = GitWorkspace.EnsureRepository(Environment.CurrentDirectory);
                     var initialized = store.Initialize(Environment.CurrentDirectory, totalCap, premiumCap);
+                    var mode = GetOption(options, "mode");
+                    initialized.Runtime.WorkspaceMcpEnabled = GetBoolOption(options, "workspace-mcp", true);
+                    initialized.Runtime.PipelineSchedulingEnabled = GetBoolOption(options, "pipeline-scheduling", true);
+                    if (!string.IsNullOrWhiteSpace(mode))
+                    {
+                        runtime.SetMode(initialized, mode);
+                    }
                     if (!string.IsNullOrWhiteSpace(goal))
                     {
                         runtime.SetGoal(initialized, goal);
                     }
                     store.Save(initialized);
                     Console.WriteLine($"Initialized workspace at {store.WorkspacePath}");
+                    if (gitInitialized)
+                    {
+                        Console.WriteLine($"Initialized git repository at {Path.GetFullPath(Environment.CurrentDirectory)}");
+                    }
                     if (!string.IsNullOrWhiteSpace(goal))
                     {
                         Console.WriteLine($"Active goal saved: {goal}");
@@ -362,6 +408,17 @@ static async Task<int> RunInteractiveShellAsync(
                     runtime.SetGoal(current, goal);
                     store.Save(current);
                     Console.WriteLine("Updated active goal.");
+                    break;
+                }
+
+                case "mode":
+                case "set-mode":
+                {
+                    var current = store.Load();
+                    var mode = GetPositionalValue(options) ?? throw new InvalidOperationException("Usage: /mode <slug>");
+                    runtime.SetMode(current, mode);
+                    store.Save(current);
+                    Console.WriteLine($"Updated active mode to {current.Runtime.ActiveModeSlug}.");
                     break;
                 }
 
@@ -485,9 +542,11 @@ static void PrintStatus(WorkspaceState state, DevTeamRuntime runtime)
 {
     var report = runtime.BuildStatusReport(state);
     Console.WriteLine($"Phase: {state.Phase}");
+    Console.WriteLine($"Mode: {state.Runtime.ActiveModeSlug}");
     Console.WriteLine(
         $"Counts: roadmap={report.Counts["roadmap"]}, issues={report.Counts["issues"]}, " +
         $"questions={report.Counts["questions"]}, runs={report.Counts["runs"]}, " +
+        $"modes={state.Modes.Count}, " +
         $"decisions={report.Counts["decisions"]}, roles={report.Counts["roles"]}, superpowers={report.Counts["superpowers"]}");
     Console.WriteLine(
         $"Budget: {report.Budget.CreditsCommitted}/{report.Budget.TotalCreditCap} total, " +
@@ -609,8 +668,9 @@ static void PrintHelp()
     Console.WriteLine("DevTeam CLI");
     Console.WriteLine("Commands (plain or slash-prefixed, for example `/init`):");
     Console.WriteLine("  start [--workspace PATH]");
-    Console.WriteLine("  init [--workspace PATH] [--goal TEXT] [--total-credit-cap N] [--premium-credit-cap N]");
+    Console.WriteLine("  init [--workspace PATH] [--goal TEXT] [--mode SLUG] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false]");
     Console.WriteLine("  set-goal <TEXT> [--workspace PATH]");
+    Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
     Console.WriteLine("  add-roadmap <TITLE> [--detail TEXT] [--priority N] [--workspace PATH]");
     Console.WriteLine("  add-issue <TITLE> --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]] [--workspace PATH]");
     Console.WriteLine("  add-question <TEXT> [--blocking] [--workspace PATH]");
@@ -625,13 +685,15 @@ static void PrintHelp()
     Console.WriteLine("  complete-run --run-id N --outcome completed|failed|blocked --summary TEXT [--workspace PATH]");
     Console.WriteLine("  status [--workspace PATH]");
     Console.WriteLine("  agent-invoke [--backend sdk|cli] [--prompt TEXT] [--model NAME] [--timeout-seconds N] [--working-directory PATH] [--extra-arg ARG ...]");
+    Console.WriteLine("  workspace-mcp --workspace PATH");
 }
 
 static void PrintInteractiveHelp()
 {
     Console.WriteLine("Interactive commands:");
-    Console.WriteLine("  /init \"goal text\"");
+    Console.WriteLine("  /init \"goal text\" [--mode SLUG]");
     Console.WriteLine("  /status");
+    Console.WriteLine("  /mode <slug>");
     Console.WriteLine("  /add-issue \"title\" --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]]");
     Console.WriteLine("  /plan");
     Console.WriteLine("  /questions");
@@ -729,6 +791,22 @@ static int GetIntOption(Dictionary<string, List<string>> options, string key, in
 
 static double GetDoubleOption(Dictionary<string, List<string>> options, string key, double fallback) =>
     double.TryParse(GetOption(options, key), out var value) ? value : fallback;
+
+static bool GetBoolOption(Dictionary<string, List<string>> options, string key, bool fallback)
+{
+    var value = GetOption(options, key);
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return fallback;
+    }
+
+    return value.Trim().ToLowerInvariant() switch
+    {
+        "true" or "1" or "yes" or "on" => true,
+        "false" or "0" or "no" or "off" => false,
+        _ => fallback
+    };
+}
 
 static int? GetNullableIntOption(Dictionary<string, List<string>> options, string key) =>
     int.TryParse(GetOption(options, key), out var value) ? value : null;

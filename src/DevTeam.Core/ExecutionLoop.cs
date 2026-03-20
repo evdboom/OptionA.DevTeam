@@ -8,6 +8,7 @@ public sealed class LoopExecutionOptions
     public int MaxSubagents { get; set; } = 1;
     public string Backend { get; set; } = "sdk";
     public TimeSpan AgentTimeout { get; set; } = TimeSpan.FromMinutes(10);
+    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(10);
     public LoopVerbosity Verbosity { get; set; } = LoopVerbosity.Normal;
 }
 
@@ -74,24 +75,29 @@ public sealed class LoopExecutor(
                 break;
             }
 
-            var pendingRuns = new List<(QueuedRunInfo Run, string SessionId, Task<AgentExecutionResult> Task)>();
+            var gitStatusBeforeIteration = GitWorkspace.TryCaptureStatus(state.RepoRoot);
+            var pendingRuns = new List<PendingAgentRun>();
             foreach (var queuedRun in runsToExecute)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var existingRun = state.AgentRuns.First(item => item.Id == queuedRun.RunId);
-                var sessionId = string.IsNullOrWhiteSpace(existingRun.SessionId)
-                    ? $"{queuedRun.RoleSlug}-run-{queuedRun.RunId:000}"
-                    : existingRun.SessionId;
+                var session = _runtime.GetOrCreateAgentSession(state, queuedRun.RunId);
+                var sessionId = session.SessionId;
                 _runtime.StartRun(state, queuedRun.RunId, sessionId);
-                Log(log, options.Verbosity, $"  Running issue #{queuedRun.IssueId} as {queuedRun.RoleSlug} via {queuedRun.ModelName} (session {sessionId}, area {(string.IsNullOrWhiteSpace(queuedRun.Area) ? "none" : queuedRun.Area)}, timeout {options.AgentTimeout.TotalSeconds:0}s)");
-                pendingRuns.Add((queuedRun, sessionId, ExecuteRunAsync(state, options, queuedRun, sessionId, cancellationToken)));
+                Log(log, options.Verbosity, $"  Running issue #{queuedRun.IssueId} as {queuedRun.RoleSlug} via {queuedRun.ModelName} (session {sessionId}, scope {session.ScopeKind}, area {(string.IsNullOrWhiteSpace(queuedRun.Area) ? "none" : queuedRun.Area)}, timeout {options.AgentTimeout.TotalSeconds:0}s)");
+                pendingRuns.Add(new PendingAgentRun(
+                    queuedRun,
+                    sessionId,
+                    ExecuteRunAsync(state, options, queuedRun, sessionId, cancellationToken),
+                    DateTimeOffset.UtcNow));
             }
 
             _store.Save(state);
 
-            foreach (var item in pendingRuns)
+            while (pendingRuns.Count > 0)
             {
-                var completed = await AwaitWithHeartbeat(item.Run, item.Task, options, log, cancellationToken);
+                var completed = await AwaitNextCompletionAsync(pendingRuns, options, log, cancellationToken);
+                pendingRuns.RemoveAll(item => item.Run.RunId == completed.Run.RunId);
+                _runtime.MergeWorkspaceAdditions(state, _store.Load());
                 if (completed.Questions.Count > 0)
                 {
                     _runtime.AddQuestions(state, completed.Questions);
@@ -138,6 +144,12 @@ public sealed class LoopExecutor(
                     }
                 }
             }
+
+            var stagedPaths = GitWorkspace.StagePathsChangedSince(state.RepoRoot, gitStatusBeforeIteration);
+            if (stagedPaths.Count > 0)
+            {
+                Log(log, options.Verbosity, $"  Staged {stagedPaths.Count} path(s) for the next orchestrator pass.");
+            }
         }
 
         return new LoopExecutionReport
@@ -147,32 +159,32 @@ public sealed class LoopExecutor(
         };
     }
 
-    private static async Task<AgentExecutionResult> AwaitWithHeartbeat(
-        QueuedRunInfo run,
-        Task<AgentExecutionResult> task,
+    private static async Task<AgentExecutionResult> AwaitNextCompletionAsync(
+        IReadOnlyList<PendingAgentRun> pendingRuns,
         LoopExecutionOptions options,
         Action<string>? log,
         CancellationToken cancellationToken)
     {
         if (options.Verbosity == LoopVerbosity.Quiet)
         {
-            return await task;
+            return await Task.WhenAny(pendingRuns.Select(item => item.Task)).Unwrap();
         }
 
-        var startedAt = DateTimeOffset.UtcNow;
-        while (!task.IsCompleted)
+        while (true)
         {
-            var completedTask = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(10), cancellationToken));
-            if (completedTask == task)
+            var delayTask = Task.Delay(options.HeartbeatInterval, cancellationToken);
+            var completionTask = await Task.WhenAny(pendingRuns.Select(item => item.Task).Append(delayTask));
+            if (completionTask != delayTask)
             {
-                break;
+                return await ((Task<AgentExecutionResult>)completionTask);
             }
 
-            var elapsed = DateTimeOffset.UtcNow - startedAt;
-            log?.Invoke($"    Still running issue #{run.IssueId} ({elapsed.TotalSeconds:0}s elapsed)...");
+            foreach (var item in pendingRuns.Where(item => !item.Task.IsCompleted))
+            {
+                var elapsed = DateTimeOffset.UtcNow - item.StartedAtUtc;
+                log?.Invoke($"    Still running issue #{item.Run.IssueId} ({elapsed.TotalSeconds:0}s elapsed)...");
+            }
         }
-
-        return await task;
     }
 
     private static void Log(Action<string>? log, LoopVerbosity verbosity, string message)
@@ -343,7 +355,10 @@ public sealed class LoopExecutor(
                 Model = queuedRun.ModelName,
                 SessionId = sessionId,
                 WorkingDirectory = state.RepoRoot,
-                Timeout = options.AgentTimeout
+                WorkspacePath = _store.WorkspacePath,
+                Timeout = options.AgentTimeout,
+                EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
+                WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName
             }, cancellationToken);
             var parsed = AgentPromptBuilder.ParseResponse(response);
             return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Issues, parsed.SuperpowersUsed, parsed.ToolsUsed, parsed.Questions);
@@ -431,6 +446,8 @@ internal static class AgentPromptBuilder
     public static string BuildPrompt(WorkspaceState state, IssueItem issue)
     {
         var role = state.Roles.FirstOrDefault(item => item.Slug == issue.RoleSlug);
+        var activeMode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase))
+            ?? state.Modes.FirstOrDefault();
         var roleBody = role?.Body ?? $"# Role: {issue.RoleSlug}";
         var roleTools = role?.RequiredTools ?? [];
         var superpowers = ResolveSuperpowers(state, issue.RoleSlug);
@@ -457,6 +474,12 @@ internal static class AgentPromptBuilder
         Active goal:
         {state.ActiveGoal?.GoalText ?? "(no active goal)"}
 
+        Active mode:
+        {(activeMode is null ? state.Runtime.ActiveModeSlug : $"{activeMode.Slug} ({activeMode.Name})")}
+
+        Mode guardrails:
+        {(activeMode?.Body.Trim() ?? "(none)")}
+
         Current issue:
         - Id: {issue.Id}
         - Title: {issue.Title}
@@ -476,6 +499,12 @@ internal static class AgentPromptBuilder
         Declared tool expectations:
         {(tools.Count == 0 ? "(none declared)" : string.Join(", ", tools))}
 
+        Workspace MCP:
+        {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Prefer using it to inspect current workspace state and to persist newly discovered issues, questions, and decisions." : "No workspace MCP server is available in this session.")}
+
+        Pipeline handoff context:
+        {BuildPipelineContextBlock(state, issue)}
+
         Open questions:
         {questionBlock}
 
@@ -486,7 +515,7 @@ internal static class AgentPromptBuilder
         {availableRoles}
 
         Task:
-        Work on the current issue using the available tools and role guidance. Keep the scope narrow. If you discover follow-on work, a blocker, a prerequisite, or a natural decomposition that should not be absorbed into the current issue, add it under ISSUES instead of expanding scope. This includes new issues for the same role when the current issue should stay small. If you are blocked by missing information, say so clearly. Do not try to ask the user interactively. Instead, put every needed user question in the QUESTIONS section.
+        Work on the current issue using the available tools, active mode guardrails, and role guidance. Keep the scope narrow. If you discover follow-on work, a blocker, a prerequisite, or a natural decomposition that should not be absorbed into the current issue, use the workspace MCP tools when available and also summarize the outcome under ISSUES for compatibility. Avoid manually creating obvious next-stage architect, developer, or tester follow-ups for the same issue family when the runtime can chain those automatically. If you are blocked by missing information, say so clearly. Do not try to ask the user interactively. Instead, put every needed user question in the QUESTIONS section and use the workspace MCP tools when available to persist them immediately.
 
         Reply in exactly this shape:
         OUTCOME: completed|blocked|failed
@@ -634,6 +663,45 @@ internal static class AgentPromptBuilder
         return string.Join(
             "\n",
             recentDecisions.Select(item => $"- #{item.Id} [{item.Source}] {item.Title}: {item.Detail}"));
+    }
+
+    private static string BuildPipelineContextBlock(WorkspaceState state, IssueItem issue)
+    {
+        if (issue.PipelineId is null)
+        {
+            return "(this issue is not currently attached to a pipeline)";
+        }
+
+        var relatedIssues = state.Issues
+            .Where(item => item.PipelineId == issue.PipelineId && item.Id != issue.Id)
+            .OrderBy(item => item.PipelineStageIndex ?? int.MaxValue)
+            .ThenBy(item => item.Id)
+            .ToList();
+        if (relatedIssues.Count == 0)
+        {
+            return "(this is the first known stage in the pipeline)";
+        }
+
+        var lines = new List<string>
+        {
+            $"Pipeline #{issue.PipelineId} for family {(string.IsNullOrWhiteSpace(issue.FamilyKey) ? "(none)" : issue.FamilyKey)}."
+        };
+
+        foreach (var relatedIssue in relatedIssues)
+        {
+            var latestRun = state.AgentRuns
+                .Where(run => run.IssueId == relatedIssue.Id)
+                .OrderByDescending(run => run.UpdatedAtUtc)
+                .FirstOrDefault();
+            var summary = latestRun is null || string.IsNullOrWhiteSpace(latestRun.Summary)
+                ? "(no run summary yet)"
+                : latestRun.Summary.Trim();
+            lines.Add(
+                $"- Stage {(relatedIssue.PipelineStageIndex?.ToString() ?? "?")} issue #{relatedIssue.Id} [{relatedIssue.RoleSlug}] {relatedIssue.Title} :: status={relatedIssue.Status}; summary={summary}");
+        }
+
+        lines.Add("Treat completed earlier stages as the current handoff contract unless you discover a concrete reason to revise them.");
+        return string.Join("\n", lines);
     }
 
     private static IReadOnlyList<ProposedQuestion> ParseQuestions(string[] lines, int questionsIndex)
@@ -797,6 +865,12 @@ internal sealed record AgentExecutionResult(
     IReadOnlyList<string> SuperpowersUsed,
     IReadOnlyList<string> ToolsUsed,
     IReadOnlyList<ProposedQuestion> Questions);
+
+internal sealed record PendingAgentRun(
+    QueuedRunInfo Run,
+    string SessionId,
+    Task<AgentExecutionResult> Task,
+    DateTimeOffset StartedAtUtc);
 
 internal sealed record ParsedAgentResponse(
     string Outcome,

@@ -10,6 +10,16 @@
       <PackagePath>tools\net10.0\any\.devteam-source\%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
       <Link>.devteam-source\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </None>
+    <None Include="..\..\README.md">
+      <Pack>true</Pack>
+      <PackagePath>\</PackagePath>
+      <Link>README.md</Link>
+    </None>
+    <None Include="..\..\LICENSE">
+      <Pack>true</Pack>
+      <PackagePath>\</PackagePath>
+      <Link>LICENSE</Link>
+    </None>
   </ItemGroup>
 
   <PropertyGroup>
@@ -19,10 +29,19 @@
     <Nullable>enable</Nullable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>devteam</ToolCommandName>
-    <PackageId>DevTeam.Cli</PackageId>
-    <Version>0.1.10</Version>
-    <Authors>GitHub Copilot</Authors>
-    <Description>Interactive DevTeam CLI for plan-first autonomous development workflows.</Description>
+    <PackageId>OptionA.DevTeam</PackageId>
+    <Title>OptionA.DevTeam</Title>
+    <Version>0.1.16</Version>
+    <Authors>OptionA</Authors>
+    <Company>OptionA</Company>
+    <Description>OptionA.DevTeam is a plan-first autonomous development runtime and CLI with pipeline orchestration, workspace MCP tools, and mode guardrails.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageTags>devteam;copilot;automation;cli;agents</PackageTags>
+    <RepositoryUrl>https://github.com/evdboom/OptionA.DevTeam</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/evdboom/OptionA.DevTeam</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
   </PropertyGroup>
 
 </Project>

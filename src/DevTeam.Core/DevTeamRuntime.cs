@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace DevTeam.Core;
 
 public sealed class DevTeamRuntime
@@ -32,6 +35,33 @@ public sealed class DevTeamRuntime
             "goal");
         return state.ActiveGoal;
     }
+
+    public void SetMode(WorkspaceState state, string modeSlug)
+    {
+        var normalized = modeSlug.Trim();
+        var mode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, normalized, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException($"Unknown mode '{modeSlug}'. Valid modes: {string.Join(", ", state.Modes.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase))}");
+        state.Runtime.ActiveModeSlug = mode.Slug;
+        state.Runtime.DefaultPipelineRoles = GetDefaultPipelineRolesForMode(mode.Slug);
+        RememberDecision(state, "Updated active mode", mode.Slug, "mode");
+    }
+
+    public ModeDefinition GetActiveMode(WorkspaceState state)
+    {
+        var active = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase));
+        return active ?? state.Modes.FirstOrDefault() ?? new ModeDefinition
+        {
+            Slug = "develop",
+            Name = "Develop",
+            Body = "# Mode: Develop"
+        };
+    }
+
+    public IReadOnlyList<string> GetKnownModeSlugs(WorkspaceState state) =>
+        state.Modes
+            .Select(mode => mode.Slug)
+            .OrderBy(slug => slug, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     public void ApprovePlan(WorkspaceState state, string note)
     {
@@ -85,21 +115,109 @@ public sealed class DevTeamRuntime
         int priority,
         int? roadmapItemId,
         IEnumerable<int> dependsOn,
-        string? area = null)
+        string? area = null,
+        string? familyKey = null,
+        int? parentIssueId = null,
+        int? pipelineId = null,
+        int? pipelineStageIndex = null)
+        => CreateIssue(state, title, detail, roleSlug, priority, roadmapItemId, dependsOn, area, familyKey, parentIssueId, pipelineId, pipelineStageIndex);
+
+    public WorkspaceSnapshot BuildWorkspaceSnapshot(WorkspaceState state)
     {
-        var issue = new IssueItem
+        EnsurePipelineAssignments(state);
+        return new WorkspaceSnapshot
         {
-            Id = state.NextIssueId++,
-            Title = title.Trim(),
-            Detail = detail.Trim(),
-            Area = NormalizeArea(area),
-            RoleSlug = ResolveRoleSlug(state, roleSlug),
-            Priority = priority,
-            RoadmapItemId = roadmapItemId,
-            DependsOnIssueIds = dependsOn.Distinct().ToList()
+            RepoRoot = state.RepoRoot,
+            Phase = state.Phase,
+            ActiveGoal = state.ActiveGoal,
+            Runtime = state.Runtime,
+            Modes = state.Modes.OrderBy(item => item.Slug).ToList(),
+            Issues = state.Issues.OrderBy(item => item.Id).ToList(),
+            Questions = state.Questions.OrderBy(item => item.Id).ToList(),
+            AgentSessions = state.AgentSessions.OrderBy(item => item.ScopeKey).ToList(),
+            Decisions = state.Decisions.OrderByDescending(item => item.CreatedAtUtc).Take(20).ToList(),
+            Pipelines = state.Pipelines.OrderBy(item => item.Id).ToList()
         };
-        state.Issues.Add(issue);
-        return issue;
+    }
+
+    public IReadOnlyList<IssueItem> GetReadyIssuesPreview(WorkspaceState state, int maxSubagents)
+    {
+        EnsurePipelineAssignments(state);
+        return GetReadyIssues(state, maxSubagents);
+    }
+
+    public DecisionRecord RecordDecision(
+        WorkspaceState state,
+        string title,
+        string detail,
+        string source,
+        int? issueId = null,
+        int? runId = null,
+        string? sessionId = null) =>
+        RememberDecision(state, title, detail, source, issueId, runId, sessionId);
+
+    public void MergeWorkspaceAdditions(WorkspaceState state, WorkspaceState externalState)
+    {
+        foreach (var question in externalState.Questions.Where(item => state.Questions.All(existing => existing.Id != item.Id)))
+        {
+            state.Questions.Add(question);
+        }
+
+        foreach (var issue in externalState.Issues.Where(item => state.Issues.All(existing => existing.Id != item.Id)))
+        {
+            state.Issues.Add(issue);
+        }
+
+        foreach (var session in externalState.AgentSessions.Where(item => state.AgentSessions.All(existing => !string.Equals(existing.ScopeKey, item.ScopeKey, StringComparison.OrdinalIgnoreCase))))
+        {
+            state.AgentSessions.Add(session);
+        }
+
+        foreach (var decision in externalState.Decisions.Where(item => state.Decisions.All(existing => existing.Id != item.Id)))
+        {
+            state.Decisions.Add(decision);
+        }
+
+        foreach (var pipeline in externalState.Pipelines.Where(item => state.Pipelines.All(existing => existing.Id != item.Id)))
+        {
+            state.Pipelines.Add(pipeline);
+        }
+
+        state.NextIssueId = Math.Max(state.NextIssueId, externalState.NextIssueId);
+        state.NextQuestionId = Math.Max(state.NextQuestionId, externalState.NextQuestionId);
+        state.NextDecisionId = Math.Max(state.NextDecisionId, externalState.NextDecisionId);
+        state.NextPipelineId = Math.Max(state.NextPipelineId, externalState.NextPipelineId);
+    }
+
+    public AgentSession GetOrCreateAgentSession(WorkspaceState state, int runId)
+    {
+        var run = state.AgentRuns.FirstOrDefault(item => item.Id == runId)
+            ?? throw new InvalidOperationException($"Run #{runId} was not found.");
+        var issue = state.Issues.FirstOrDefault(item => item.Id == run.IssueId)
+            ?? throw new InvalidOperationException($"Issue #{run.IssueId} was not found.");
+        var scope = DescribeSessionScope(issue);
+        var binding = state.AgentSessions.FirstOrDefault(item => string.Equals(item.ScopeKey, scope.ScopeKey, StringComparison.OrdinalIgnoreCase));
+        if (binding is null)
+        {
+            binding = new AgentSession
+            {
+                ScopeKey = scope.ScopeKey,
+                ScopeKind = scope.ScopeKind,
+                RoleSlug = issue.RoleSlug,
+                IssueId = scope.IssueId,
+                PipelineId = scope.PipelineId,
+                SessionId = BuildSessionId(state.RepoRoot, scope.ScopeKey, issue.RoleSlug),
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            state.AgentSessions.Add(binding);
+        }
+
+        binding.RoleSlug = issue.RoleSlug;
+        binding.IssueId = scope.IssueId;
+        binding.PipelineId = scope.PipelineId;
+        binding.LastRunId = runId;
+        binding.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        return binding;
     }
 
     public IReadOnlyList<string> GetKnownRoleSlugs(WorkspaceState state)
@@ -239,6 +357,7 @@ public sealed class DevTeamRuntime
                 Title = normalizedTitle,
                 Detail = proposal.Detail.Trim(),
                 Area = NormalizeArea(proposal.Area),
+                FamilyKey = NormalizeFamilyKey("", normalizedTitle, proposal.Area),
                 RoleSlug = normalizedRole,
                 Priority = proposal.Priority,
                 RoadmapItemId = sourceIssue.RoadmapItemId,
@@ -254,6 +373,7 @@ public sealed class DevTeamRuntime
     public LoopResult RunOnce(WorkspaceState state, int maxSubagents = 3)
     {
         var created = EnsureBootstrapPlan(state);
+        EnsurePipelineAssignments(state);
         var readyIssues = GetReadyIssues(state, maxSubagents);
         if (readyIssues.Count == 0)
         {
@@ -331,14 +451,17 @@ public sealed class DevTeamRuntime
             case "completed":
                 run.Status = AgentRunStatus.Completed;
                 issue.Status = ItemStatus.Done;
+                AdvancePipelineAfterCompletion(state, issue);
                 break;
             case "failed":
                 run.Status = AgentRunStatus.Failed;
                 issue.Status = ItemStatus.Open;
+                UpdatePipelineStatus(state, issue, PipelineStatus.Open, issue.Id);
                 break;
             case "blocked":
                 run.Status = AgentRunStatus.Blocked;
                 issue.Status = ItemStatus.Blocked;
+                UpdatePipelineStatus(state, issue, PipelineStatus.Blocked, issue.Id);
                 break;
             default:
                 throw new InvalidOperationException("Outcome must be one of: completed, failed, blocked.");
@@ -361,6 +484,11 @@ public sealed class DevTeamRuntime
         run.Status = AgentRunStatus.Running;
         run.SessionId = sessionId.Trim();
         run.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        var issue = state.Issues.FirstOrDefault(item => item.Id == run.IssueId);
+        if (issue is not null)
+        {
+            UpdatePipelineStatus(state, issue, PipelineStatus.Running, issue.Id);
+        }
     }
 
     public StatusReport BuildStatusReport(WorkspaceState state)
@@ -449,6 +577,11 @@ public sealed class DevTeamRuntime
             .Select(run => state.Issues.FirstOrDefault(issue => issue.Id == run.IssueId)?.Area)
             .Where(area => !string.IsNullOrWhiteSpace(area))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var reservedPipelineIds = activeRuns
+            .Select(run => state.Issues.FirstOrDefault(issue => issue.Id == run.IssueId)?.PipelineId)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .ToHashSet();
 
         var ready = state.Issues
             .Where(issue => issue.Status == ItemStatus.Open)
@@ -459,12 +592,34 @@ public sealed class DevTeamRuntime
             .ThenBy(issue => issue.Id)
             .ToList();
 
-        var selected = new List<IssueItem>();
         foreach (var issue in ready)
         {
-            if (selected.Count >= Math.Max(1, maxSubagents))
+            EnsurePipelineForIssue(state, issue);
+        }
+
+        var readyLeads = ready
+            .GroupBy(issue => issue.PipelineId ?? issue.Id)
+            .Select(group => group
+                .OrderByDescending(item => item.Priority)
+                .ThenBy(item => item.Id)
+                .First())
+            .OrderByDescending(issue => issue.Priority)
+            .ThenBy(issue => issue.Id)
+            .ToList();
+
+        var desiredConcurrency = DeterminePipelineConcurrency(state, readyLeads, maxSubagents);
+
+        var selected = new List<IssueItem>();
+        foreach (var issue in readyLeads)
+        {
+            if (selected.Count >= desiredConcurrency)
             {
                 break;
+            }
+
+            if (issue.PipelineId is int pipelineId && reservedPipelineIds.Contains(pipelineId))
+            {
+                continue;
             }
 
             if (!string.IsNullOrWhiteSpace(issue.Area) && reservedAreas.Contains(issue.Area))
@@ -473,6 +628,10 @@ public sealed class DevTeamRuntime
             }
 
             selected.Add(issue);
+            if (issue.PipelineId is int selectedPipelineId)
+            {
+                reservedPipelineIds.Add(selectedPipelineId);
+            }
             if (!string.IsNullOrWhiteSpace(issue.Area))
             {
                 reservedAreas.Add(issue.Area);
@@ -484,6 +643,178 @@ public sealed class DevTeamRuntime
 
     private static bool HasBlockingQuestions(WorkspaceState state) =>
         state.Questions.Any(question => question.Status == QuestionStatus.Open && question.IsBlocking);
+
+    private static void EnsurePipelineAssignments(WorkspaceState state)
+    {
+        foreach (var issue in state.Issues.Where(item => !item.IsPlanningIssue))
+        {
+            EnsurePipelineForIssue(state, issue);
+        }
+    }
+
+    private static void EnsurePipelineForIssue(WorkspaceState state, IssueItem issue)
+    {
+        if (issue.IsPlanningIssue || !state.Runtime.PipelineSchedulingEnabled)
+        {
+            return;
+        }
+
+        issue.FamilyKey = NormalizeFamilyKey(issue.FamilyKey, issue.Title, issue.Area);
+        if (issue.PipelineId is not null && state.Pipelines.Any(item => item.Id == issue.PipelineId.Value))
+        {
+            return;
+        }
+
+        var sequence = BuildPipelineSequence(state, issue.RoleSlug);
+        var pipeline = new PipelineState
+        {
+            Id = state.NextPipelineId++,
+            RootIssueId = issue.Id,
+            FamilyKey = issue.FamilyKey,
+            Area = issue.Area,
+            RoleSequence = sequence,
+            IssueIds = [issue.Id],
+            ActiveIssueId = issue.Status is ItemStatus.Done ? null : issue.Id,
+            Status = issue.Status switch
+            {
+                ItemStatus.Blocked => PipelineStatus.Blocked,
+                ItemStatus.InProgress => PipelineStatus.Running,
+                ItemStatus.Done when sequence.Count <= 1 => PipelineStatus.Completed,
+                _ => PipelineStatus.Open
+            },
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        issue.PipelineId = pipeline.Id;
+        issue.PipelineStageIndex ??= 0;
+        state.Pipelines.Add(pipeline);
+    }
+
+    private static List<string> BuildPipelineSequence(WorkspaceState state, string rootRoleSlug)
+    {
+        var normalized = ResolveRoleSlug(state, rootRoleSlug);
+        if (state.Runtime.DefaultPipelineRoles.Count > 0
+            && state.Runtime.DefaultPipelineRoles.Any(role => string.Equals(role, normalized, StringComparison.OrdinalIgnoreCase)))
+        {
+            return state.Runtime.DefaultPipelineRoles
+                .Where(role => state.Roles.Any(item => string.Equals(item.Slug, role, StringComparison.OrdinalIgnoreCase)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        List<string> sequence = normalized switch
+        {
+            "architect" => ["architect", "developer", "tester"],
+            "developer" or "backend-developer" or "frontend-developer" or "fullstack-developer" => [normalized, "tester"],
+            _ => [normalized]
+        };
+
+        return sequence
+            .Where(role => state.Roles.Any(item => string.Equals(item.Slug, role, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<string> GetDefaultPipelineRolesForMode(string modeSlug) =>
+        modeSlug.Trim().ToLowerInvariant() switch
+        {
+            "creative-writing" => ["architect", "developer", "reviewer"],
+            _ => ["architect", "developer", "tester"]
+        };
+
+    private static int DeterminePipelineConcurrency(WorkspaceState state, IReadOnlyList<IssueItem> readyLeads, int maxSubagents)
+    {
+        if (readyLeads.Count == 0)
+        {
+            return 0;
+        }
+
+        if (state.Phase == WorkflowPhase.Planning || maxSubagents <= 1)
+        {
+            return 1;
+        }
+
+        var desired = Math.Min(Math.Max(1, maxSubagents), readyLeads.Count);
+        if (readyLeads.Count == 1)
+        {
+            return 1;
+        }
+
+        var topPriority = readyLeads[0].Priority;
+        var secondPriority = readyLeads[1].Priority;
+        if (topPriority - secondPriority >= 20)
+        {
+            return 1;
+        }
+
+        return desired;
+    }
+
+    private static void AdvancePipelineAfterCompletion(WorkspaceState state, IssueItem issue)
+    {
+        if (issue.PipelineId is null)
+        {
+            return;
+        }
+
+        var pipeline = state.Pipelines.FirstOrDefault(item => item.Id == issue.PipelineId.Value);
+        if (pipeline is null)
+        {
+            return;
+        }
+
+        var currentStage = issue.PipelineStageIndex ?? 0;
+        if (currentStage >= pipeline.RoleSequence.Count - 1)
+        {
+            pipeline.ActiveIssueId = null;
+            pipeline.Status = PipelineStatus.Completed;
+            pipeline.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            return;
+        }
+
+        var nextStageIndex = currentStage + 1;
+        var nextIssue = state.Issues.FirstOrDefault(item =>
+            item.PipelineId == pipeline.Id && item.PipelineStageIndex == nextStageIndex);
+        if (nextIssue is null)
+        {
+            nextIssue = CreateIssue(
+                state,
+                issue.Title,
+                issue.Detail,
+                pipeline.RoleSequence[nextStageIndex],
+                Math.Max(1, issue.Priority - 5),
+                issue.RoadmapItemId,
+                [issue.Id],
+                issue.Area,
+                issue.FamilyKey,
+                issue.Id,
+                pipeline.Id,
+                nextStageIndex);
+            pipeline.IssueIds.Add(nextIssue.Id);
+        }
+
+        pipeline.ActiveIssueId = nextIssue.Id;
+        pipeline.Status = nextIssue.Status == ItemStatus.Blocked ? PipelineStatus.Blocked : PipelineStatus.Open;
+        pipeline.UpdatedAtUtc = DateTimeOffset.UtcNow;
+    }
+
+    private static void UpdatePipelineStatus(WorkspaceState state, IssueItem issue, PipelineStatus status, int? activeIssueId)
+    {
+        if (issue.PipelineId is null)
+        {
+            return;
+        }
+
+        var pipeline = state.Pipelines.FirstOrDefault(item => item.Id == issue.PipelineId.Value);
+        if (pipeline is null)
+        {
+            return;
+        }
+
+        pipeline.Status = status;
+        pipeline.ActiveIssueId = activeIssueId;
+        pipeline.UpdatedAtUtc = DateTimeOffset.UtcNow;
+    }
 
     private static ModelDefinition SelectModelForRole(WorkspaceState state, string roleSlug)
     {
@@ -544,6 +875,77 @@ public sealed class DevTeamRuntime
         };
         state.Decisions.Add(record);
         return record;
+    }
+
+    private static (string ScopeKey, string ScopeKind, int? IssueId, int? PipelineId) DescribeSessionScope(IssueItem issue)
+    {
+        if (issue.IsPlanningIssue || string.Equals(issue.RoleSlug, "orchestrator", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("workspace:orchestrator", "workspace", issue.Id, null);
+        }
+
+        if (issue.PipelineId is not null)
+        {
+            return ($"pipeline:{issue.PipelineId.Value}:role:{issue.RoleSlug}", "pipeline-role", null, issue.PipelineId);
+        }
+
+        return ($"issue:{issue.Id}:role:{issue.RoleSlug}", "issue", issue.Id, null);
+    }
+
+    private static string BuildSessionId(string repoRoot, string scopeKey, string roleSlug)
+    {
+        var normalizedRole = NormalizeArea(roleSlug);
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{Path.GetFullPath(repoRoot)}|{scopeKey}")))
+            .ToLowerInvariant()[..12];
+        return $"devteam-{normalizedRole}-{hash}";
+    }
+
+    private static string NormalizeFamilyKey(string? familyKey, string title, string? area)
+    {
+        if (!string.IsNullOrWhiteSpace(familyKey))
+        {
+            return BuildRoleKey(familyKey);
+        }
+
+        if (!string.IsNullOrWhiteSpace(area))
+        {
+            return NormalizeArea(area);
+        }
+
+        return BuildRoleKey(title);
+    }
+
+    private static IssueItem CreateIssue(
+        WorkspaceState state,
+        string title,
+        string detail,
+        string roleSlug,
+        int priority,
+        int? roadmapItemId,
+        IEnumerable<int> dependsOn,
+        string? area,
+        string? familyKey,
+        int? parentIssueId,
+        int? pipelineId,
+        int? pipelineStageIndex)
+    {
+        var issue = new IssueItem
+        {
+            Id = state.NextIssueId++,
+            Title = title.Trim(),
+            Detail = detail.Trim(),
+            Area = NormalizeArea(area),
+            FamilyKey = NormalizeFamilyKey(familyKey, title, area),
+            RoleSlug = ResolveRoleSlug(state, roleSlug),
+            Priority = priority,
+            RoadmapItemId = roadmapItemId,
+            DependsOnIssueIds = dependsOn.Distinct().ToList(),
+            ParentIssueId = parentIssueId,
+            PipelineId = pipelineId,
+            PipelineStageIndex = pipelineStageIndex
+        };
+        state.Issues.Add(issue);
+        return issue;
     }
 
     private static string ResolveRoleSlug(WorkspaceState state, string roleSlug)

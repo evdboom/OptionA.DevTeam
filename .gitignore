@@ -1,7 +1,10 @@
 # DevTeam runtime workspace
 .devteam/
-
+.devteam-*/
+!.devteam-source/
+!.devteam-source/**
 bin/
 obj/
 .vs/
+nupkg/
 

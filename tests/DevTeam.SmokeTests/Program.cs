@@ -7,8 +7,15 @@ var tests = new List<(string Name, Action Run)>
     ("Planning phase waits for plan approval", TestPlanningPhaseRequiresApproval),
     ("Blocking questions only halt when no ready work exists", TestBlockingQuestionWaitState),
     ("Premium cap forces fallback model", TestPremiumCapFallback),
+    ("Role suggested model overrides default policy", TestRoleSuggestedModelOverridesDefaultPolicy),
     ("CLI agent client builds a copilot invocation", TestCliAgentClientInvocationShape),
     ("SDK agent client is the default integration backend", TestSdkAgentClientFactory),
+    ("SDK session config wires workspace MCP server", TestSdkSessionConfigWiresWorkspaceMcp),
+    ("Orchestrator session is reused across planning retries", TestOrchestratorSessionIsReusedAcrossPlanningRetries),
+    ("Issue retries reuse the same session", TestIssueRetriesReuseTheSameSession),
+    ("Parallel pipelines keep isolated sessions", TestParallelPipelinesKeepIsolatedSessions),
+    ("Workspace loads default modes", TestWorkspaceLoadsModes),
+    ("Set mode updates active mode and pipeline defaults", TestSetModeUpdatesRuntimeConfiguration),
     ("DevTeam assets load from .devteam-source first", TestPromptAssetsPreferDevTeamSource),
     ("Run-loop executes queued work with normal verbosity", TestRunLoopExecutesWork),
     ("Run-loop resumes previously queued runs", TestRunLoopResumesQueuedRuns),
@@ -22,11 +29,21 @@ var tests = new List<(string Name, Action Run)>
     ("Role aliases are exposed for validation feedback", TestRoleAliasesExposed),
     ("Parallel loop executes independent areas concurrently", TestParallelLoopExecutesIndependentAreas),
     ("Conflict prevention avoids same-area parallel runs", TestConflictPreventionAvoidsSameAreaRuns),
+    ("Architect pipeline completion creates developer follow-up", TestArchitectPipelineCompletionCreatesDeveloperFollowUp),
+    ("Priority gap can reduce pipeline concurrency", TestPriorityGapReducesPipelineConcurrency),
+    ("Mode guardrails appear in agent prompt", TestModeGuardrailsAppearInPrompt),
+    ("Pipeline handoff appears in agent prompt", TestPipelineHandoffAppearsInPrompt),
     ("Collapsed response headers still parse cleanly", TestCollapsedResponseHeadersParseCleanly),
     ("Run artifacts capture superpowers and tools used", TestRunArtifactsCaptureUsageMetadata),
     ("Legacy workspaces hydrate missing roles and superpowers", TestLegacyWorkspaceHydratesMetadata),
     ("Friendly role names resolve to canonical roles", TestFriendlyRoleNamesResolve),
-    ("External repos fall back to packaged prompt assets", TestExternalReposFallBackToPackagedAssets)
+    ("External repos fall back to packaged prompt assets", TestExternalReposFallBackToPackagedAssets),
+    ("Git helper initializes repository when missing", TestGitHelperInitializesRepository),
+    ("Git helper stages only iteration changes", TestGitHelperStagesOnlyIterationChanges),
+    ("Loop stages changed files after iteration", TestLoopStagesChangedFilesAfterIteration),
+    ("Workspace manifest shards large collections", TestWorkspaceManifestShardsCollections),
+    ("Prompt asset bodies are not persisted in state files", TestPromptAssetsAreNotPersisted),
+    ("Parallel heartbeats cover all running issues", TestParallelHeartbeatsCoverAllRunningIssues)
 };
 
 var failures = new List<string>();
@@ -118,6 +135,17 @@ static void TestPremiumCapFallback()
     AssertEqual("gpt-5.4", result.QueuedRuns[0].ModelName, "Fallback model");
 }
 
+static void TestRoleSuggestedModelOverridesDefaultPolicy()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Use execution mode for frontend work.");
+    harness.Runtime.AddIssue(harness.State, "Implement HUD", "", "frontend-developer", 100, null, []);
+
+    var result = harness.Runtime.RunOnce(harness.State, 1);
+
+    AssertEqual("claude-sonnet-4.6", result.QueuedRuns[0].ModelName, "Role suggested model should take precedence.");
+}
+
 static void TestCliAgentClientInvocationShape()
 {
     using var harness = new TestHarness();
@@ -143,6 +171,149 @@ static void TestSdkAgentClientFactory()
 {
     var client = AgentClientFactory.Create("sdk");
     AssertEqual("copilot-sdk", client.Name, "SDK backend name");
+}
+
+static void TestSdkSessionConfigWiresWorkspaceMcp()
+{
+    using var harness = new TestHarness();
+    var request = new AgentInvocationRequest
+    {
+        Prompt = "Summarize the work.",
+        Model = "gpt-5.4",
+        SessionId = "architect-run-001",
+        WorkingDirectory = harness.RepoRoot,
+        WorkspacePath = harness.Store.WorkspacePath,
+        EnableWorkspaceMcp = true,
+        WorkspaceMcpServerName = "devteam-workspace",
+        ToolHostPath = @"C:\tools\DevTeam.Cli.dll"
+    };
+
+    var sessionConfig = WorkspaceMcpSessionConfigFactory.BuildSessionConfig(request);
+    var mcpServers = sessionConfig.McpServers ?? throw new InvalidOperationException("Session config should include MCP servers.");
+    AssertTrue(mcpServers.ContainsKey("devteam-workspace"), "Workspace MCP server should be registered.");
+    var server = mcpServers["devteam-workspace"] as GitHub.Copilot.SDK.McpLocalServerConfig;
+    AssertTrue(server is not null, "Workspace MCP server config should be local.");
+    AssertEqual("dotnet", server!.Command, "DLL-hosted MCP server should launch with dotnet.");
+    AssertTrue(server.Args.Contains("workspace-mcp"), "MCP command should invoke the workspace host.");
+    AssertTrue(server.Args.Contains(harness.Store.WorkspacePath), "MCP command should target the workspace path.");
+}
+
+static void TestWorkspaceLoadsModes()
+{
+    using var harness = new TestHarness();
+
+    AssertTrue(harness.State.Modes.Count >= 2, "Workspace should load at least the default modes.");
+    AssertTrue(harness.State.Modes.Any(mode => mode.Slug == "develop"), "Develop mode should be available.");
+    AssertTrue(harness.State.Modes.Any(mode => mode.Slug == "creative-writing"), "Creative writing mode should be available.");
+    AssertEqual("develop", harness.State.Runtime.ActiveModeSlug, "Develop should be the default active mode.");
+}
+
+static void TestOrchestratorSessionIsReusedAcrossPlanningRetries()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a reusable planning workflow.");
+    harness.Store.Save(harness.State);
+    var agent = new RecordingAgentClient(
+        "OUTCOME: completed\nSUMMARY:\nInitial planning pass complete.",
+        "OUTCOME: completed\nSUMMARY:\nPlanning updated after feedback.");
+    var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+
+    executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 1,
+            MaxSubagents = 1,
+            Verbosity = LoopVerbosity.Normal
+        }).GetAwaiter().GetResult();
+
+    harness.Runtime.RecordPlanningFeedback(harness.State, "Narrow the first milestone.");
+    harness.Store.Save(harness.State);
+
+    executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 1,
+            MaxSubagents = 1,
+            Verbosity = LoopVerbosity.Normal
+        }).GetAwaiter().GetResult();
+
+    AssertEqual(2, agent.Requests.Count, "Expected two orchestrator invocations.");
+    AssertEqual(agent.Requests[0].SessionId, agent.Requests[1].SessionId, "Planning retries should reuse the orchestrator session.");
+}
+
+static void TestIssueRetriesReuseTheSameSession()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    harness.Runtime.AddIssue(harness.State, "Implement core loop", "Build the first pass.", "developer", 100, null, []);
+    harness.Store.Save(harness.State);
+    var agent = new RecordingAgentClient(
+        "OUTCOME: failed\nSUMMARY:\nNeed another pass.",
+        "OUTCOME: completed\nSUMMARY:\nCompleted on retry.");
+    var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+
+    executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 1,
+            MaxSubagents = 1,
+            Verbosity = LoopVerbosity.Normal
+        }).GetAwaiter().GetResult();
+
+    executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 1,
+            MaxSubagents = 1,
+            Verbosity = LoopVerbosity.Normal
+        }).GetAwaiter().GetResult();
+
+    AssertEqual(2, agent.Requests.Count, "Expected two issue invocations.");
+    AssertEqual(agent.Requests[0].SessionId, agent.Requests[1].SessionId, "Issue retries should stay on the same session.");
+}
+
+static void TestParallelPipelinesKeepIsolatedSessions()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    harness.Runtime.AddIssue(harness.State, "Plan gameplay", "", "architect", 100, null, [], "gameplay");
+    harness.Runtime.AddIssue(harness.State, "Plan menus", "", "architect", 95, null, [], "menus");
+    harness.Store.Save(harness.State);
+    var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nPlanned.");
+    var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+
+    executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 1,
+            MaxSubagents = 2,
+            Verbosity = LoopVerbosity.Normal
+        }).GetAwaiter().GetResult();
+
+    AssertEqual(2, agent.Requests.Count, "Expected two parallel invocations.");
+    AssertTrue(agent.Requests.Select(item => item.SessionId).Distinct(StringComparer.Ordinal).Count() == 2,
+        "Separate pipelines should not share a session.");
+}
+
+static void TestSetModeUpdatesRuntimeConfiguration()
+{
+    using var harness = new TestHarness();
+
+    harness.Runtime.SetMode(harness.State, "creative-writing");
+
+    AssertEqual("creative-writing", harness.State.Runtime.ActiveModeSlug, "Mode should update.");
+    AssertTrue(harness.State.Runtime.DefaultPipelineRoles.SequenceEqual(["architect", "developer", "reviewer"]),
+        "Creative writing mode should swap the default pipeline roles.");
 }
 
 static void TestPromptAssetsPreferDevTeamSource()
@@ -189,7 +360,7 @@ static void TestRunLoopExecutesWork()
         "Normal verbosity should emit iteration logs.");
     AssertTrue(messages.Any(message => message.Contains("Phase: Execution", StringComparison.Ordinal)),
         "Normal verbosity should include the current phase.");
-    AssertEqual(2, harness.State.Issues.Count(item => item.Status == ItemStatus.Done), "Completed issue count");
+    AssertTrue(harness.State.Issues.Count(item => item.Status == ItemStatus.Done) >= 2, "Loop should complete at least the initially ready work.");
     AssertTrue(harness.State.Decisions.Count >= 3, "Loop should persist decisions.");
     AssertTrue(harness.State.AgentRuns.Any(run => !string.IsNullOrWhiteSpace(run.SessionId)),
         "Runs should record session ids.");
@@ -317,10 +488,7 @@ static void TestInitClearsLegacyArtifacts()
     }
     finally
     {
-        if (Directory.Exists(tempRoot))
-        {
-            Directory.Delete(tempRoot, true);
-        }
+        // Leave the temp repo behind to avoid flaky Windows file locking on .git objects during teardown.
     }
 }
 
@@ -484,6 +652,87 @@ static void TestConflictPreventionAvoidsSameAreaRuns()
     AssertEqual(1, result.QueuedRuns.Count(run => run.Area == "testing"), "Independent area should still queue.");
 }
 
+static void TestArchitectPipelineCompletionCreatesDeveloperFollowUp()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    var architectIssue = harness.Runtime.AddIssue(harness.State, "Design gameplay slice", "Outline the gameplay slice.", "architect", 100, null, [], "gameplay");
+
+    var queued = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, queued.QueuedRuns.Single().RunId, "completed", "Architecture complete.");
+
+    var developerIssue = harness.State.Issues.SingleOrDefault(issue => issue.ParentIssueId == architectIssue.Id && issue.RoleSlug == "developer");
+    AssertTrue(developerIssue is not null, "Architect completion should create a developer follow-up.");
+    AssertTrue(developerIssue!.DependsOnIssueIds.Contains(architectIssue.Id), "Developer follow-up should depend on the architect issue.");
+    AssertTrue(developerIssue.PipelineId == architectIssue.PipelineId, "Follow-up should stay in the same pipeline.");
+}
+
+static void TestPriorityGapReducesPipelineConcurrency()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    harness.Runtime.AddIssue(harness.State, "Critical architecture", "", "architect", 100, null, [], "alpha");
+    harness.Runtime.AddIssue(harness.State, "Lower priority implementation", "", "developer", 70, null, [], "beta");
+    harness.Runtime.AddIssue(harness.State, "Lower priority tests", "", "tester", 68, null, [], "gamma");
+
+    var result = harness.Runtime.RunOnce(harness.State, 3);
+
+    AssertEqual(1, result.QueuedRuns.Count, "Large priority gaps should allow the orchestrator to run a single pipeline.");
+    AssertEqual("Critical architecture", result.QueuedRuns.Single().Title, "The highest priority pipeline should win.");
+}
+
+static void TestModeGuardrailsAppearInPrompt()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    harness.Runtime.AddIssue(harness.State, "Build gameplay loop", "Create a playable gameplay loop.", "developer", 100, null, []);
+    harness.Store.Save(harness.State);
+    var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDone.");
+    var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+
+    executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 1,
+            MaxSubagents = 1,
+            Verbosity = LoopVerbosity.Normal
+        }).GetAwaiter().GetResult();
+
+    var prompt = agent.LastPrompt ?? throw new InvalidOperationException("Expected a prompt to be captured.");
+    AssertTrue(prompt.Contains("Active mode:", StringComparison.Ordinal), "Prompt should include the active mode.");
+    AssertTrue(prompt.Contains("Always build the changed project or solution", StringComparison.Ordinal), "Develop guardrails should be included in the prompt.");
+    AssertTrue(prompt.Contains("unit tests, integration tests", StringComparison.Ordinal), "Testing guardrails should be visible to the agent.");
+}
+
+static void TestPipelineHandoffAppearsInPrompt()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    var architectIssue = harness.Runtime.AddIssue(harness.State, "Plan gameplay loop", "Define the gameplay architecture.", "architect", 100, null, [], "gameplay");
+    var queued = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, queued.QueuedRuns.Single().RunId, "completed", "Use a simple game loop, obstacle spawner, and a shared collision model.");
+    harness.Store.Save(harness.State);
+    var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nImplemented the gameplay loop.");
+    var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+
+    executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 1,
+            MaxSubagents = 1,
+            Verbosity = LoopVerbosity.Normal
+        }).GetAwaiter().GetResult();
+
+    var prompt = agent.LastPrompt ?? throw new InvalidOperationException("Expected a prompt to be captured.");
+    AssertTrue(prompt.Contains("Pipeline handoff context:", StringComparison.Ordinal), "Prompt should include the pipeline handoff section.");
+    AssertTrue(prompt.Contains($"issue #{architectIssue.Id} [architect] Plan gameplay loop", StringComparison.Ordinal), "Prompt should identify the prior architect stage.");
+    AssertTrue(prompt.Contains("Use a simple game loop, obstacle spawner, and a shared collision model.", StringComparison.Ordinal), "Prompt should surface the prior stage summary.");
+}
+
 static void TestCollapsedResponseHeadersParseCleanly()
 {
     using var harness = new TestHarness();
@@ -583,15 +832,12 @@ static void TestLegacyWorkspaceHydratesMetadata()
 
         AssertTrue(loaded.Roles.Count > 0, "Legacy workspace should rehydrate roles on load.");
         AssertTrue(loaded.Superpowers.Count > 0, "Legacy workspace should rehydrate superpowers on load.");
-        AssertTrue(persistedJson.Contains("\"Roles\": [", StringComparison.Ordinal), "Hydrated workspace should be persisted back to disk.");
-        AssertTrue(!persistedJson.Contains("\"Roles\": []", StringComparison.Ordinal), "Persisted workspace should no longer have empty role metadata.");
+        AssertTrue(persistedJson.Contains("\"FormatVersion\": 4", StringComparison.Ordinal), "Hydrated workspace should be migrated to the current manifest format.");
+        AssertTrue(!File.Exists(Path.Combine(store.StateDirectoryPath, "roles.json")), "Derived role assets should not be persisted into state files.");
     }
     finally
     {
-        if (Directory.Exists(tempRoot))
-        {
-            Directory.Delete(tempRoot, true);
-        }
+        // Leave the temp repo behind to avoid flaky Windows file locking on .git objects during teardown.
     }
 }
 
@@ -622,9 +868,167 @@ static void TestExternalReposFallBackToPackagedAssets()
     {
         if (Directory.Exists(tempRoot))
         {
-            Directory.Delete(tempRoot, true);
+            TestFileSystem.DeleteDirectoryWithRetries(tempRoot);
         }
     }
+}
+
+static void TestGitHelperInitializesRepository()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+    try
+    {
+        AssertTrue(!GitWorkspace.IsGitRepository(tempRoot), "Temp folder should not start as a git repository.");
+
+        var initialized = GitWorkspace.EnsureRepository(tempRoot);
+
+        AssertTrue(initialized, "Git helper should initialize a repository when one is missing.");
+        AssertTrue(Directory.Exists(Path.Combine(tempRoot, ".git")), "Git init should create the .git directory.");
+        AssertTrue(GitWorkspace.IsGitRepository(tempRoot), "Folder should be recognized as a git repository after init.");
+    }
+    finally
+    {
+        // Leave the temp repo behind to avoid flaky Windows file locking on .git objects during teardown.
+    }
+}
+
+static void TestGitHelperStagesOnlyIterationChanges()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+    try
+    {
+        GitWorkspace.EnsureRepository(tempRoot);
+        File.WriteAllText(Path.Combine(tempRoot, "preexisting.txt"), "before");
+        var before = GitWorkspace.TryCaptureStatus(tempRoot);
+        File.WriteAllText(Path.Combine(tempRoot, "iteration.txt"), "after");
+
+        var staged = GitWorkspace.StagePathsChangedSince(tempRoot, before);
+        var status = RunGit(tempRoot, "status", "--porcelain=v1");
+
+        AssertTrue(staged.SequenceEqual(["iteration.txt"]), "Only the new iteration path should be staged.");
+        AssertTrue(status.Contains("A  iteration.txt", StringComparison.Ordinal), "Iteration file should be staged.");
+        AssertTrue(status.Contains("?? preexisting.txt", StringComparison.Ordinal), "Preexisting untracked file should remain unstaged.");
+    }
+    finally
+    {
+        // Leave the temp repo behind to avoid flaky Windows file locking on .git objects during teardown.
+    }
+}
+
+static void TestLoopStagesChangedFilesAfterIteration()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+    try
+    {
+        var repoRoot = Path.Combine(tempRoot, "repo");
+        Directory.CreateDirectory(repoRoot);
+        GitWorkspace.EnsureRepository(repoRoot);
+
+        var localStore = new WorkspaceStore(Path.Combine(tempRoot, ".loop-workspace"));
+        var localState = localStore.Initialize(repoRoot, 25, 6);
+        var localRuntime = new DevTeamRuntime();
+        localRuntime.ApprovePlan(localState, "Run in execution mode.");
+        localRuntime.AddIssue(localState, "Write output file", "", "developer", 100, null, []);
+        localStore.Save(localState);
+
+        var executor = new LoopExecutor(
+            localRuntime,
+            localStore,
+            _ => new FileWritingAgentClient("generated.txt", "OUTCOME: completed\nSUMMARY:\nDone."));
+
+        executor.RunAsync(
+            localState,
+            new LoopExecutionOptions
+            {
+                Backend = "sdk",
+                MaxIterations = 1,
+                MaxSubagents = 1,
+                Verbosity = LoopVerbosity.Normal
+            }).GetAwaiter().GetResult();
+
+        var status = RunGit(repoRoot, "status", "--porcelain=v1");
+        AssertTrue(status.Contains("A  generated.txt", StringComparison.Ordinal), "Loop should stage files changed during the iteration.");
+    }
+    finally
+    {
+        // Leave the temp repo behind to avoid flaky Windows file locking on .git objects during teardown.
+    }
+}
+
+static void TestWorkspaceManifestShardsCollections()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a large autonomous system.");
+    harness.Runtime.AddIssue(harness.State, "Design runtime", "Create the runtime plan.", "architect", 90, null, []);
+    harness.Runtime.AddQuestion(harness.State, "Should the project support plugins?", false);
+    harness.Store.Save(harness.State);
+
+    var manifestJson = File.ReadAllText(harness.Store.StatePath);
+    var issuesJson = File.ReadAllText(Path.Combine(harness.Store.StateDirectoryPath, "issues.json"));
+    var questionsJson = File.ReadAllText(Path.Combine(harness.Store.StateDirectoryPath, "questions.json"));
+
+    AssertTrue(manifestJson.Contains("\"FormatVersion\": 4", StringComparison.Ordinal), "Workspace should persist a manifest format version.");
+    AssertTrue(manifestJson.Contains("\"IssuesFile\": \"issues.json\"", StringComparison.Ordinal), "Manifest should point at the sharded issues file.");
+    AssertTrue(!manifestJson.Contains("\"Issues\":", StringComparison.Ordinal), "Manifest should not inline issue collections.");
+    AssertTrue(issuesJson.Contains("Design runtime", StringComparison.Ordinal), "Issues should be stored in the sharded issues file.");
+    AssertTrue(questionsJson.Contains("support plugins", StringComparison.Ordinal), "Questions should be stored in the sharded questions file.");
+}
+
+static void TestPromptAssetsAreNotPersisted()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Keep persisted context small.");
+    harness.Store.Save(harness.State);
+
+    var manifestJson = File.ReadAllText(harness.Store.StatePath);
+    var rolesPath = Path.Combine(harness.Store.StateDirectoryPath, "roles.json");
+    var superpowersPath = Path.Combine(harness.Store.StateDirectoryPath, "superpowers.json");
+
+    AssertTrue(harness.State.Roles.Count > 0, "Roles should still be available in memory for prompt building.");
+    AssertTrue(harness.State.Superpowers.Count > 0, "Superpowers should still be available in memory for prompt building.");
+    AssertTrue(!manifestJson.Contains("## Suggested Model", StringComparison.Ordinal), "Manifest should not inline prompt markdown bodies.");
+    AssertTrue(!File.Exists(rolesPath), "Roles should not be persisted into the state directory.");
+    AssertTrue(!File.Exists(superpowersPath), "Superpowers should not be persisted into the state directory.");
+}
+
+static void TestParallelHeartbeatsCoverAllRunningIssues()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    harness.Runtime.AddIssue(harness.State, "Short task", "", "developer", 100, null, [], "alpha");
+    harness.Runtime.AddIssue(harness.State, "Long task", "", "tester", 90, null, [], "beta");
+    harness.Store.Save(harness.State);
+    var messages = new List<string>();
+    var executor = new LoopExecutor(
+        harness.Runtime,
+        harness.Store,
+        _ => new FakeStaggeredAgentClient(
+            "OUTCOME: completed\nSUMMARY:\nDone.",
+            TimeSpan.FromMilliseconds(150),
+            TimeSpan.FromMilliseconds(350)));
+
+    executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 1,
+            MaxSubagents = 2,
+            HeartbeatInterval = TimeSpan.FromMilliseconds(100),
+            Verbosity = LoopVerbosity.Normal
+        },
+        messages.Add).GetAwaiter().GetResult();
+
+    var firstOutcomeIndex = messages.FindIndex(message => message.Contains("Outcome:", StringComparison.Ordinal));
+    var heartbeat1Index = messages.FindIndex(message => message.Contains("Still running issue #1", StringComparison.Ordinal));
+    var heartbeat2Index = messages.FindIndex(message => message.Contains("Still running issue #2", StringComparison.Ordinal));
+
+    AssertTrue(heartbeat1Index >= 0, "First issue should emit a heartbeat.");
+    AssertTrue(heartbeat2Index >= 0, "Second issue should emit a heartbeat while the first is still pending.");
+    AssertTrue(heartbeat2Index < firstOutcomeIndex, "Heartbeat for the second issue should appear before the first completion.");
 }
 
 static void AssertEqual<T>(T expected, T actual, string label)
@@ -641,6 +1045,42 @@ static void AssertTrue(bool value, string message)
     {
         throw new InvalidOperationException(message);
     }
+}
+
+static string RunGit(string workingDirectory, params string[] arguments)
+{
+    using var process = new System.Diagnostics.Process
+    {
+        StartInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        }
+    };
+
+    foreach (var argument in arguments)
+    {
+        process.StartInfo.ArgumentList.Add(argument);
+    }
+
+    if (!process.Start())
+    {
+        throw new InvalidOperationException("Failed to start git in tests.");
+    }
+
+    var stdout = process.StandardOutput.ReadToEnd();
+    var stderr = process.StandardError.ReadToEnd();
+    process.WaitForExit();
+    if (process.ExitCode != 0)
+    {
+        throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "Git command failed in tests." : stderr.Trim());
+    }
+
+    return stdout;
 }
 
 file sealed class TestHarness : IDisposable
@@ -665,7 +1105,7 @@ file sealed class TestHarness : IDisposable
     {
         if (Directory.Exists(TempRoot))
         {
-            Directory.Delete(TempRoot, true);
+            TestFileSystem.DeleteDirectoryWithRetries(TempRoot);
         }
     }
 
@@ -715,6 +1155,72 @@ file sealed class FakeAgentClient(string output) : IAgentClient
     }
 }
 
+file sealed class RecordingAgentClient : IAgentClient
+{
+    private readonly IReadOnlyList<string> _outputs;
+    private readonly object _gate = new();
+    private int _invocationCount;
+
+    public RecordingAgentClient(params string[] outputs)
+    {
+        _outputs = outputs.Length == 0
+            ? ["OUTCOME: completed\nSUMMARY:\nDone."]
+            : outputs;
+    }
+
+    public string Name => "recording-agent";
+    public string? LastPrompt { get; private set; }
+    public List<RecordedAgentRequest> Requests { get; } = [];
+
+    public Task<AgentInvocationResult> InvokeAsync(AgentInvocationRequest request, CancellationToken cancellationToken = default)
+    {
+        string output;
+        lock (_gate)
+        {
+            LastPrompt = request.Prompt;
+            Requests.Add(new RecordedAgentRequest
+            {
+                Prompt = request.Prompt,
+                SessionId = request.SessionId ?? "",
+                Model = request.Model ?? ""
+            });
+            output = _outputs[Math.Min(_invocationCount, _outputs.Count - 1)];
+            _invocationCount++;
+        }
+
+        return Task.FromResult(new AgentInvocationResult
+        {
+            BackendName = Name,
+            ExitCode = 0,
+            SessionId = request.SessionId ?? "",
+            StdOut = output
+        });
+    }
+}
+
+file sealed class RecordedAgentRequest
+{
+    public string Prompt { get; init; } = "";
+    public string SessionId { get; init; } = "";
+    public string Model { get; init; } = "";
+}
+
+file sealed class FileWritingAgentClient(string fileName, string output) : IAgentClient
+{
+    public string Name => "file-writing-agent";
+
+    public Task<AgentInvocationResult> InvokeAsync(AgentInvocationRequest request, CancellationToken cancellationToken = default)
+    {
+        File.WriteAllText(Path.Combine(request.WorkingDirectory, fileName), "generated");
+        return Task.FromResult(new AgentInvocationResult
+        {
+            BackendName = Name,
+            ExitCode = 0,
+            StdOut = output
+        });
+    }
+}
+
 file sealed class FakeConcurrentAgentClient(string output) : IAgentClient
 {
     private int _currentInvocations;
@@ -739,6 +1245,75 @@ file sealed class FakeConcurrentAgentClient(string output) : IAgentClient
         finally
         {
             Interlocked.Decrement(ref _currentInvocations);
+        }
+    }
+}
+
+file sealed class FakeStaggeredAgentClient(string output, params TimeSpan[] delays) : IAgentClient
+{
+    private int _invocationCount;
+
+    public string Name => "fake-staggered-agent";
+
+    public async Task<AgentInvocationResult> InvokeAsync(AgentInvocationRequest request, CancellationToken cancellationToken = default)
+    {
+        var invocation = Interlocked.Increment(ref _invocationCount) - 1;
+        var delay = invocation < delays.Length ? delays[invocation] : delays.LastOrDefault();
+        if (delay > TimeSpan.Zero)
+        {
+            await Task.Delay(delay, cancellationToken);
+        }
+
+        return new AgentInvocationResult
+        {
+            BackendName = Name,
+            ExitCode = 0,
+            StdOut = output
+        };
+    }
+}
+
+file static class TestFileSystem
+{
+    public static void DeleteDirectoryWithRetries(string path)
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                Directory.Delete(path, true);
+                return;
+            }
+            catch (IOException) when (attempt < 4)
+            {
+                Thread.Sleep(100);
+            }
+            catch (UnauthorizedAccessException) when (attempt < 4)
+            {
+                Thread.Sleep(100);
+            }
+        }
+
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                {
+                    try
+                    {
+                        File.SetAttributes(file, FileAttributes.Normal);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                Directory.Delete(path, true);
+            }
+        }
+        catch
+        {
         }
     }
 }
