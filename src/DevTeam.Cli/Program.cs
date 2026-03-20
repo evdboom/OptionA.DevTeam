@@ -34,6 +34,13 @@ try
 
         case "init":
         {
+            var force = GetBoolOption(options, "force", false);
+            if (!force && File.Exists(store.StatePath))
+            {
+                Console.Error.WriteLine($"Workspace already initialized at {Path.GetFullPath(workspacePath)}.");
+                Console.Error.WriteLine("Use --force to reinitialize (this will reset all workspace state).");
+                return 1;
+            }
             var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
             var premiumCap = GetDoubleOption(options, "premium-credit-cap", 6);
             var goal = GetOption(options, "goal") ?? GetPositionalValue(options);
@@ -389,6 +396,13 @@ static async Task<int> RunInteractiveShellAsync(
 
                 case "init":
                 {
+                    var force = GetBoolOption(options, "force", false);
+                    if (!force && File.Exists(store.StatePath))
+                    {
+                        Console.WriteLine($"Workspace already initialized at {store.WorkspacePath}.");
+                        Console.WriteLine("Use /init --force to reinitialize (this will reset all workspace state).");
+                        break;
+                    }
                     var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
                     var premiumCap = GetDoubleOption(options, "premium-credit-cap", 6);
                     var goal = GetOption(options, "goal") ?? GetPositionalValue(options);
@@ -806,7 +820,7 @@ static void PrintHelp()
     Console.WriteLine("DevTeam CLI");
     Console.WriteLine("Commands (plain or slash-prefixed, for example `/init`):");
     Console.WriteLine("  start [--workspace PATH]");
-    Console.WriteLine("  init [--workspace PATH] [--goal TEXT] [--mode SLUG] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false]");
+    Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT] [--mode SLUG] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false]");
     Console.WriteLine("  customize [--force]                Copy default roles, modes, and superpowers to .devteam-source/ for editing");
     Console.WriteLine("  set-goal <TEXT> [--workspace PATH]");
     Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
@@ -832,7 +846,7 @@ static void PrintHelp()
 static void PrintInteractiveHelp()
 {
     Console.WriteLine("Interactive commands:");
-    Console.WriteLine("  /init \"goal text\" [--mode SLUG]");
+    Console.WriteLine("  /init \"goal text\" [--force] [--mode SLUG]");
     Console.WriteLine("  /customize [--force]    Copy default assets to .devteam-source/ for editing");
     Console.WriteLine("  /status");
     Console.WriteLine("  /mode <slug>");
