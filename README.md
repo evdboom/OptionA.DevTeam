@@ -1,21 +1,50 @@
 # OptionA.DevTeam
 
-`OptionA.DevTeam` is a .NET global tool that runs a plan-first autonomous dev team from your terminal using Github Copilot.
+`OptionA.DevTeam` is a .NET global tool that runs a plan-first autonomous dev team from your terminal using GitHub Copilot.
 
-It helps you turn a goal into a reviewed plan, then executes the work through specialized roles such as planner, orchestrator, architect, developer, and tester. The CLI keeps a local workspace, tracks questions and decisions, and iterates through execution from the command line.
+Unlike single-prompt coding agents, DevTeam splits work into narrow issues with explicit dependencies, tracks decisions and questions, and schedules multi-role pipelines (architect → developer → tester) that execute concurrently when areas don't conflict. You stay in control through plan approval and feedback — the runtime does the iteration.
+
+## How it works
+
+```
+ You                          DevTeam                        Copilot SDK
+  │                              │                               │
+  │  /init --goal "..."          │                               │
+  ├─────────────────────────────►│                               │
+  │                              │                               │
+  │  /plan                       │  planner agent ──────────────►│
+  ├─────────────────────────────►│◄──────────── plan.md ─────────│
+  │◄──── show plan ──────────────│                               │
+  │                              │                               │
+  │  /approve                    │                               │
+  ├─────────────────────────────►│  orchestrator selects batch   │
+  │                              ├──────────────────────────────►│
+  │  /run                        │  architect ──────────────────►│
+  ├─────────────────────────────►│  developer ──────────────────►│
+  │                              │  tester ─────────────────────►│
+  │                              │◄──── results + new issues ────│
+  │                              │                               │
+  │                              │  reevaluate ─► next batch     │
+  │◄──── status / questions ─────│         ... loop repeats ...  │
+```
+
+1. **Plan** — the `planner` role creates an initial plan with roadmap items and issues.
+2. **Review** — you read the plan and either give feedback (which revises it) or approve.
+3. **Orchestrate** — the `orchestrator` evaluates the issue board and selects the next execution batch.
+4. **Execute** — worker roles (architect, developer, tester, etc.) run the selected issues. Each completed issue can propose follow-on issues, creating multi-role pipelines.
+5. **Loop** — the runtime reevaluates dependencies, advances pipelines, and repeats until done or budget is exhausted.
 
 ## What it does
 
-With `OptionA.DevTeam`, you can:
-
-- initialize a workspace for a new or existing repository
-- generate an initial plan and revise it with feedback
-- approve the plan before execution starts
-- run an execution loop with multiple agent roles
-- track questions, issues, decisions, and runs in a local workspace
-- switch between modes such as `develop` and `creative-writing`
-
-The default experience is built around software delivery. In `develop` mode, the runtime pushes agents toward building working software, validating it, and documenting what changed.
+- Initialize a workspace for a new or existing repository
+- Generate an initial plan and revise it with feedback before execution
+- Run an execution loop with specialized agent roles
+- Schedule multi-role pipelines (architect → developer → tester) automatically
+- Run independent areas concurrently while preventing conflicts
+- Track questions, issues, decisions, and budget in a local workspace
+- Expose a workspace MCP server so agents can read and write project state
+- Connect external MCP servers (e.g., Context7 for library docs) to every spawned agent
+- Switch between modes such as `develop` and `creative-writing`
 
 ## Installation
 
@@ -44,22 +73,10 @@ After installation, use the `devteam` command:
 devteam /help
 ```
 
-If you want to install a specific version:
-
-```powershell
-dotnet tool install --global OptionA.DevTeam --version 0.1.18
-```
-
-For local testing from a package folder:
-
-```powershell
-dotnet tool install --global --add-source .\nupkg OptionA.DevTeam --version 0.1.18
-```
-
 ## Requirements
 
-- .NET SDK 10
-- GitHub Copilot CLI installed and authenticated
+- [.NET SDK 10](https://dotnet.microsoft.com/download/dotnet/10.0)
+- [GitHub Copilot SDK](https://github.com/features/copilot) — the runtime uses the Copilot .NET SDK as its default backend. You must be authenticated with GitHub Copilot (via `gh auth login` or an active Copilot subscription).
 
 ## Quick start
 
@@ -75,19 +92,12 @@ For longer goals or markdown-based project briefs, load the goal from a file:
 devteam /init --workspace .devteam --goal-file .\goal.md
 ```
 
-This creates a local workspace and, if needed, initializes a git repository first.
+This creates a local workspace and, if needed, initializes a git repository.
 
 Start the interactive shell:
 
 ```powershell
 devteam /start --workspace .devteam
-```
-
-If you want DevTeam to keep Windows awake during long shell or loop sessions,
-enable it explicitly:
-
-```powershell
-devteam /set-keep-awake true --workspace .devteam
 ```
 
 Generate the first plan:
@@ -108,97 +118,81 @@ Run the execution loop:
 /run --max-iterations 5 --max-subagents 3
 ```
 
-## Typical CLI flow
+### Example session
 
-Initialize a workspace:
+```
+> devteam /init --workspace .devteam --goal "Build a CLI Tetris clone"
+  Workspace initialized at .devteam
+  Goal set: Build a CLI Tetris clone
 
-```powershell
-devteam /init --workspace .devteam --goal "Build an autonomous dev team runtime" --mode develop
+> devteam /start --workspace .devteam
+  DevTeam shell (type /help for commands)
+
+devteam> /plan
+  Running planner...
+  Plan written to .devteam\plan.md
+
+devteam> /approve Looks good.
+  Plan approved. Workspace moved to Execution phase.
+
+devteam> /run --max-iterations 5 --max-subagents 3
+  Iteration 1: orchestrator selected 2 issues
+    [ISS-1] architect: Define game architecture (pipeline 1)
+    [ISS-2] architect: Design rendering layer (pipeline 2)
+  Iteration 2: pipelines advanced
+    [ISS-3] developer: Implement game loop (pipeline 1)
+    [ISS-4] developer: Implement renderer (pipeline 2)
+  ...
+  Iteration 5: 3 pipelines completed, 1 question pending
+  Loop finished: waiting-for-input
 ```
 
-Open the shell:
-
-```powershell
-devteam /start --workspace .devteam
-```
-
-Common shell commands:
+## Interactive shell commands
 
 ```text
-/status
-/plan
-/questions
-/budget
-/keep-awake on
-/check-update
-/update
-/feedback Narrow the first milestone.
-/approve Start building.
-/run --max-iterations 5 --max-subagents 3
-/exit
+/status                                   Show workspace state
+/plan                                     Generate or show the plan
+/feedback <text>                          Revise the plan with feedback
+/approve [note]                           Approve the plan and move to execution
+/run [--max-iterations N] [--max-subagents N]  Run the execution loop
+/questions                                List open questions
+/answer-question <ID> <answer>            Answer a question
+/budget [--total N] [--premium N]         Show or adjust budget
+/keep-awake on|off                        Prevent Windows sleep during runs
+/check-update                             Check for newer versions
+/update                                   Update the global tool
+/exit                                     Exit the shell
 ```
-
-If no plan exists yet, `/plan` runs the planner for you, writes `.devteam\plan.md`, shows it in the shell, and waits for feedback or approval.
 
 ## Non-interactive usage
 
-Initialize a workspace:
+Every shell command also works as a standalone CLI invocation:
 
 ```powershell
 devteam /init --workspace .devteam --goal "Build a CLI Tetris clone"
+devteam /plan --workspace .devteam
+devteam /approve-plan --workspace .devteam --note "Looks good. Start building."
+devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3
+devteam /status --workspace .devteam
+devteam /questions --workspace .devteam
+devteam /answer-question 1 "Use keyboard controls only." --workspace .devteam
 ```
 
-You can also update the active goal from a markdown file later:
+Update the goal later:
 
 ```powershell
 devteam /set-goal --workspace .devteam --goal-file .\goal.md
 ```
 
-Generate and inspect a plan:
+Keep Windows awake during a long run:
 
 ```powershell
-devteam /plan --workspace .devteam
-```
-
-Approve the plan:
-
-```powershell
-devteam /approve-plan --workspace .devteam --note "Looks good. Start building."
-```
-
-Run the loop:
-
-```powershell
-devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3
-```
-
-One-off keep-awake override for a long run:
-
-```powershell
-devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3 --keep-awake true
-```
-
-Check status:
-
-```powershell
-devteam /status --workspace .devteam
-```
-
-List open questions:
-
-```powershell
-devteam /questions --workspace .devteam
-```
-
-Answer a question:
-
-```powershell
-devteam /answer-question 1 "Use keyboard controls only for the first version."
+devteam /run --workspace .devteam --max-iterations 10 --keep-awake true
 ```
 
 ## Modes
 
-The runtime supports mode-specific guardrails.
+The runtime supports mode-specific guardrails that shape how agents approach work.
 
 Switch modes with:
 
@@ -206,60 +200,130 @@ Switch modes with:
 devteam /set-mode creative-writing --workspace .devteam
 ```
 
-Current packaged modes:
+Packaged modes:
 
-- `develop`
-- `creative-writing`
+| Mode | Description |
+|------|-------------|
+| `develop` (default) | Build working software, add tests, validate builds |
+| `creative-writing` | Preserve voice, revise in passes, surface narrative gaps |
 
-`develop` is the default mode for software delivery.
+Mode guardrails are injected into every agent prompt so all roles follow the active mode's rules.
+
+## Pipelines
+
+When work is approved, the runtime automatically creates multi-role pipelines. For example, a feature issue assigned to `architect` will, on completion, generate a follow-up for `developer`, and then `tester`. Each stage must complete before the next starts.
+
+Independent pipelines (different `area` values) run concurrently. Pipelines in the same area are serialized to avoid merge conflicts.
+
+## Extending with MCP servers
+
+Spawned agents can access external tools through MCP (Model Context Protocol) servers. Two types are supported:
+
+### Workspace MCP server
+
+The runtime automatically exposes a local `devteam-workspace` MCP server that lets agents read and write workspace state (issues, questions, decisions). This is enabled by default and can be toggled:
+
+```powershell
+devteam /init --workspace .devteam --goal "..." --workspace-mcp true
+```
+
+### External MCP servers
+
+Declare additional MCP servers in `.devteam-source/MCP_SERVERS.json`. Every enabled server is registered with every Copilot SDK session, so all spawned agents can call their tools.
+
+```json
+[
+  {
+    "Name": "context7",
+    "Command": "npx",
+    "Args": ["-y", "@upstash/context7-mcp@latest"],
+    "Description": "Library documentation lookup via Context7.",
+    "Enabled": true
+  }
+]
+```
+
+Each entry supports:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `Name` | yes | Unique server name (used as the MCP server key) |
+| `Command` | yes | Executable to launch (e.g., `npx`, `node`, `dotnet`) |
+| `Args` | yes | Command-line arguments |
+| `Cwd` | no | Working directory (defaults to repo root) |
+| `Description` | no | Human-readable description |
+| `Enabled` | no | `true` by default; set `false` to disable without removing |
+
+Context7 ships as a default entry, giving every agent access to up-to-date library documentation.
 
 ## Customizing roles, modes, and superpowers
 
-DevTeam ships with built-in roles, modes, superpowers, and model policies. To
-customize them for your project, copy the defaults into your repo:
+DevTeam ships with built-in roles, modes, superpowers, and model policies. To customize them for your project, copy the defaults into your repo:
 
 ```powershell
 devteam /customize
 ```
 
-This creates a `.devteam-source/` directory in the current folder containing
-all packaged assets. Edit the markdown files to adjust behaviour:
+This creates a `.devteam-source/` directory containing all packaged assets:
 
-- `roles/` — agent personas (architect, developer, tester, …)
-- `modes/` — mode-specific guardrails (develop, creative-writing, …)
-- `superpowers/` — reusable skill prompts (tdd, review, debug, …)
-- `MODELS.json` — model selection policies per role
+```
+.devteam-source/
+├── roles/              Agent personas
+│   ├── architect.md
+│   ├── developer.md
+│   ├── tester.md
+│   ├── planner.md
+│   ├── orchestrator.md
+│   ├── reviewer.md
+│   └── ...
+├── modes/              Mode-specific guardrails
+│   ├── develop.md
+│   └── creative-writing.md
+├── superpowers/        Reusable skill prompts
+│   ├── tdd.md
+│   ├── review.md
+│   ├── debug.md
+│   └── ...
+├── MODELS.json         Model selection per role
+└── MCP_SERVERS.json    External MCP servers for agents
+```
 
-Project-level assets always override the packaged defaults. To reset a file,
-delete it and it will fall back to the built-in version.
+Edit the markdown files to adjust behavior. Roles and superpowers can declare tool expectations in frontmatter:
 
-Use `--force` to overwrite existing files with the latest packaged versions.
+```markdown
+---
+tools: rg, git, dotnet
+---
+# Role: Architect
+...
+```
 
-## How DevTeam works
-
-At a high level:
-
-1. `planner` creates the initial plan.
-2. You review it and approve it.
-3. `orchestrator` chooses the next execution batch.
-4. Worker roles execute the selected work.
-5. The loop reevaluates the workspace and repeats.
-
-The runtime stores its local state under the workspace directory, typically `.devteam`.
+Project-level assets always override the packaged defaults. To reset a file, delete it and the built-in version takes over. Use `--force` to overwrite existing files with the latest packaged versions.
 
 ## Workspace files
 
-The CLI writes its local runtime state to the workspace, including:
+The CLI writes its local runtime state under the workspace directory (typically `.devteam/`):
 
-- `workspace.json`
-- `state\issues.json`
-- `state\runs.json`
-- `state\decisions.json`
-- `questions.md`
-- `plan.md`
-- `issues\_index.md`
+```
+.devteam/
+├── workspace.json          Main manifest (phase, budget, runtime config)
+├── plan.md                 Generated plan (readable, versioned)
+├── questions.md            Open questions for the user
+├── state/
+│   ├── issues.json         Issue board
+│   ├── runs.json           Agent run history
+│   ├── sessions.json       Copilot session tracking
+│   ├── decisions.json      Architectural decisions
+│   ├── pipelines.json      Multi-role pipeline state
+│   └── ...
+├── issues/                 Markdown mirrors of the issue board
+│   ├── _index.md
+│   └── ISS-*.md
+├── runs/                   Per-run artifacts
+└── decisions/              Per-decision artifacts
+```
 
-You do not need to edit these files manually to use the tool, but they are there for visibility.
+You do not need to edit these files manually. They are there for visibility and version control.
 
 ## Packaging and local development
 
@@ -279,6 +343,12 @@ Pack the tool locally:
 
 ```powershell
 dotnet pack .\src\DevTeam.Cli\DevTeam.Cli.csproj -c Release -o .\nupkg
+```
+
+Install a local build:
+
+```powershell
+dotnet tool update --global --add-source .\nupkg OptionA.DevTeam
 ```
 
 ## License
