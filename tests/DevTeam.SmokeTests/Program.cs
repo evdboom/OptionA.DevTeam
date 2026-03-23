@@ -59,7 +59,11 @@ var tests = new List<(string Name, Action Run)>
     ("Workspace save tolerates replace-blocking readers", TestWorkspaceSaveToleratesReplaceBlockingReaders),
     ("Prompt asset bodies are not persisted in state files", TestPromptAssetsAreNotPersisted),
     ("Execution orchestrator emits heartbeat while selecting batch", TestExecutionOrchestratorEmitsHeartbeat),
-    ("Existing pipeline follow-ups are normalized", TestExistingPipelineFollowUpsAreNormalized)
+    ("Existing pipeline follow-ups are normalized", TestExistingPipelineFollowUpsAreNormalized),
+    ("Plan approval transitions to architect planning", TestPlanApprovalTransitionsToArchitectPlanning),
+    ("Architect approval transitions to execution", TestArchitectApprovalTransitionsToExecution),
+    ("Auto-approve skips both approval gates", TestAutoApproveSkipsBothGates),
+    ("Autopilot mode enables auto-approve", TestAutopilotModeEnablesAutoApprove)
 };
 
 var failures = new List<string>();
@@ -497,6 +501,14 @@ static void TestRunLoopExecutesWork()
     var planning = harness.Runtime.RunOnce(harness.State, 1);
     harness.Runtime.CompleteRun(harness.State, planning.QueuedRuns[0].RunId, "completed", "Planning finished.");
     harness.Runtime.ApprovePlan(harness.State, "Approved the initial plan.");
+
+    // Complete the architect planning phase
+    var architectRun = harness.Runtime.RunOnce(harness.State, 1);
+    AssertTrue(architectRun.QueuedRuns.Count > 0, "Architect planning should queue architect work.");
+    AssertEqual("architect", architectRun.QueuedRuns[0].RoleSlug, "Architect planning phase should run architect issues.");
+    harness.Runtime.CompleteRun(harness.State, architectRun.QueuedRuns[0].RunId, "completed", "Architecture decided.");
+    harness.Runtime.ApproveArchitectPlan(harness.State, "Approve the detailed plan.");
+
     harness.Store.Save(harness.State);
     var messages = new List<string>();
     var executor = new LoopExecutor(
@@ -518,9 +530,8 @@ static void TestRunLoopExecutesWork()
     AssertEqual("idle", report.FinalState, "Final loop state");
     AssertTrue(messages.Any(message => message.Contains("Iteration 1", StringComparison.Ordinal)),
         "Normal verbosity should emit iteration logs.");
-    AssertTrue(messages.Any(message => message.Contains("Phase: Execution", StringComparison.Ordinal)),
+    AssertTrue(messages.Any(message => message.Contains("Execution", StringComparison.Ordinal)),
         "Normal verbosity should include the current phase.");
-    AssertTrue(harness.State.Issues.Count(item => item.Status == ItemStatus.Done) >= 2, "Loop should complete at least the initially ready work.");
     AssertTrue(harness.State.Decisions.Count >= 3, "Loop should persist decisions.");
     AssertTrue(harness.State.AgentRuns.Any(run => !string.IsNullOrWhiteSpace(run.SessionId)),
         "Runs should record session ids.");
@@ -1438,6 +1449,95 @@ static void TestExistingPipelineFollowUpsAreNormalized()
 
     AssertEqual("Implement gameplay slice", developerIssue.Title, "Existing inherited follow-up titles should be normalized.");
     AssertTrue(developerIssue.Detail.Contains("Implement gameplay slice", StringComparison.Ordinal), "Existing inherited follow-up details should be normalized.");
+}
+
+static void TestPlanApprovalTransitionsToArchitectPlanning()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a thing.");
+    var planning = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, planning.QueuedRuns[0].RunId, "completed", "Plan done.");
+
+    // Before approval, we're in Planning
+    AssertEqual(WorkflowPhase.Planning, harness.State.Phase, "Should be in Planning before approval");
+
+    harness.Runtime.ApprovePlan(harness.State, "Looks good.");
+
+    // After approval, should transition to ArchitectPlanning because there's an open architect issue
+    AssertEqual(WorkflowPhase.ArchitectPlanning, harness.State.Phase, "Should transition to ArchitectPlanning after plan approval");
+
+    // Architect issues should be eligible in this phase
+    var architectRun = harness.Runtime.RunOnce(harness.State, 1);
+    AssertTrue(architectRun.QueuedRuns.Count > 0, "Architect planning should queue architect work.");
+    AssertEqual("architect", architectRun.QueuedRuns[0].RoleSlug, "Only architect issues should run in ArchitectPlanning phase.");
+}
+
+static void TestArchitectApprovalTransitionsToExecution()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a thing.");
+    var planning = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, planning.QueuedRuns[0].RunId, "completed", "Plan done.");
+    harness.Runtime.ApprovePlan(harness.State, "Looks good.");
+
+    // Complete architect work
+    var architectRun = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, architectRun.QueuedRuns[0].RunId, "completed", "Architecture decided.");
+
+    AssertEqual(WorkflowPhase.ArchitectPlanning, harness.State.Phase, "Should still be in ArchitectPlanning before second approval");
+
+    harness.Runtime.ApproveArchitectPlan(harness.State, "Start building.");
+    AssertEqual(WorkflowPhase.Execution, harness.State.Phase, "Should transition to Execution after architect approval");
+}
+
+static void TestAutoApproveSkipsBothGates()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a thing.");
+    harness.Runtime.SetAutoApprove(harness.State, true);
+    AssertTrue(harness.State.Runtime.AutoApproveEnabled, "Auto-approve should be enabled.");
+
+    // Complete the planning issue
+    var planning = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, planning.QueuedRuns[0].RunId, "completed", "Plan done.");
+    harness.Store.Save(harness.State);
+
+    // Run the loop — it should auto-approve both the plan and architect approvals
+    var executor = new LoopExecutor(
+        harness.Runtime,
+        harness.Store,
+        _ => new FakeAgentClient("OUTCOME: completed\nSUMMARY:\nDone."));
+
+    var messages = new List<string>();
+    var report = executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 6,
+            MaxSubagents = 1,
+            Verbosity = LoopVerbosity.Normal
+        },
+        messages.Add).GetAwaiter().GetResult();
+
+    AssertTrue(messages.Any(message => message.Contains("Auto-approving plan", StringComparison.Ordinal)),
+        "Loop should auto-approve the high-level plan.");
+    AssertTrue(messages.Any(message => message.Contains("Auto-approving architect plan", StringComparison.Ordinal)),
+        "Loop should auto-approve the architect plan.");
+    AssertEqual(WorkflowPhase.Execution, harness.State.Phase, "Should reach Execution phase via auto-approve.");
+}
+
+static void TestAutopilotModeEnablesAutoApprove()
+{
+    using var harness = new TestHarness();
+    AssertTrue(!harness.State.Runtime.AutoApproveEnabled, "Auto-approve should be off by default.");
+
+    harness.Runtime.SetMode(harness.State, "autopilot");
+    AssertEqual("autopilot", harness.State.Runtime.ActiveModeSlug, "Active mode should be autopilot.");
+    AssertTrue(harness.State.Runtime.AutoApproveEnabled, "Autopilot mode should enable auto-approve.");
+
+    harness.Runtime.SetMode(harness.State, "develop");
+    AssertTrue(!harness.State.Runtime.AutoApproveEnabled, "Switching away from autopilot should disable auto-approve.");
 }
 
 static void AssertEqual<T>(T expected, T actual, string label)

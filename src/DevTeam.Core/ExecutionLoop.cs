@@ -60,12 +60,35 @@ public sealed class LoopExecutor(
                     finalState = orchestration.State;
                     runsToExecute = orchestration.QueuedRuns.ToList();
                 }
+                else if (state.Phase == WorkflowPhase.ArchitectPlanning)
+                {
+                    var result = _runtime.RunOnce(state, options.MaxSubagents);
+                    finalState = result.State;
+                    created = result.Created.ToArray();
+                    runsToExecute = result.QueuedRuns.ToList();
+
+                    if (finalState == "awaiting-architect-approval" && state.Runtime.AutoApproveEnabled)
+                    {
+                        Log(log, options.Verbosity, "  Auto-approving architect plan (auto-approve enabled).");
+                        _runtime.ApproveArchitectPlan(state, "Auto-approved by runtime.");
+                        _store.Save(state);
+                        continue;
+                    }
+                }
                 else
                 {
                     var result = _runtime.RunOnce(state, options.MaxSubagents);
                     finalState = result.State;
                     created = result.Created.ToArray();
                     runsToExecute = result.QueuedRuns.ToList();
+
+                    if (finalState == "awaiting-plan-approval" && state.Runtime.AutoApproveEnabled)
+                    {
+                        Log(log, options.Verbosity, "  Auto-approving plan (auto-approve enabled).");
+                        _runtime.ApprovePlan(state, "Auto-approved by runtime.");
+                        _store.Save(state);
+                        continue;
+                    }
                 }
             }
             else
@@ -73,13 +96,12 @@ public sealed class LoopExecutor(
                 finalState = "queued";
             }
 
-            Log(log, options.Verbosity, $"Iteration {iteration}: state={finalState}");
+            Log(log, options.Verbosity, $"Iteration {iteration}: {state.Phase}");
             if (created.Length > 0)
             {
-                Log(log, options.Verbosity, $"  Bootstrapped: {string.Join(", ", created)}");
+                LogDetailed(log, options.Verbosity, $"  Bootstrapped: {string.Join(", ", created)}");
             }
 
-            Log(log, options.Verbosity, $"  Phase: {state.Phase}");
             LogQueuedPipelines(state, runsToExecute, log, options.Verbosity);
 
             if (finalState != "queued")
@@ -95,7 +117,8 @@ public sealed class LoopExecutor(
                 var session = _runtime.GetOrCreateAgentSession(state, queuedRun.RunId);
                 var sessionId = session.SessionId;
                 _runtime.StartRun(state, queuedRun.RunId, sessionId);
-                Log(log, options.Verbosity, $"  Running issue #{queuedRun.IssueId} as {queuedRun.RoleSlug} via {queuedRun.ModelName} (session {sessionId}, scope {session.ScopeKind}, area {(string.IsNullOrWhiteSpace(queuedRun.Area) ? "none" : queuedRun.Area)}, timeout {options.AgentTimeout.TotalSeconds:0}s)");
+                Log(log, options.Verbosity, $"  Running issue #{queuedRun.IssueId} as {queuedRun.RoleSlug} via {queuedRun.ModelName}");
+                LogDetailed(log, options.Verbosity, $"    Session {sessionId}, scope {session.ScopeKind}, area {(string.IsNullOrWhiteSpace(queuedRun.Area) ? "none" : queuedRun.Area)}, timeout {options.AgentTimeout.TotalSeconds:0}s");
                 pendingRuns.Add(new PendingAgentRun(
                     queuedRun,
                     sessionId,
@@ -165,11 +188,12 @@ public sealed class LoopExecutor(
                 }
             }
 
-            Log(log, options.Verbosity, "  Finalizing iteration and staging changed paths...");
+            LogBudget(state, log, options.Verbosity);
+            LogDetailed(log, options.Verbosity, "  Finalizing iteration and staging changed paths...");
             var stagedPaths = GitWorkspace.StagePathsChangedSince(state.RepoRoot, gitStatusBeforeIteration);
             if (stagedPaths.Count > 0)
             {
-                Log(log, options.Verbosity, $"  Staged {stagedPaths.Count} path(s) for the next orchestrator pass.");
+                LogDetailed(log, options.Verbosity, $"  Staged {stagedPaths.Count} path(s) for the next orchestrator pass.");
             }
         }
 
@@ -221,6 +245,20 @@ public sealed class LoopExecutor(
         {
             log?.Invoke(message);
         }
+    }
+
+    private static void LogDetailed(Action<string>? log, LoopVerbosity verbosity, string message)
+    {
+        if (verbosity == LoopVerbosity.Detailed)
+        {
+            log?.Invoke(message);
+        }
+    }
+
+    private static void LogBudget(WorkspaceState state, Action<string>? log, LoopVerbosity verbosity)
+    {
+        var b = state.Budget;
+        Log(log, verbosity, $"  Budget: {b.CreditsCommitted:0.##}/{b.TotalCreditCap:0.##} credits used ({b.PremiumCreditsCommitted:0.##}/{b.PremiumCreditCap:0.##} premium)");
     }
 
     private static void LogQueuedPipelines(
@@ -645,7 +683,7 @@ public sealed class LoopExecutor(
     }
 }
 
-internal static class AgentPromptBuilder
+public static class AgentPromptBuilder
 {
     private static readonly Dictionary<string, string[]> RoleSuperpowerMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -751,6 +789,71 @@ internal static class AgentPromptBuilder
         TOOLS_USED:
         - <tool name or command>
         List the concrete tools or commands you actually used. If none, write `(none)`.
+        QUESTIONS:
+        - [blocking] <question text>
+        - [non-blocking] <question text>
+        If you do not need user input, write `(none)` under QUESTIONS.
+        """;
+    }
+
+    public static string BuildAdHocPrompt(WorkspaceState state, string roleSlug, string userMessage)
+    {
+        var role = state.Roles.FirstOrDefault(item => string.Equals(item.Slug, roleSlug, StringComparison.OrdinalIgnoreCase));
+        var activeMode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase))
+            ?? state.Modes.FirstOrDefault();
+        var roleBody = role?.Body ?? $"# Role: {roleSlug}";
+        var superpowers = ResolveSuperpowers(state, roleSlug);
+        var superpowerBlock = superpowers.Count == 0
+            ? "(none)"
+            : string.Join("\n\n---\n\n", superpowers.Select(item => item.Body.Trim()));
+        var availableRoles = string.Join(", ", state.Roles.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+
+        return $"""
+        You are working inside the DevTeam runtime. A human team member is addressing you directly.
+
+        Current phase:
+        {state.Phase}
+
+        Active goal:
+        {state.ActiveGoal?.GoalText ?? "(no active goal)"}
+
+        Active mode:
+        {(activeMode is null ? state.Runtime.ActiveModeSlug : $"{activeMode.Slug} ({activeMode.Name})")}
+
+        Mode guardrails:
+        {(activeMode?.Body.Trim() ?? "(none)")}
+
+        Role instructions:
+        {roleBody.Trim()}
+
+        Relevant superpowers:
+        {superpowerBlock}
+
+        Workspace MCP:
+        {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Use it to inspect current workspace state and to persist newly discovered issues, questions, and decisions." : "No workspace MCP server is available in this session.")}
+
+        Open questions:
+        {BuildQuestionBlock(state)}
+
+        Recent decisions:
+        {BuildDecisionBlock(state)}
+
+        Valid role slugs for ISSUES:
+        {availableRoles}
+
+        User message:
+        {userMessage}
+
+        Task:
+        Respond to the user's message using your role expertise and the available tools. Be conversational and direct. If you discover work that should be tracked, propose it under ISSUES. If you need information from the user, put it under QUESTIONS.
+
+        Reply in exactly this shape:
+        OUTCOME: completed|blocked|failed
+        SUMMARY:
+        <your response to the user>
+        ISSUES:
+        - role=<role>; area=<area-or-none>; priority=<1-100>; depends=<ids-or-none>; title=<title>; detail=<detail>
+        If no issues should be created, write `(none)` under ISSUES.
         QUESTIONS:
         - [blocking] <question text>
         - [non-blocking] <question text>
@@ -1212,7 +1315,7 @@ public sealed record RunProgressSnapshot(
     string Title,
     TimeSpan Elapsed);
 
-internal sealed record ParsedAgentResponse(
+public sealed record ParsedAgentResponse(
     string Outcome,
     string Summary,
     IReadOnlyList<int> SelectedIssueIds,

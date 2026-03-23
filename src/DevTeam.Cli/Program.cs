@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Text;
 using DevTeam.Cli;
 using DevTeam.Core;
+using ReadLine = System.ReadLine;
 
 var command = NormalizeCommand(args.Length == 0 ? "help" : args[0]);
 var options = ParseOptions(args.Skip(1).ToArray());
@@ -53,6 +54,7 @@ try
             state.Runtime.KeepAwakeEnabled = GetBoolOption(options, "keep-awake", state.Runtime.KeepAwakeEnabled);
             state.Runtime.WorkspaceMcpEnabled = GetBoolOption(options, "workspace-mcp", true);
             state.Runtime.PipelineSchedulingEnabled = GetBoolOption(options, "pipeline-scheduling", true);
+            state.Runtime.AutoApproveEnabled = GetBoolOption(options, "auto-approve", state.Runtime.AutoApproveEnabled);
             if (!string.IsNullOrWhiteSpace(mode))
             {
                 runtime.SetMode(state, mode);
@@ -181,9 +183,37 @@ try
         {
             var state = store.Load();
             var note = GetOption(options, "note") ?? GetPositionalValue(options) ?? "User approved the current plan.";
-            runtime.ApprovePlan(state, note);
+            if (state.Phase == WorkflowPhase.ArchitectPlanning)
+            {
+                runtime.ApproveArchitectPlan(state, note);
+                store.Save(state);
+                Console.WriteLine("Approved the architect plan. Execution work can now begin.");
+            }
+            else
+            {
+                runtime.ApprovePlan(state, note);
+                store.Save(state);
+                if (state.Phase == WorkflowPhase.ArchitectPlanning)
+                {
+                    Console.WriteLine("Approved the high-level plan. Architect planning phase is next — run the loop to let the architect design the execution plan, then approve again.");
+                }
+                else
+                {
+                    Console.WriteLine("Approved the current plan. Execution work can now continue.");
+                }
+            }
+            return 0;
+        }
+
+        case "set-auto-approve":
+        {
+            var state = store.Load();
+            var requested = GetPositionalValue(options) ?? GetOption(options, "enabled")
+                ?? throw new InvalidOperationException("Usage: set-auto-approve <true|false> [--workspace PATH]");
+            var enabled = ParseBoolOrThrow(requested, "Usage: set-auto-approve <true|false> [--workspace PATH]");
+            runtime.SetAutoApprove(state, enabled);
             store.Save(state);
-            Console.WriteLine("Approved the current plan. Execution work can now continue.");
+            Console.WriteLine($"Updated auto-approve setting to {(enabled ? "enabled" : "disabled")}.");
             return 0;
         }
 
@@ -324,9 +354,9 @@ static async Task<int> RunInteractiveShellAsync(
 {
     using var keepAwakeController = new KeepAwakeController();
     var shellKeepAwakeEnabled = GetNullableBoolOption(startOptions, "keep-awake");
-    Console.WriteLine("DevTeam interactive shell");
-    Console.WriteLine($"Workspace: {store.WorkspacePath}");
-    Console.WriteLine("Type /help for commands. Type /exit to quit.");
+    Console.WriteLine(ConsoleTheme.Label("DevTeam interactive shell"));
+    Console.WriteLine($"Workspace: {ConsoleTheme.Accent(store.WorkspacePath)}");
+    Console.WriteLine($"Type {ConsoleTheme.Command("/help")} for commands. {ConsoleTheme.Command("/exit")} to quit. {ConsoleTheme.Muted("Tab to autocomplete.")}"  );
     await NotifyAboutAvailableUpdateAsync(toolUpdateService);
     TryLoadState(store, out var initialState);
     if (shellKeepAwakeEnabled is null)
@@ -334,6 +364,9 @@ static async Task<int> RunInteractiveShellAsync(
         shellKeepAwakeEnabled = initialState?.Runtime.KeepAwakeEnabled ?? false;
     }
     ApplyKeepAwakeSetting(keepAwakeController, shellKeepAwakeEnabled.Value, interactiveShell: true, Console.WriteLine);
+
+    ReadLine.HistoryEnabled = true;
+    ReadLine.AutoCompletionHandler = new ShellAutoCompleteHandler();
 
     while (true)
     {
@@ -344,15 +377,15 @@ static async Task<int> RunInteractiveShellAsync(
             var openQuestions = state.Questions.Where(item => item.Status == QuestionStatus.Open).ToList();
             if (openQuestions.Count > 0)
             {
-                Console.WriteLine($"Open questions: {openQuestions.Count} (see {Path.Combine(store.WorkspacePath, "questions.md")})");
+                Console.WriteLine($"{ConsoleTheme.Warning($"{openQuestions.Count} open question{(openQuestions.Count == 1 ? "" : "s")}")} — use {ConsoleTheme.Command("/questions")} to list or {ConsoleTheme.Command("/answer")} <id> <text>");
             }
         }
         catch
         {
         }
 
-        Console.Write("devteam> ");
-        var line = Console.ReadLine();
+        ConsoleTheme.WritePrompt("devteam> ");
+        var line = Console.IsInputRedirected ? Console.ReadLine() : ReadLine.Read("");
         if (line is null)
         {
             return 0;
@@ -364,6 +397,25 @@ static async Task<int> RunInteractiveShellAsync(
             continue;
         }
 
+        if (line.StartsWith("@", StringComparison.Ordinal) && state is not null)
+        {
+            var spaceIndex = line.IndexOf(' ');
+            var roleInput = spaceIndex > 1 ? line[1..spaceIndex] : line[1..];
+            var userMessage = spaceIndex > 1 ? line[(spaceIndex + 1)..].Trim() : "";
+            if (string.IsNullOrWhiteSpace(userMessage))
+            {
+                Console.WriteLine($"Usage: {ConsoleTheme.Command("@role")} <message>");
+                continue;
+            }
+            if (!runtime.TryResolveRoleSlug(state, roleInput, out var roleSlug))
+            {
+                Console.WriteLine($"Unknown role '{ConsoleTheme.Warning(roleInput)}'. Known roles: {string.Join(", ", runtime.GetKnownRoleSlugs(state).OrderBy(s => s))}");
+                continue;
+            }
+            await InvokeRoleDirectAsync(store, runtime, state, roleSlug, userMessage);
+            continue;
+        }
+
         if (!line.StartsWith("/", StringComparison.Ordinal) && state is not null)
         {
             var openQuestions = state.Questions.Where(item => item.Status == QuestionStatus.Open).ToList();
@@ -371,7 +423,19 @@ static async Task<int> RunInteractiveShellAsync(
             {
                 runtime.AnswerQuestion(state, openQuestions[0].Id, line);
                 store.Save(state);
-                Console.WriteLine($"Answered question #{openQuestions[0].Id}.");
+                var stillOpen = state.Questions.Count(q => q.Status == QuestionStatus.Open);
+                if (stillOpen == 0)
+                {
+                    Console.WriteLine($"Answered question #{openQuestions[0].Id}. {ConsoleTheme.Success("All questions resolved.")}");
+                    if (state.Phase == WorkflowPhase.Planning)
+                    {
+                        Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to move forward or type feedback to revise the plan.");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"Answered question #{openQuestions[0].Id}. {ConsoleTheme.Muted($"{stillOpen} remaining.")}");
+                }
                 continue;
             }
 
@@ -561,9 +625,61 @@ static async Task<int> RunInteractiveShellAsync(
                 {
                     var current = store.Load();
                     var note = GetOption(options, "note") ?? GetPositionalValue(options) ?? "User approved the current plan.";
-                    runtime.ApprovePlan(current, note);
-                    store.Save(current);
-                    Console.WriteLine("Approved the current plan.");
+                    if (current.Phase == WorkflowPhase.ArchitectPlanning)
+                    {
+                        runtime.ApproveArchitectPlan(current, note);
+                        store.Save(current);
+                        Console.WriteLine(ConsoleTheme.Success("Approved the architect plan. Execution phase begins."));
+                        Console.Write($"Run the execution loop now? ({ConsoleTheme.Command("Y")}/n) ");
+                        var answer = (Console.IsInputRedirected ? Console.ReadLine() : ReadLine.Read(""))?.Trim();
+                        if (string.IsNullOrEmpty(answer) || answer.StartsWith("y", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var report = await RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: true);
+                            Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
+                            PrintBudget(current.Budget);
+                        }
+                    }
+                    else
+                    {
+                        runtime.ApprovePlan(current, note);
+                        store.Save(current);
+                        if (current.Phase == WorkflowPhase.ArchitectPlanning)
+                        {
+                            Console.WriteLine(ConsoleTheme.Success("Approved the high-level plan.") + $" Phase: {ConsoleTheme.Phase("ArchitectPlanning")}");
+                            Console.Write($"Run the architect planning loop now? ({ConsoleTheme.Command("Y")}/n) ");
+                            var answer = (Console.IsInputRedirected ? Console.ReadLine() : ReadLine.Read(""))?.Trim();
+                            if (string.IsNullOrEmpty(answer) || answer.StartsWith("y", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var report = await RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: true);
+                                Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
+                                PrintBudget(current.Budget);
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine(ConsoleTheme.Success("Approved the current plan."));
+                        }
+                    }
+                    break;
+                }
+
+                case "set-auto-approve":
+                case "auto-approve":
+                {
+                    var current = TryLoadState(store, out var loadedState) ? loadedState : null;
+                    var requested = GetPositionalValue(options) ?? GetOption(options, "enabled");
+                    if (string.IsNullOrWhiteSpace(requested))
+                    {
+                        Console.WriteLine($"Auto-approve: {(current?.Runtime.AutoApproveEnabled == true ? "enabled" : "disabled")}.");
+                        break;
+                    }
+                    var enabled = ParseBoolOrThrow(requested, "Usage: /auto-approve <on|off>");
+                    if (current is not null)
+                    {
+                        runtime.SetAutoApprove(current, enabled);
+                        store.Save(current);
+                    }
+                    Console.WriteLine($"Auto-approve {(enabled ? "enabled" : "disabled")}.");
                     break;
                 }
 
@@ -592,7 +708,19 @@ static async Task<int> RunInteractiveShellAsync(
 
                     runtime.AnswerQuestion(current, int.Parse(values[0]), string.Join(" ", values.Skip(1)));
                     store.Save(current);
-                    Console.WriteLine($"Answered question #{values[0]}.");
+                    var remaining = current.Questions.Count(q => q.Status == QuestionStatus.Open);
+                    if (remaining == 0)
+                    {
+                        Console.WriteLine($"Answered question #{values[0]}. {ConsoleTheme.Success("All questions resolved.")}");
+                        if (current.Phase == WorkflowPhase.Planning)
+                        {
+                            Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to move forward or type feedback to revise the plan.");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Answered question #{values[0]}. {ConsoleTheme.Muted($"{remaining} remaining.")}");
+                    }
                     break;
                 }
 
@@ -649,7 +777,7 @@ static async Task<int> RunInteractiveShellAsync(
                 }
 
                 default:
-                    Console.WriteLine($"Unknown command '{tokens[0]}'. Type /help.");
+                    Console.WriteLine($"Unknown command '{ConsoleTheme.Warning(tokens[0])}'. Type {ConsoleTheme.Command("/help")}.");
                     break;
             }
         }
@@ -657,6 +785,92 @@ static async Task<int> RunInteractiveShellAsync(
         {
             Console.WriteLine(ex.Message);
         }
+    }
+}
+
+static async Task InvokeRoleDirectAsync(
+    WorkspaceStore store,
+    DevTeamRuntime runtime,
+    WorkspaceState state,
+    string roleSlug,
+    string userMessage)
+{
+    var policy = runtime.GetRoleModelPolicy(state, roleSlug);
+    var model = policy.PrimaryModel;
+    var cost = state.Models.FirstOrDefault(m => string.Equals(m.Name, model, StringComparison.OrdinalIgnoreCase))?.Cost ?? 1;
+    var remaining = state.Budget.TotalCreditCap - state.Budget.CreditsCommitted;
+    if (remaining < cost && cost > 0)
+    {
+        var fallback = policy.FallbackModel;
+        var fallbackCost = state.Models.FirstOrDefault(m => string.Equals(m.Name, fallback, StringComparison.OrdinalIgnoreCase))?.Cost ?? 0;
+        if (remaining >= fallbackCost)
+        {
+            Console.WriteLine(ConsoleTheme.Warning($"Budget low — falling back to {fallback}"));
+            model = fallback;
+            cost = fallbackCost;
+        }
+        else
+        {
+            Console.WriteLine(ConsoleTheme.Warning("Budget exhausted. Use /budget to increase."));
+            return;
+        }
+    }
+
+    var prompt = AgentPromptBuilder.BuildAdHocPrompt(state, roleSlug, userMessage);
+    var sessionId = $"devteam-adhoc-{roleSlug}";
+    Console.WriteLine($"Invoking {ConsoleTheme.Role(roleSlug)} via {ConsoleTheme.Muted(model)}...");
+
+    var client = AgentClientFactory.Create("sdk");
+    try
+    {
+        var response = await client.InvokeAsync(new AgentInvocationRequest
+        {
+            Prompt = prompt,
+            Model = model,
+            SessionId = sessionId,
+            WorkingDirectory = state.RepoRoot,
+            WorkspacePath = store.WorkspacePath,
+            Timeout = TimeSpan.FromMinutes(10),
+            EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
+            WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
+            ExternalMcpServers = state.McpServers
+        });
+
+        state.Budget.CreditsCommitted += cost;
+        if (policy.AllowPremium)
+        {
+            state.Budget.PremiumCreditsCommitted += cost;
+        }
+
+        var parsed = AgentPromptBuilder.ParseResponse(response);
+
+        Console.WriteLine();
+        Console.WriteLine(ConsoleTheme.Label($"── {roleSlug} ──"));
+        Console.WriteLine(parsed.Summary);
+
+        if (parsed.Issues.Count > 0)
+        {
+            var anchor = state.Issues.FirstOrDefault(i => !i.IsPlanningIssue) ?? state.Issues.FirstOrDefault();
+            if (anchor is not null)
+            {
+                runtime.AddGeneratedIssues(state, anchor.Id, parsed.Issues);
+                Console.WriteLine();
+                Console.WriteLine($"{ConsoleTheme.Accent($"{parsed.Issues.Count} issue(s) proposed")} and added to the board.");
+            }
+        }
+        if (parsed.Questions.Count > 0)
+        {
+            runtime.AddQuestions(state, parsed.Questions);
+            Console.WriteLine();
+            Console.WriteLine($"{ConsoleTheme.Warning($"{parsed.Questions.Count} question(s)")} added. Use {ConsoleTheme.Command("/questions")} to review.");
+        }
+
+        runtime.MergeWorkspaceAdditions(state, store.Load());
+        store.Save(state);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine(ConsoleTheme.Error($"Agent error: {ex.Message}"));
     }
 }
 
@@ -722,26 +936,39 @@ static async Task ShowPlanAsync(
     {
         case PlanPreparationStatus.MissingGoal:
             Console.WriteLine(interactive
-                ? "No active goal is set yet. Use /goal or /init --goal first."
+                ? $"No active goal is set yet. Use {ConsoleTheme.Command("/goal")} or {ConsoleTheme.Command("/init")} --goal first."
                 : "No active goal is set yet. Use `goal` or `init --goal` first.");
             return;
         case PlanPreparationStatus.Failed:
             Console.WriteLine("The planner ran, but no plan file was written yet.");
             if (result.Report?.FinalState == "waiting-for-user")
             {
-                Console.WriteLine($"Check {Path.Combine(store.WorkspacePath, "questions.md")} and answer the open questions first.");
+                Console.WriteLine(interactive
+                    ? $"Answer the open questions first with {ConsoleTheme.Command("/answer")}."
+                    : $"Check {Path.Combine(store.WorkspacePath, "questions.md")} and answer the open questions first.");
             }
             return;
         case PlanPreparationStatus.Generated:
-            Console.WriteLine("Plan generated.");
+            Console.WriteLine(ConsoleTheme.Success("Plan generated."));
             break;
     }
 
+    if (state.Phase == WorkflowPhase.ArchitectPlanning)
+    {
+        Console.WriteLine($"High-level plan approved. Phase: {ConsoleTheme.Phase("ArchitectPlanning")}");
+        Console.WriteLine(interactive
+            ? $"Run {ConsoleTheme.Command("/run")} to let the architect create execution issues, then {ConsoleTheme.Command("/approve")} again."
+            : "Run the loop to let the architect create execution issues, then approve again.");
+        return;
+    }
+
     PrintPlan(store);
+    PrintOpenQuestions(state, interactive);
+
     if (state.Phase == WorkflowPhase.Planning)
     {
         Console.WriteLine(interactive
-            ? "Reply with feedback as plain text or use /approve when the plan looks good."
+            ? $"Reply with feedback as plain text or use {ConsoleTheme.Command("/approve")} when the plan looks good."
             : "Review the plan, provide feedback with `feedback`, or use `approve-plan` when it looks good.");
     }
 }
@@ -766,39 +993,42 @@ static Dictionary<string, List<string>> BuildPlanningOptions(Dictionary<string, 
 static void PrintStatus(WorkspaceState state, DevTeamRuntime runtime)
 {
     var report = runtime.BuildStatusReport(state);
-    Console.WriteLine($"Phase: {state.Phase}");
-    Console.WriteLine($"Mode: {state.Runtime.ActiveModeSlug}");
-    Console.WriteLine($"Keep awake: {(state.Runtime.KeepAwakeEnabled ? "enabled" : "disabled")}");
+    Console.WriteLine($"{ConsoleTheme.Label("Phase:")} {ConsoleTheme.Phase(state.Phase.ToString())}");
+    Console.WriteLine($"{ConsoleTheme.Label("Mode:")} {ConsoleTheme.Accent(state.Runtime.ActiveModeSlug)}");
+    Console.WriteLine($"{ConsoleTheme.Label("Keep awake:")} {(state.Runtime.KeepAwakeEnabled ? ConsoleTheme.Success("enabled") : ConsoleTheme.Muted("disabled"))}");
+    Console.WriteLine($"{ConsoleTheme.Label("Auto-approve:")} {(state.Runtime.AutoApproveEnabled ? ConsoleTheme.Success("enabled") : ConsoleTheme.Muted("disabled"))}");
     Console.WriteLine(
         $"Counts: roadmap={report.Counts["roadmap"]}, issues={report.Counts["issues"]}, " +
         $"questions={report.Counts["questions"]}, runs={report.Counts["runs"]}, " +
         $"modes={state.Modes.Count}, " +
         $"decisions={report.Counts["decisions"]}, roles={report.Counts["roles"]}, superpowers={report.Counts["superpowers"]}");
     Console.WriteLine(
-        $"Budget: {report.Budget.CreditsCommitted}/{report.Budget.TotalCreditCap} total, " +
-        $"{report.Budget.PremiumCreditsCommitted}/{report.Budget.PremiumCreditCap} premium");
+        $"{ConsoleTheme.Label("Budget:")} {ConsoleTheme.BudgetUsage(report.Budget.CreditsCommitted, report.Budget.TotalCreditCap)} credits " +
+        $"({ConsoleTheme.Number($"{report.Budget.TotalCreditCap - report.Budget.CreditsCommitted:0.##}")} remaining), " +
+        $"premium {ConsoleTheme.BudgetUsage(report.Budget.PremiumCreditsCommitted, report.Budget.PremiumCreditCap)} " +
+        $"({ConsoleTheme.Number($"{report.Budget.PremiumCreditCap - report.Budget.PremiumCreditsCommitted:0.##}")} remaining)");
     if (report.QueuedRuns.Count > 0)
     {
-        Console.WriteLine("Queued runs:");
+        Console.WriteLine(ConsoleTheme.Label("Queued runs:"));
         foreach (var run in report.QueuedRuns)
         {
-            Console.WriteLine($"  - #{run.Id} issue #{run.IssueId} {run.RoleSlug} via {run.ModelName}");
+            Console.WriteLine($"  - #{ConsoleTheme.Number(run.Id.ToString())} issue #{ConsoleTheme.Number(run.IssueId.ToString())} {ConsoleTheme.Role(run.RoleSlug)} via {ConsoleTheme.Accent(run.ModelName)}");
         }
     }
     if (report.OpenQuestions.Count > 0)
     {
-        Console.WriteLine("Open questions:");
+        Console.WriteLine(ConsoleTheme.Label("Open questions:"));
         foreach (var question in report.OpenQuestions)
         {
-            Console.WriteLine($"  - #{question.Id} ({(question.IsBlocking ? "blocking" : "non-blocking")}) {question.Text}");
+            Console.WriteLine($"  - #{ConsoleTheme.Number(question.Id.ToString())} ({(question.IsBlocking ? ConsoleTheme.Warning("blocking") : ConsoleTheme.Muted("non-blocking"))}) {question.Text}");
         }
     }
     if (report.RecentDecisions.Count > 0)
     {
-        Console.WriteLine("Recent decisions:");
+        Console.WriteLine(ConsoleTheme.Label("Recent decisions:"));
         foreach (var decision in report.RecentDecisions)
         {
-            Console.WriteLine($"  - #{decision.Id} [{decision.Source}] {decision.Title}");
+            Console.WriteLine($"  - #{ConsoleTheme.Number(decision.Id.ToString())} [{ConsoleTheme.Accent(decision.Source)}] {decision.Title}");
         }
     }
 }
@@ -806,8 +1036,10 @@ static void PrintStatus(WorkspaceState state, DevTeamRuntime runtime)
 static void PrintBudget(BudgetState budget)
 {
     Console.WriteLine(
-        $"Budget: {budget.CreditsCommitted}/{budget.TotalCreditCap} total, " +
-        $"{budget.PremiumCreditsCommitted}/{budget.PremiumCreditCap} premium");
+        $"{ConsoleTheme.Label("Budget:")} {ConsoleTheme.BudgetUsage(budget.CreditsCommitted, budget.TotalCreditCap)} credits " +
+        $"({ConsoleTheme.Number($"{budget.TotalCreditCap - budget.CreditsCommitted:0.##}")} remaining), " +
+        $"premium {ConsoleTheme.BudgetUsage(budget.PremiumCreditsCommitted, budget.PremiumCreditCap)} " +
+        $"({ConsoleTheme.Number($"{budget.PremiumCreditCap - budget.PremiumCreditsCommitted:0.##}")} remaining)");
 }
 
 static void PrintQuestions(WorkspaceState state, WorkspaceStore store)
@@ -827,6 +1059,31 @@ static void PrintQuestions(WorkspaceState state, WorkspaceStore store)
     {
         Console.WriteLine($"#{question.Id} [{(question.IsBlocking ? "blocking" : "non-blocking")}] {question.Text}");
     }
+}
+
+static void PrintOpenQuestions(WorkspaceState state, bool interactive)
+{
+    var openQuestions = state.Questions
+        .Where(item => item.Status == QuestionStatus.Open)
+        .OrderBy(item => item.Id)
+        .ToList();
+
+    if (openQuestions.Count == 0)
+    {
+        return;
+    }
+
+    Console.WriteLine();
+    Console.WriteLine(ConsoleTheme.Label($"─── {openQuestions.Count} open question{(openQuestions.Count == 1 ? "" : "s")} ───"));
+    foreach (var question in openQuestions)
+    {
+        var tag = question.IsBlocking ? ConsoleTheme.Warning("blocking") : ConsoleTheme.Muted("non-blocking");
+        Console.WriteLine($"  #{ConsoleTheme.Number(question.Id.ToString())} [{tag}] {question.Text}");
+    }
+    Console.WriteLine(interactive
+        ? $"Answer with: {ConsoleTheme.Command("/answer")} <id> <text>"
+        : "Answer with: answer-question <id> <text>");
+    Console.WriteLine();
 }
 
 static void PrintPlan(WorkspaceStore store)
@@ -899,6 +1156,7 @@ static void PrintHelp()
     Console.WriteLine("  set-goal <TEXT> [--goal-file PATH] [--workspace PATH]");
     Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
     Console.WriteLine("  set-keep-awake <true|false> [--workspace PATH]");
+    Console.WriteLine("  set-auto-approve <true|false> [--workspace PATH]");
     Console.WriteLine("  add-roadmap <TITLE> [--detail TEXT] [--priority N] [--workspace PATH]");
     Console.WriteLine("  add-issue <TITLE> --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]] [--workspace PATH]");
     Console.WriteLine("  add-question <TEXT> [--blocking] [--workspace PATH]");
@@ -920,27 +1178,31 @@ static void PrintHelp()
 
 static void PrintInteractiveHelp()
 {
-    Console.WriteLine("Interactive commands:");
-    Console.WriteLine("  /init \"goal text\" [--goal-file PATH] [--force] [--mode SLUG] [--keep-awake true|false]");
-    Console.WriteLine("  /customize [--force]    Copy default assets to .devteam-source/ for editing");
-    Console.WriteLine("  /status");
-    Console.WriteLine("  /mode <slug>");
-    Console.WriteLine("  /keep-awake <on|off>");
-    Console.WriteLine("  /add-issue \"title\" --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]]");
-    Console.WriteLine("  /plan");
-    Console.WriteLine("  /questions");
-    Console.WriteLine("  /budget [--total N] [--premium N]");
-    Console.WriteLine("  /check-update");
-    Console.WriteLine("  /update");
-    Console.WriteLine("  /run [--max-iterations N] [--timeout-seconds N] [--keep-awake true|false]");
-    Console.WriteLine("  /feedback <text>");
-    Console.WriteLine("  /approve [note]");
-    Console.WriteLine("  /answer <id> <text>");
-    Console.WriteLine("  /goal <text> [--goal-file PATH]");
-    Console.WriteLine("  /exit");
+    Console.WriteLine(ConsoleTheme.Label("Interactive commands:"));
+    Console.WriteLine($"  {ConsoleTheme.Command("/init")} \"goal text\" [--goal-file PATH] [--force] [--mode SLUG] [--keep-awake true|false]");
+    Console.WriteLine($"  {ConsoleTheme.Command("/customize")} [--force]    Copy default assets to .devteam-source/ for editing");
+    Console.WriteLine($"  {ConsoleTheme.Command("/status")}");
+    Console.WriteLine($"  {ConsoleTheme.Command("/mode")} <slug>");
+    Console.WriteLine($"  {ConsoleTheme.Command("/keep-awake")} <on|off>");
+    Console.WriteLine($"  {ConsoleTheme.Command("/add-issue")} \"title\" --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]]");
+    Console.WriteLine($"  {ConsoleTheme.Command("/plan")}");
+    Console.WriteLine($"  {ConsoleTheme.Command("/questions")}");
+    Console.WriteLine($"  {ConsoleTheme.Command("/budget")} [--total N] [--premium N]");
+    Console.WriteLine($"  {ConsoleTheme.Command("/check-update")}");
+    Console.WriteLine($"  {ConsoleTheme.Command("/update")}");
+    Console.WriteLine($"  {ConsoleTheme.Command("/run")} [--max-iterations N] [--timeout-seconds N] [--keep-awake true|false]");
+    Console.WriteLine($"  {ConsoleTheme.Command("/feedback")} <text>");
+    Console.WriteLine($"  {ConsoleTheme.Command("/approve")} [note]");
+    Console.WriteLine($"  {ConsoleTheme.Command("/answer")} <id> <text>");
+    Console.WriteLine($"  {ConsoleTheme.Command("/goal")} <text> [--goal-file PATH]");
+    Console.WriteLine($"  {ConsoleTheme.Command("/exit")}");
     Console.WriteLine("If exactly one question is open, you can type a plain answer without `/answer`.");
     Console.WriteLine("While a plan is awaiting approval, plain text is treated as planning feedback and re-runs planning.");
     Console.WriteLine("If no plan exists yet, `/plan` runs the planner and then shows the generated plan.");
+    Console.WriteLine();
+    Console.WriteLine(ConsoleTheme.Label("Direct role invocation:"));
+    Console.WriteLine($"  {ConsoleTheme.Command("@role")} <message>    Talk directly to any role (e.g. {ConsoleTheme.Muted("@architect can you review our API design?")})");
+    Console.WriteLine($"  Roles: use {ConsoleTheme.Command("/status")} to see available roles. Tab-completes after {ConsoleTheme.Muted("@")}.");
 }
 
 static Dictionary<string, List<string>> ParseOptions(string[] tokens)
@@ -1162,7 +1424,7 @@ static async Task NotifyAboutAvailableUpdateAsync(ToolUpdateService toolUpdateSe
     var status = await TryCheckForToolUpdatesAsync(toolUpdateService, TimeSpan.FromSeconds(3));
     if (status?.IsUpdateAvailable == true)
     {
-        Console.WriteLine($"Update available: {status.LatestVersion} (current {status.CurrentVersion}). Run /update to install it.");
+        Console.WriteLine($"{ConsoleTheme.Warning("Update available:")} {ConsoleTheme.Number(status.LatestVersion)} (current {status.CurrentVersion}). Run {ConsoleTheme.Command("/update")} to install it.");
     }
 }
 
@@ -1409,5 +1671,45 @@ file sealed class LoopConsoleRenderer : IDisposable
         }
 
         return value[..Math.Max(0, maxLength - 1)] + "…";
+    }
+}
+
+file sealed class ShellAutoCompleteHandler : IAutoCompleteHandler
+{
+    private static readonly string[] Commands =
+    [
+        "/init", "/status", "/plan", "/run", "/approve", "/feedback",
+        "/questions", "/answer", "/budget", "/goal", "/mode",
+        "/keep-awake", "/auto-approve", "/add-issue", "/customize",
+        "/check-update", "/update", "/exit", "/help"
+    ];
+
+    private static readonly string[] RoleMentions =
+    [
+        "@planner", "@architect", "@orchestrator",
+        "@developer", "@backend-developer", "@frontend-developer", "@fullstack-developer",
+        "@tester", "@reviewer", "@ux", "@user", "@game-designer",
+        "@navigator", "@analyst", "@security", "@docs", "@devops", "@refactorer"
+    ];
+
+    public char[] Separators { get; set; } = [' '];
+
+    public string[] GetSuggestions(string text, int index)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return Commands;
+        }
+
+        if (text.StartsWith("@", StringComparison.Ordinal))
+        {
+            return RoleMentions
+                .Where(r => r.StartsWith(text, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
+        return Commands
+            .Where(cmd => cmd.StartsWith(text, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
     }
 }

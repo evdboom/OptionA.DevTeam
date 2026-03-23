@@ -33,6 +33,13 @@ public static class PlanWorkflow
         && HasPlan(store)
         && state.Issues.Any(item => item.IsPlanningIssue && item.Status == ItemStatus.Done);
 
+    public static bool IsAwaitingArchitectApproval(WorkspaceState state) =>
+        state.Phase == WorkflowPhase.ArchitectPlanning
+        && state.Issues
+            .Where(issue => string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase) && !issue.IsPlanningIssue)
+            .All(issue => issue.Status == ItemStatus.Done)
+        && state.Issues.Any(issue => string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase) && !issue.IsPlanningIssue);
+
     public static async Task<PlanPreparationResult> EnsurePlanAsync(
         WorkspaceStore store,
         WorkspaceState state,

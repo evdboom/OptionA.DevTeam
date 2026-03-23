@@ -5,11 +5,11 @@ namespace DevTeam.Core;
 
 internal static partial class SeedData
 {
-    private static readonly string[] RoleDirectoryCandidates = [".devteam-source\\roles"];
-    private static readonly string[] ModeDirectoryCandidates = [".devteam-source\\modes"];
-    private static readonly string[] SuperpowerDirectoryCandidates = [".devteam-source\\superpowers"];
-    private static readonly string[] ModelFileCandidates = [".devteam-source\\MODELS.json"];
-    private static readonly string[] McpServerFileCandidates = [".devteam-source\\MCP_SERVERS.json"];
+    private static readonly string[] RoleDirectoryCandidates = [Path.Combine(".devteam-source", "roles")];
+    private static readonly string[] ModeDirectoryCandidates = [Path.Combine(".devteam-source", "modes")];
+    private static readonly string[] SuperpowerDirectoryCandidates = [Path.Combine(".devteam-source", "superpowers")];
+    private static readonly string[] ModelFileCandidates = [Path.Combine(".devteam-source", "MODELS.json")];
+    private static readonly string[] McpServerFileCandidates = [Path.Combine(".devteam-source", "MCP_SERVERS.json")];
 
     private static readonly Dictionary<string, RoleModelPolicy> DefaultPolicies = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -24,7 +24,13 @@ internal static partial class SeedData
         ["reviewer"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
         ["ux"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
         ["user"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["game-designer"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gpt-5-mini", AllowPremium = false }
+        ["game-designer"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["navigator"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
+        ["analyst"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["security"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["docs"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["devops"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["refactorer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false }
     };
 
     public static WorkspaceState BuildInitialState(string repoRoot, double totalCreditCap, double premiumCreditCap)
@@ -223,7 +229,7 @@ internal static partial class SeedData
                 {
                     Slug = "develop",
                     Name = "Develop",
-                    SourcePath = ".devteam-source\\modes\\develop.md",
+                    SourcePath = Path.Combine(".devteam-source", "modes", "develop.md"),
                     Body = """
                     # Mode: Develop
 
@@ -241,7 +247,7 @@ internal static partial class SeedData
                 {
                     Slug = "creative-writing",
                     Name = "Creative Writing",
-                    SourcePath = ".devteam-source\\modes\\creative-writing.md",
+                    SourcePath = Path.Combine(".devteam-source", "modes", "creative-writing.md"),
                     Body = """
                     # Mode: Creative Writing
 

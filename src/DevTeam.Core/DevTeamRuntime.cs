@@ -43,6 +43,7 @@ public sealed class DevTeamRuntime
             ?? throw new InvalidOperationException($"Unknown mode '{modeSlug}'. Valid modes: {string.Join(", ", state.Modes.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase))}");
         state.Runtime.ActiveModeSlug = mode.Slug;
         state.Runtime.DefaultPipelineRoles = GetDefaultPipelineRolesForMode(mode.Slug);
+        state.Runtime.AutoApproveEnabled = string.Equals(mode.Slug, "autopilot", StringComparison.OrdinalIgnoreCase);
         RememberDecision(state, "Updated active mode", mode.Slug, "mode");
     }
 
@@ -71,12 +72,33 @@ public sealed class DevTeamRuntime
 
     public void ApprovePlan(WorkspaceState state, string note)
     {
+        var hasArchitectWork = state.Issues.Any(issue =>
+            !issue.IsPlanningIssue
+            && string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase)
+            && issue.Status is ItemStatus.Open or ItemStatus.InProgress);
+
+        state.Phase = hasArchitectWork ? WorkflowPhase.ArchitectPlanning : WorkflowPhase.Execution;
+        RememberDecision(
+            state,
+            hasArchitectWork ? "Approved high-level plan — entering architect planning" : "Approved execution plan",
+            string.IsNullOrWhiteSpace(note) ? "The current planning output is approved." : note.Trim(),
+            "plan");
+    }
+
+    public void ApproveArchitectPlan(WorkspaceState state, string note)
+    {
         state.Phase = WorkflowPhase.Execution;
         RememberDecision(
             state,
-            "Approved execution plan",
-            string.IsNullOrWhiteSpace(note) ? "The current planning output is approved for execution." : note.Trim(),
+            "Approved detailed architect plan — entering execution",
+            string.IsNullOrWhiteSpace(note) ? "The architect plan is approved for execution." : note.Trim(),
             "plan");
+    }
+
+    public void SetAutoApprove(WorkspaceState state, bool enabled)
+    {
+        state.Runtime.AutoApproveEnabled = enabled;
+        RememberDecision(state, "Updated auto-approve setting", enabled ? "enabled" : "disabled", "runtime");
     }
 
     public void RecordPlanningFeedback(WorkspaceState state, string feedback)
@@ -166,6 +188,12 @@ public sealed class DevTeamRuntime
             && state.Issues.Any(issue => issue.IsPlanningIssue && issue.Status == ItemStatus.Done))
         {
             return HasBlockingQuestions(state) ? "waiting-for-user" : "awaiting-plan-approval";
+        }
+
+        if (state.Phase == WorkflowPhase.ArchitectPlanning
+            && state.Issues.Where(issue => string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase) && !issue.IsPlanningIssue).All(issue => issue.Status == ItemStatus.Done))
+        {
+            return HasBlockingQuestions(state) ? "waiting-for-user" : "awaiting-architect-approval";
         }
 
         return HasBlockingQuestions(state) ? "waiting-for-user" : "idle";
@@ -373,6 +401,11 @@ public sealed class DevTeamRuntime
             .Select(role => role.Slug)
             .OrderBy(slug => slug, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    public RoleModelPolicy GetRoleModelPolicy(WorkspaceState state, string roleSlug)
+    {
+        return SeedData.GetPolicy(state, roleSlug);
     }
 
     public IReadOnlyDictionary<string, string> GetKnownRoleAliases(WorkspaceState state)
@@ -679,7 +712,7 @@ public sealed class DevTeamRuntime
             {
                 Id = state.NextIssueId++,
                 Title = "Run the planning session and split the work",
-                Detail = "Generate the first roadmap detail, identify missing information, and decompose the goal into small issues.",
+                Detail = "Generate the high-level strategy, identify what the architect needs to decide, and decompose the goal into broad milestones. Do not make technology or implementation choices — leave those to the architect.",
                 IsPlanningIssue = true,
                 RoleSlug = "planner",
                 Priority = 100,
@@ -689,8 +722,8 @@ public sealed class DevTeamRuntime
             state.Issues.Add(new IssueItem
             {
                 Id = state.NextIssueId++,
-                Title = "Draft the initial runtime architecture",
-                Detail = "Design execution phases, data model, tool boundaries, and integration seams for the dev-team runtime.",
+                Title = "Design the technical approach and create execution issues",
+                Detail = "Given the approved high-level plan, choose the technology stack, define the architecture, and break the work into concrete execution issues with clear dependencies.",
                 RoleSlug = "architect",
                 Priority = 90,
                 RoadmapItemId = roadmapId,
@@ -763,7 +796,7 @@ public sealed class DevTeamRuntime
         var ready = state.Issues
             .Where(issue => issue.Status == ItemStatus.Open)
             .Where(issue => !queuedIssueIds.Contains(issue.Id))
-            .Where(issue => state.Phase == WorkflowPhase.Planning ? issue.IsPlanningIssue : !issue.IsPlanningIssue)
+            .Where(issue => IsIssueEligibleForPhase(state.Phase, issue))
             .Where(issue => issue.DependsOnIssueIds.All(depId => state.Issues.Any(dep => dep.Id == depId && dep.Status == ItemStatus.Done)))
             .OrderByDescending(issue => issue.Priority)
             .ThenBy(issue => issue.Id)
@@ -796,6 +829,16 @@ public sealed class DevTeamRuntime
 
     private static bool HasBlockingQuestions(WorkspaceState state) =>
         state.Questions.Any(question => question.Status == QuestionStatus.Open && question.IsBlocking);
+
+    private static bool IsIssueEligibleForPhase(WorkflowPhase phase, IssueItem issue) =>
+        phase switch
+        {
+            WorkflowPhase.Planning => issue.IsPlanningIssue,
+            WorkflowPhase.ArchitectPlanning => !issue.IsPlanningIssue
+                && string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase),
+            WorkflowPhase.Execution => !issue.IsPlanningIssue,
+            _ => !issue.IsPlanningIssue
+        };
 
     private static void EnsurePipelineAssignments(WorkspaceState state)
     {
@@ -883,7 +926,7 @@ public sealed class DevTeamRuntime
             return 0;
         }
 
-        if (state.Phase == WorkflowPhase.Planning || maxSubagents <= 1)
+        if (state.Phase is WorkflowPhase.Planning or WorkflowPhase.ArchitectPlanning || maxSubagents <= 1)
         {
             return 1;
         }

@@ -33,7 +33,8 @@
   - `ISSUES:`
   - `QUESTIONS:`
 - Keep issue scope small. The runtime is designed around narrow issues with explicit dependencies rather than one large task per run.
-- Every goal starts in `Planning`. Only planning issues are eligible until the user runs `approve-plan`, which switches the workspace to `Execution`.
+- Every goal starts in `Planning`. The planner produces a high-level strategy without making technology choices. After the user approves (`approve-plan`), the workspace transitions to `ArchitectPlanning` where architect issues run and produce detailed execution issues. A second approval moves the workspace to `Execution`. If no architect issues exist, approval goes directly to `Execution`.
+- Auto-approve: when `RuntimeConfiguration.AutoApproveEnabled` is true, the loop automatically approves both the plan and the architect plan. The `autopilot` mode enables auto-approve and is the intended "agents decide everything" workflow.
 - During planning approval, freeform user feedback should revise the plan instead of being ignored.
 - Questions are the explicit user-input inbox. Blocking questions can halt the loop; non-blocking questions should not stop other ready work.
 - Use `run-loop` for actual execution. `run-once` only queues work; `run-loop` executes queued runs and is the command to use when you want the system to keep moving.

@@ -37,6 +37,7 @@ public sealed class RuntimeConfiguration
     public bool KeepAwakeEnabled { get; set; }
     public bool WorkspaceMcpEnabled { get; set; } = true;
     public bool PipelineSchedulingEnabled { get; set; } = true;
+    public bool AutoApproveEnabled { get; set; }
     public string WorkspaceMcpServerName { get; set; } = "devteam-workspace";
     public List<string> DefaultPipelineRoles { get; set; } = ["architect", "developer", "tester"];
 
@@ -300,6 +301,7 @@ public enum PipelineStatus
 public enum WorkflowPhase
 {
     Planning,
+    ArchitectPlanning,
     Execution
 }
 

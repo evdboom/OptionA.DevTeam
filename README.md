@@ -2,7 +2,7 @@
 
 `OptionA.DevTeam` is a .NET global tool that runs a plan-first autonomous dev team from your terminal using GitHub Copilot.
 
-Unlike single-prompt coding agents, DevTeam splits work into narrow issues with explicit dependencies, tracks decisions and questions, and schedules multi-role pipelines (architect → developer → tester) that execute concurrently when areas don't conflict. You stay in control through plan approval and feedback — the runtime does the iteration.
+Unlike single-prompt coding agents, DevTeam splits work into narrow issues with explicit dependencies, tracks decisions and questions, and schedules multi-role pipelines (navigator → architect → developer → security → tester) that execute concurrently when areas don't conflict. You stay in control through plan approval and feedback — or enable autopilot and let the agents decide everything.
 
 ## How it works
 
@@ -13,33 +13,39 @@ Unlike single-prompt coding agents, DevTeam splits work into narrow issues with 
   ├─────────────────────────────►│                               │
   │                              │                               │
   │  /plan                       │  planner agent ──────────────►│
-  ├─────────────────────────────►│◄──────────── plan.md ─────────│
+  ├─────────────────────────────►│◄──────── high-level plan ─────│
   │◄──── show plan ──────────────│                               │
   │                              │                               │
-  │  /approve                    │                               │
-  ├─────────────────────────────►│  orchestrator selects batch   │
-  │                              ├──────────────────────────────►│
-  │  /run                        │  architect ──────────────────►│
+  │  /approve                    │  architect agent ────────────►│
+  ├─────────────────────────────►│◄── tech choices + issues ─────│
+  │◄──── show architect plan ────│                               │
+  │                              │                               │
+  │  /approve                    │  orchestrator selects batch   │
   ├─────────────────────────────►│  developer ──────────────────►│
-  │                              │  tester ─────────────────────►│
-  │                              │◄──── results + new issues ────│
+  │  /run                        │  tester ─────────────────────►│
+  ├─────────────────────────────►│◄──── results + new issues ────│
   │                              │                               │
   │                              │  reevaluate ─► next batch     │
   │◄──── status / questions ─────│         ... loop repeats ...  │
 ```
 
-1. **Plan** — the `planner` role creates an initial plan with roadmap items and issues.
-2. **Review** — you read the plan and either give feedback (which revises it) or approve.
-3. **Orchestrate** — the `orchestrator` evaluates the issue board and selects the next execution batch.
-4. **Execute** — worker roles (architect, developer, tester, etc.) run the selected issues. Each completed issue can propose follow-on issues, creating multi-role pipelines.
-5. **Loop** — the runtime reevaluates dependencies, advances pipelines, and repeats until done or budget is exhausted.
+The workflow has three phases with two approval gates:
+
+1. **Planning** — the `planner` role produces a high-level strategy: milestones, delivery order, risks. It does *not* make technology choices or create implementation-level issues.
+2. **Review plan** — you read the plan and either give feedback (which revises it) or approve.
+3. **Architecture** — architect issues run and produce technology decisions, concrete execution issues, and ADRs.
+4. **Review architect plan** — you review the architect output and approve to move to execution.
+5. **Execution** — worker roles (navigator, developer, security, tester, docs, etc.) run the selected issues. Each completed issue can propose follow-on issues, creating multi-role pipelines.
+6. **Loop** — the runtime reevaluates dependencies, advances pipelines, and repeats until done or budget is exhausted.
+
+In **autopilot** mode both approval gates are skipped automatically — agents decide everything.
 
 ## What it does
 
 - Initialize a workspace for a new or existing repository
 - Generate an initial plan and revise it with feedback before execution
 - Run an execution loop with specialized agent roles
-- Schedule multi-role pipelines (architect → developer → tester) automatically
+- Schedule multi-role pipelines (navigator → architect → developer → security → tester) automatically
 - Run independent areas concurrently while preventing conflicts
 - Track questions, issues, decisions, and budget in a local workspace
 - Expose a workspace MCP server so agents can read and write project state
@@ -133,15 +139,21 @@ devteam> /plan
   Plan written to .devteam\plan.md
 
 devteam> /approve Looks good.
-  Plan approved. Workspace moved to Execution phase.
+  Plan approved. Workspace moved to ArchitectPlanning phase.
+  Running architect issues...
+
+devteam> /approve Ship it.
+  Architect plan approved. Workspace moved to Execution phase.
 
 devteam> /run --max-iterations 5 --max-subagents 3
   Iteration 1: orchestrator selected 2 issues
-    [ISS-1] architect: Define game architecture (pipeline 1)
-    [ISS-2] architect: Design rendering layer (pipeline 2)
-  Iteration 2: pipelines advanced
     [ISS-3] developer: Implement game loop (pipeline 1)
     [ISS-4] developer: Implement renderer (pipeline 2)
+  Budget: 4/25 credits used (2/6 premium)
+  Iteration 2: pipelines advanced
+    [ISS-5] tester: Test game loop (pipeline 1)
+    [ISS-6] tester: Test renderer (pipeline 2)
+  Budget: 8/25 credits used (2/6 premium)
   ...
   Iteration 5: 3 pipelines completed, 1 question pending
   Loop finished: waiting-for-input
@@ -206,8 +218,43 @@ Packaged modes:
 |------|-------------|
 | `develop` (default) | Build working software, add tests, validate builds |
 | `creative-writing` | Preserve voice, revise in passes, surface narrative gaps |
+| `autopilot` | Full autonomy — agents decide everything without approval gates |
 
 Mode guardrails are injected into every agent prompt so all roles follow the active mode's rules.
+
+Autopilot mode automatically approves both the plan and architect plan, so the loop runs end-to-end without pausing for human input. Enable it at init time or switch later:
+
+```powershell
+devteam /init --workspace .devteam --goal "Build a Flappy Bird game" --mode autopilot
+devteam /set-mode autopilot --workspace .devteam
+```
+
+## Budget
+
+Every agent invocation costs credits. The budget is a local cost cap that prevents runaway iteration — when credits are exhausted, roles fall back to free models (like `gpt-5-mini`) instead of stopping.
+
+Credits are a simple abstraction over model cost tiers:
+
+| Tier | Cost | Examples |
+|------|------|----------|
+| Premium | 3 credits | `claude-opus-4.6` |
+| Standard | 1 credit | `claude-sonnet-4.6`, `gpt-5.4`, `gemini-3.1-pro-preview` |
+| Light | 0.33 credits | `claude-haiku-4.5`, `gemini-3-flash-preview` |
+| Free | 0 credits | `gpt-5-mini`, `gpt-4.1`, `gpt-4o` |
+
+The budget has two caps:
+
+- **Total** (default 25) — maximum credits across all models. When exhausted, every role falls back to a free model.
+- **Premium** (default 6) — maximum credits for premium models only. When exhausted, premium roles fall back to their configured fallback model while standard/free models continue normally.
+
+View or adjust the budget:
+
+```text
+/budget
+/budget --total 50 --premium 12
+```
+
+The budget is displayed after each loop iteration so you can see spend in real time.
 
 ## Pipelines
 
@@ -272,9 +319,12 @@ This creates a `.devteam-source/` directory containing all packaged assets:
 │   ├── architect.md
 │   ├── developer.md
 │   ├── tester.md
-│   ├── planner.md
-│   ├── orchestrator.md
-│   ├── reviewer.md
+│   ├── navigator.md
+│   ├── analyst.md
+│   ├── security.md
+│   ├── docs.md
+│   ├── devops.md
+│   ├── refactorer.md
 │   └── ...
 ├── modes/              Mode-specific guardrails
 │   ├── develop.md
