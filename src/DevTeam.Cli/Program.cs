@@ -254,6 +254,10 @@ try
             var report = await RunLoopAsync(store, runtime, loopExecutor, state, options);
             Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
             PrintBudget(state.Budget);
+            if (report.FinalState == "awaiting-architect-approval")
+            {
+                PrintArchitectSummary(state);
+            }
             return 0;
         }
 
@@ -359,6 +363,11 @@ static async Task<int> RunInteractiveShellAsync(
     Console.WriteLine($"Type {ConsoleTheme.Command("/help")} for commands. {ConsoleTheme.Command("/exit")} to quit. {ConsoleTheme.Muted("Tab to autocomplete.")}"  );
     await NotifyAboutAvailableUpdateAsync(toolUpdateService);
     TryLoadState(store, out var initialState);
+    if (initialState is null)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"No workspace found. Use {ConsoleTheme.Command("/init")} --goal \"<your goal>\" to get started.");
+    }
     if (shellKeepAwakeEnabled is null)
     {
         shellKeepAwakeEnabled = initialState?.Runtime.KeepAwakeEnabled ?? false;
@@ -527,6 +536,8 @@ static async Task<int> RunInteractiveShellAsync(
                     {
                         Console.WriteLine($"Active goal saved: {goal}");
                     }
+                    Console.WriteLine();
+                    Console.WriteLine($"Next step: run {ConsoleTheme.Command("/plan")} to generate the high-level plan.");
                     break;
                 }
 
@@ -653,6 +664,7 @@ static async Task<int> RunInteractiveShellAsync(
                                 var report = await RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: true);
                                 Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
                                 PrintBudget(current.Budget);
+                                PrintArchitectSummary(current);
                             }
                         }
                         else
@@ -748,6 +760,10 @@ static async Task<int> RunInteractiveShellAsync(
                     else if (report.FinalState == "awaiting-plan-approval")
                     {
                         Console.WriteLine("Use /plan to review, type feedback to revise, or /approve to move into execution.");
+                    }
+                    else if (report.FinalState == "awaiting-architect-approval")
+                    {
+                        PrintArchitectSummary(current);
                     }
                     break;
                 }
@@ -1040,6 +1056,56 @@ static void PrintBudget(BudgetState budget)
         $"({ConsoleTheme.Number($"{budget.TotalCreditCap - budget.CreditsCommitted:0.##}")} remaining), " +
         $"premium {ConsoleTheme.BudgetUsage(budget.PremiumCreditsCommitted, budget.PremiumCreditCap)} " +
         $"({ConsoleTheme.Number($"{budget.PremiumCreditCap - budget.PremiumCreditsCommitted:0.##}")} remaining)");
+}
+
+static void PrintArchitectSummary(WorkspaceState state)
+{
+    var architectRuns = state.AgentRuns
+        .Where(run => string.Equals(run.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase)
+            && run.Status == AgentRunStatus.Completed
+            && !string.IsNullOrWhiteSpace(run.Summary))
+        .OrderByDescending(run => run.UpdatedAtUtc)
+        .Take(1)
+        .ToList();
+    if (architectRuns.Count == 0)
+    {
+        return;
+    }
+
+    Console.WriteLine();
+    Console.WriteLine(ConsoleTheme.Label("─── Architect Summary ───"));
+    foreach (var run in architectRuns)
+    {
+        var issue = state.Issues.FirstOrDefault(i => i.Id == run.IssueId);
+        if (issue is not null)
+        {
+            Console.WriteLine($"  {ConsoleTheme.Accent(issue.Title)}");
+        }
+        foreach (var summaryLine in run.Summary.Split('\n'))
+        {
+            Console.WriteLine($"  {summaryLine}");
+        }
+    }
+
+    var createdIssues = state.Issues
+        .Where(i => !i.IsPlanningIssue
+            && !string.Equals(i.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase)
+            && i.Status != ItemStatus.Done)
+        .OrderByDescending(i => i.Priority)
+        .ThenBy(i => i.Id)
+        .ToList();
+    if (createdIssues.Count > 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine(ConsoleTheme.Label($"Execution issues created ({createdIssues.Count}):"));
+        foreach (var issue in createdIssues)
+        {
+            Console.WriteLine($"  #{ConsoleTheme.Number(issue.Id.ToString())} [{ConsoleTheme.Role(issue.RoleSlug)}] {issue.Title}");
+        }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to begin execution or type feedback to revise.");
 }
 
 static void PrintQuestions(WorkspaceState state, WorkspaceStore store)
