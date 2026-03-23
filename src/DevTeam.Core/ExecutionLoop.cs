@@ -702,6 +702,27 @@ public static class AgentPromptBuilder
         ["conflict-resolver"] = ["resolve-conflict"]
     };
 
+    private static readonly HashSet<string> DesignOnlyRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "planner", "orchestrator", "architect", "navigator", "analyst", "security", "reviewer"
+    };
+
+    private static string BuildFileBoundaryBlock(string roleSlug)
+    {
+        if (!DesignOnlyRoles.Contains(roleSlug))
+        {
+            return "";
+        }
+        return """
+
+        FILE BOUNDARY (enforced by runtime):
+        You are a design-only role. Do NOT create, edit, or delete source code files.
+        Do NOT run commands that create files or directories (npm init, dotnet new, mkdir, touch, etc.).
+        Describe structures, patterns, and decisions in your SUMMARY. Create ISSUES for implementation work.
+        Violations will be flagged as role-boundary errors.
+        """;
+    }
+
     public static string BuildPrompt(WorkspaceState state, IssueItem issue)
     {
         var role = state.Roles.FirstOrDefault(item => item.Slug == issue.RoleSlug);
@@ -772,7 +793,7 @@ public static class AgentPromptBuilder
 
         Valid role slugs for ISSUES:
         {availableRoles}
-
+        {BuildFileBoundaryBlock(issue.RoleSlug)}
         Task:
         Work on the current issue using the available tools, active mode guardrails, and role guidance. Keep the scope narrow. If you discover follow-on work, a blocker, a prerequisite, or a natural decomposition that should not be absorbed into the current issue, use the workspace MCP tools when available and also summarize the outcome under ISSUES for compatibility. Avoid manually creating obvious next-stage architect, developer, or tester follow-ups for the same issue family when the runtime can chain those automatically. If you are blocked by missing information, say so clearly. Do not try to ask the user interactively. Instead, put every needed user question in the QUESTIONS section and use the workspace MCP tools when available to persist them immediately.
 
@@ -840,7 +861,7 @@ public static class AgentPromptBuilder
 
         Valid role slugs for ISSUES:
         {availableRoles}
-
+        {BuildFileBoundaryBlock(roleSlug)}
         User message:
         {userMessage}
 

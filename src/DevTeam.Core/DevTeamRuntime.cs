@@ -522,6 +522,15 @@ public sealed class DevTeamRuntime
         {
             var normalizedTitle = proposal.Title.Trim();
             var normalizedRole = ResolveRoleSlug(state, proposal.RoleSlug);
+
+            // During Planning phase the bootstrap already seeds the architect issue.
+            // Reject any additional architect issues proposed by the planner.
+            if (state.Phase == WorkflowPhase.Planning
+                && string.Equals(normalizedRole, "architect", StringComparison.OrdinalIgnoreCase)
+                && state.Issues.Any(i => string.Equals(i.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase) && i.Status != ItemStatus.Done))
+            {
+                continue;
+            }
             var existing = state.Issues.FirstOrDefault(item =>
                 string.Equals(item.Title, normalizedTitle, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(item.RoleSlug, normalizedRole, StringComparison.OrdinalIgnoreCase)

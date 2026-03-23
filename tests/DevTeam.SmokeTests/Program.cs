@@ -63,7 +63,9 @@ var tests = new List<(string Name, Action Run)>
     ("Plan approval transitions to architect planning", TestPlanApprovalTransitionsToArchitectPlanning),
     ("Architect approval transitions to execution", TestArchitectApprovalTransitionsToExecution),
     ("Auto-approve skips both approval gates", TestAutoApproveSkipsBothGates),
-    ("Autopilot mode enables auto-approve", TestAutopilotModeEnablesAutoApprove)
+    ("Autopilot mode enables auto-approve", TestAutopilotModeEnablesAutoApprove),
+    ("Design-only roles receive file boundary enforcement", TestDesignOnlyRolesReceiveFileBoundary),
+    ("Planner cannot create duplicate architect issues", TestPlannerCannotCreateDuplicateArchitectIssues)
 };
 
 var failures = new List<string>();
@@ -1538,6 +1540,61 @@ static void TestAutopilotModeEnablesAutoApprove()
 
     harness.Runtime.SetMode(harness.State, "develop");
     AssertTrue(!harness.State.Runtime.AutoApproveEnabled, "Switching away from autopilot should disable auto-approve.");
+}
+
+static void TestDesignOnlyRolesReceiveFileBoundary()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Approve.");
+
+    // Architect should get file boundary enforcement
+    var architectIssue = harness.Runtime.AddIssue(harness.State, "Design the architecture", "Choose patterns.", "architect", 100, null, []);
+    harness.Store.Save(harness.State);
+    var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDesigned.");
+    var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+    executor.RunAsync(harness.State, new LoopExecutionOptions { Backend = "sdk", MaxIterations = 1, MaxSubagents = 1, Verbosity = LoopVerbosity.Normal }).GetAwaiter().GetResult();
+    var architectPrompt = agent.LastPrompt ?? throw new InvalidOperationException("Expected architect prompt.");
+    AssertTrue(architectPrompt.Contains("FILE BOUNDARY", StringComparison.Ordinal), "Architect prompt should include FILE BOUNDARY enforcement.");
+    AssertTrue(architectPrompt.Contains("design-only role", StringComparison.Ordinal), "Architect prompt should state it is a design-only role.");
+
+    // Developer should NOT get file boundary enforcement
+    var devIssue = harness.Runtime.AddIssue(harness.State, "Build the game loop", "Implement it.", "developer", 80, null, []);
+    harness.Store.Save(harness.State);
+    var devAgent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nBuilt.");
+    var devExecutor = new LoopExecutor(harness.Runtime, harness.Store, _ => devAgent);
+    devExecutor.RunAsync(harness.State, new LoopExecutionOptions { Backend = "sdk", MaxIterations = 1, MaxSubagents = 1, Verbosity = LoopVerbosity.Normal }).GetAwaiter().GetResult();
+    var devPrompt = devAgent.LastPrompt ?? throw new InvalidOperationException("Expected developer prompt.");
+    AssertTrue(!devPrompt.Contains("FILE BOUNDARY", StringComparison.Ordinal), "Developer prompt should NOT include FILE BOUNDARY enforcement.");
+}
+
+static void TestPlannerCannotCreateDuplicateArchitectIssues()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a flappy bird game.");
+    var planning = harness.Runtime.RunOnce(harness.State, 1);
+
+    // State is Planning, bootstrap already created one architect issue.
+    var architectCountBefore = harness.State.Issues.Count(i =>
+        string.Equals(i.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase));
+    AssertEqual(1, architectCountBefore, "Bootstrap should seed exactly one architect issue");
+
+    // Simulate the planner proposing an architect issue via AddGeneratedIssues.
+    var planningIssueId = planning.QueuedRuns[0].IssueId;
+    var added = harness.Runtime.AddGeneratedIssues(harness.State, planningIssueId, [
+        new GeneratedIssueProposal
+        {
+            Title = "Choose technology stack and design architecture",
+            Detail = "Evaluate options and choose the best approach.",
+            RoleSlug = "architect",
+            Area = "architecture",
+            Priority = 90
+        }
+    ]);
+
+    AssertEqual(0, added.Count, "Planner should not be able to add architect issues during Planning");
+    var architectCountAfter = harness.State.Issues.Count(i =>
+        string.Equals(i.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase));
+    AssertEqual(1, architectCountAfter, "Architect issue count should remain 1");
 }
 
 static void AssertEqual<T>(T expected, T actual, string label)

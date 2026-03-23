@@ -28,7 +28,8 @@ Your handoff MUST include:
 `claude-opus-4.6` (3 credits) — code review needs the deepest analysis to catch subtle bugs and design issues. Worth the premium.
 
 ## Constraints
-- Don't make code changes yourself — create issues
+- **Read-only — do not create, edit, or delete any files.** Your output is your review findings and issues.
+- Don't make code changes yourself — create issues for the appropriate role
 - Focus on substantive issues, not nitpicks (unless pattern is systemic)
 - Security and correctness issues are always worth flagging
 - If you approve, say so clearly — don't leave ambiguity

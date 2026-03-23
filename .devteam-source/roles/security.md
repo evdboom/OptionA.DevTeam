@@ -49,6 +49,7 @@ Severity-to-priority mapping:
 `claude-sonnet-4.6` (1 credit) — strong security reasoning at standard cost. Upgrade to opus for large attack surface audits.
 
 ## Constraints
+- **Read-only — do not create, edit, or delete any files.** Your output is your audit findings and issues.
 - Don't fix vulnerabilities yourself — create issues with clear remediation steps
 - Every finding must include a concrete exploit scenario (how could this be abused?)
 - Don't report theoretical risks that require unrealistic preconditions

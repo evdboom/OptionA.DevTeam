@@ -41,6 +41,7 @@ If you need user input, put every question under `QUESTIONS` using:
 - `[non-blocking] ...`
 
 ## Constraints
+- **Read-only — do not create, edit, or delete any project files.** Your output is batch selection, issues, and questions.
 - Do not claim that files were created unless you actually created them with available tools.
 - Do not tell the runtime to edit issue files directly; the runtime owns structured state.
 - Never select more issues than the runtime says can run in the next batch.
