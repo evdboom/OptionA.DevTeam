@@ -17,6 +17,7 @@ public sealed class AgentInvocationRequest
     public bool EnableWorkspaceMcp { get; init; }
     public string WorkspaceMcpServerName { get; init; } = "devteam-workspace";
     public string? ToolHostPath { get; init; }
+    public IReadOnlyList<McpServerDefinition> ExternalMcpServers { get; init; } = [];
 }
 
 public sealed class AgentInvocationResult
@@ -51,13 +52,34 @@ public static class WorkspaceMcpSessionConfigFactory
             SkillDirectories = ResolveSkillDirectories(request.WorkingDirectory)
         };
 
+        var allMcpServers = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
         var mcpConfig = CreateLocalMcpServerConfig(request);
         if (mcpConfig is not null)
         {
-            sessionConfig.McpServers = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            allMcpServers[request.WorkspaceMcpServerName] = mcpConfig;
+        }
+
+        foreach (var external in request.ExternalMcpServers)
+        {
+            if (!external.Enabled || string.IsNullOrWhiteSpace(external.Name) || string.IsNullOrWhiteSpace(external.Command))
             {
-                [request.WorkspaceMcpServerName] = mcpConfig
+                continue;
+            }
+
+            allMcpServers[external.Name] = new McpLocalServerConfig
+            {
+                Type = "local",
+                Command = external.Command,
+                Args = external.Args.ToList(),
+                Cwd = external.Cwd ?? request.WorkingDirectory,
+                Tools = ["*"]
             };
+        }
+
+        if (allMcpServers.Count > 0)
+        {
+            sessionConfig.McpServers = allMcpServers;
         }
 
         return sessionConfig;

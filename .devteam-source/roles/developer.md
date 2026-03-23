@@ -21,8 +21,9 @@ Your handoff MUST include:
 1. **Issues worked** — list issue IDs and what was done
 2. **Files changed** — brief summary of changes 
 3. **Commands to run** — any `CMD:` lines needed (build, install, etc.)
-4. **Test notes** — what the Tester should verify
-5. **Blockers** — anything that prevented completion
+4. **Run notes** — how the user should actually run or preview the result after your changes
+5. **Test notes** — what the Tester should verify
+6. **Blockers** — anything that prevented completion
 
 ## Issue Workflow
 - When starting an issue: update its status to `in-progress`
@@ -38,3 +39,5 @@ Your handoff MUST include:
 - Keep changes small and buildable — the project must compile/run after every iteration
 - If you find a bug while working, create a new issue for it rather than fixing it inline (unless trivial)
 - Write brief inline comments only where logic is non-obvious
+- If you add dependencies, generated assets, or tool output, make sure repo hygiene stays intact (`.gitignore`, no checked-in `node_modules`, no transient artifacts committed).
+- If you build a runnable app or script, update `README.md` or equivalent docs with exact install/run/test commands.

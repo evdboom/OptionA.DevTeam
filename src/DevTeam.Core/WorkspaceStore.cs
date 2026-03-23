@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -9,7 +12,7 @@ public sealed class WorkspaceStore
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() }
+        Converters = { new JsonStringEnumConverter(), new FlexibleDateTimeOffsetJsonConverter() }
     };
 
     public WorkspaceStore(string workspacePath)
@@ -25,69 +28,79 @@ public sealed class WorkspaceStore
 
     public WorkspaceState Initialize(string repoRoot, double totalCreditCap, double premiumCreditCap)
     {
-        ResetWorkspaceArtifacts();
-        Directory.CreateDirectory(WorkspacePath);
-        Directory.CreateDirectory(Path.Combine(WorkspacePath, "runs"));
-        Directory.CreateDirectory(Path.Combine(WorkspacePath, "decisions"));
-        Directory.CreateDirectory(Path.Combine(WorkspacePath, "artifacts"));
-        var state = SeedData.BuildInitialState(repoRoot, totalCreditCap, premiumCreditCap);
-        Save(state);
-        return state;
+        return WithWorkspaceLock(() =>
+        {
+            ResetWorkspaceArtifacts();
+            Directory.CreateDirectory(WorkspacePath);
+            Directory.CreateDirectory(Path.Combine(WorkspacePath, "runs"));
+            Directory.CreateDirectory(Path.Combine(WorkspacePath, "decisions"));
+            Directory.CreateDirectory(Path.Combine(WorkspacePath, "artifacts"));
+            var state = SeedData.BuildInitialState(repoRoot, totalCreditCap, premiumCreditCap);
+            Save(state);
+            return state;
+        });
     }
 
     public WorkspaceState Load()
     {
-        if (!File.Exists(StatePath))
+        return WithWorkspaceLock(() =>
         {
-            throw new InvalidOperationException(
-                $"Workspace state not found at '{StatePath}'. Run 'init' first.");
-        }
-
-        using var doc = JsonDocument.Parse(File.ReadAllText(StatePath));
-        WorkspaceState? state;
-        var migratedFromLegacy = false;
-        if (doc.RootElement.TryGetProperty("FormatVersion", out var formatVersionElement)
-            && formatVersionElement.GetInt32() >= CurrentFormatVersion)
-        {
-            var manifest = JsonSerializer.Deserialize<WorkspaceManifest>(doc.RootElement.GetRawText(), JsonOptions);
-            if (manifest is null)
+            if (!File.Exists(StatePath))
             {
-                throw new InvalidOperationException("Failed to deserialize workspace manifest.");
+                throw new InvalidOperationException(
+                    $"Workspace state not found at '{StatePath}'. Run 'init' first.");
             }
 
-            state = LoadFromManifest(manifest);
-        }
-        else
-        {
-            state = JsonSerializer.Deserialize<WorkspaceState>(doc.RootElement.GetRawText(), JsonOptions);
-            migratedFromLegacy = true;
-        }
+            using var doc = JsonDocument.Parse(File.ReadAllText(StatePath));
+            WorkspaceState? state;
+            var migratedFromLegacy = false;
+            if (doc.RootElement.TryGetProperty("FormatVersion", out var formatVersionElement)
+                && formatVersionElement.GetInt32() >= CurrentFormatVersion)
+            {
+                var manifest = JsonSerializer.Deserialize<WorkspaceManifest>(doc.RootElement.GetRawText(), JsonOptions);
+                if (manifest is null)
+                {
+                    throw new InvalidOperationException("Failed to deserialize workspace manifest.");
+                }
 
-        if (state is null)
-        {
-            throw new InvalidOperationException("Failed to deserialize workspace state.");
-        }
+                state = LoadFromManifest(manifest);
+            }
+            else
+            {
+                state = JsonSerializer.Deserialize<WorkspaceState>(doc.RootElement.GetRawText(), JsonOptions);
+                migratedFromLegacy = true;
+            }
 
-        var hydratedMetadata = SeedData.HydrateMissingWorkspaceMetadata(state);
-        if (migratedFromLegacy || hydratedMetadata)
-        {
-            Save(state);
-        }
+            if (state is null)
+            {
+                throw new InvalidOperationException("Failed to deserialize workspace state.");
+            }
 
-        return state;
+            var hydratedMetadata = SeedData.HydrateMissingWorkspaceMetadata(state);
+            if (migratedFromLegacy || hydratedMetadata)
+            {
+                Save(state);
+            }
+
+            return state;
+        });
     }
 
     public void Save(WorkspaceState state)
     {
-        Directory.CreateDirectory(WorkspacePath);
-        Directory.CreateDirectory(Path.Combine(WorkspacePath, "runs"));
-        Directory.CreateDirectory(Path.Combine(WorkspacePath, "decisions"));
-        Directory.CreateDirectory(Path.Combine(WorkspacePath, "artifacts"));
-        Directory.CreateDirectory(StateDirectoryPath);
-        SaveCollections(state);
-        File.WriteAllText(StatePath, JsonSerializer.Serialize(CreateManifest(state), JsonOptions));
-        WriteIssueBoard(state);
-        WriteQuestionsFile(state);
+        WithWorkspaceLock(() =>
+        {
+            Directory.CreateDirectory(WorkspacePath);
+            Directory.CreateDirectory(Path.Combine(WorkspacePath, "runs"));
+            Directory.CreateDirectory(Path.Combine(WorkspacePath, "decisions"));
+            Directory.CreateDirectory(Path.Combine(WorkspacePath, "artifacts"));
+            Directory.CreateDirectory(StateDirectoryPath);
+            SaveCollections(state);
+            AtomicWriteAllText(StatePath, JsonSerializer.Serialize(CreateManifest(state), JsonOptions));
+            WriteIssueBoard(state);
+            WriteQuestionsFile(state);
+            return 0;
+        });
     }
 
     private void ResetWorkspaceArtifacts()
@@ -204,7 +217,7 @@ public sealed class WorkspaceStore
     private void WriteCollection<T>(string fileName, IReadOnlyList<T> items)
     {
         var path = Path.Combine(StateDirectoryPath, fileName);
-        File.WriteAllText(path, JsonSerializer.Serialize(items, JsonOptions));
+        AtomicWriteAllText(path, JsonSerializer.Serialize(items, JsonOptions));
     }
 
     private void DeleteCollection(string fileName)
@@ -226,7 +239,7 @@ public sealed class WorkspaceStore
 
         if (openQuestions.Count == 0)
         {
-            File.WriteAllText(path, "# Open questions\n\n(none)\n");
+            AtomicWriteAllText(path, "# Open questions\n\n(none)\n");
             return;
         }
 
@@ -247,7 +260,7 @@ public sealed class WorkspaceStore
             lines.Add("");
         }
 
-        File.WriteAllText(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
+        AtomicWriteAllText(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
     }
 
     private void WriteIssueBoard(WorkspaceState state)
@@ -274,7 +287,7 @@ public sealed class WorkspaceStore
             WriteIssueFile(issuesDir, state, issue);
         }
 
-        File.WriteAllText(
+        AtomicWriteAllText(
             Path.Combine(issuesDir, "_index.md"),
             string.Join(Environment.NewLine, indexLines) + Environment.NewLine);
     }
@@ -342,7 +355,108 @@ public sealed class WorkspaceStore
         {decisionBlock}
         """;
 
-        File.WriteAllText(path, content);
+        AtomicWriteAllText(path, content);
+    }
+
+    private T WithWorkspaceLock<T>(Func<T> action)
+    {
+        using var mutex = new Mutex(false, BuildWorkspaceMutexName());
+        var acquired = false;
+        try
+        {
+            try
+            {
+                acquired = mutex.WaitOne(TimeSpan.FromSeconds(30));
+            }
+            catch (AbandonedMutexException)
+            {
+                acquired = true;
+            }
+
+            if (!acquired)
+            {
+                throw new IOException($"Timed out waiting for exclusive access to workspace '{WorkspacePath}'.");
+            }
+
+            return action();
+        }
+        finally
+        {
+            if (acquired)
+            {
+                mutex.ReleaseMutex();
+            }
+        }
+    }
+
+    private string BuildWorkspaceMutexName()
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(WorkspacePath.ToLowerInvariant()));
+        var hash = Convert.ToHexString(bytes[..8]);
+        return $"OptionA.DevTeam.Workspace.{hash}";
+    }
+
+    private static void AtomicWriteAllText(string path, string content)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(tempPath, content, Encoding.UTF8);
+            if (File.Exists(path))
+            {
+                ReplaceWithFallback(tempPath, path, content);
+                tempPath = string.Empty;
+                return;
+            }
+
+            File.Move(tempPath, path);
+            tempPath = string.Empty;
+        }
+        finally
+        {
+            if (!string.IsNullOrEmpty(tempPath) && File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    private static void ReplaceWithFallback(string tempPath, string path, string content)
+    {
+        Exception? replaceFailure = null;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                File.Replace(tempPath, path, null, ignoreMetadataErrors: true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                replaceFailure = ex;
+                System.Threading.Thread.Sleep(50 * (attempt + 1));
+            }
+        }
+
+        try
+        {
+            OverwriteInPlace(path, content);
+            File.Delete(tempPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException(
+                $"Failed to replace '{path}' after repeated retries and in-place fallback.",
+                new AggregateException(replaceFailure ?? ex, ex));
+        }
+    }
+
+    private static void OverwriteInPlace(string path, string content)
+    {
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        using var writer = new StreamWriter(stream, Encoding.UTF8);
+        writer.Write(content);
     }
 
     private static string FormatIssueId(int id) => id.ToString("0000");
@@ -395,6 +509,75 @@ public sealed class WorkspaceStore
         public int NextRunId { get; init; } = 1;
         public int NextDecisionId { get; init; } = 1;
         public int NextPipelineId { get; init; } = 1;
+    }
+
+    private sealed class FlexibleDateTimeOffsetJsonConverter : JsonConverter<DateTimeOffset>
+    {
+        private static readonly string[] LegacyFormats =
+        [
+            "dd/MM/yyyy HH:mm:ss",
+            "d/M/yyyy HH:mm:ss",
+            "MM/dd/yyyy HH:mm:ss",
+            "M/d/yyyy HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss"
+        ];
+
+        public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return reader.TokenType switch
+            {
+                JsonTokenType.String => ParseString(reader.GetString() ?? string.Empty),
+                JsonTokenType.Number => ParseNumber(ref reader),
+                _ => throw new JsonException($"Unexpected token {reader.TokenType} for DateTimeOffset.")
+            };
+        }
+
+        public override void Write(Utf8JsonWriter writer, DateTimeOffset value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(value.ToString("O", CultureInfo.InvariantCulture));
+
+        private static DateTimeOffset ParseString(string value)
+        {
+            if (DateTimeOffset.TryParse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind,
+                out var parsed))
+            {
+                return parsed;
+            }
+
+            if (DateTimeOffset.TryParse(
+                value,
+                CultureInfo.CurrentCulture,
+                DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeLocal,
+                out parsed))
+            {
+                return parsed;
+            }
+
+            foreach (var culture in new[] { CultureInfo.InvariantCulture, CultureInfo.GetCultureInfo("en-GB"), CultureInfo.GetCultureInfo("nl-NL") })
+            {
+                if (DateTime.TryParseExact(
+                    value,
+                    LegacyFormats,
+                    culture,
+                    DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeLocal,
+                    out var localDateTime))
+                {
+                    return new DateTimeOffset(localDateTime);
+                }
+            }
+
+            throw new JsonException($"The JSON value '{value}' could not be converted to {nameof(DateTimeOffset)}.");
+        }
+
+        private static DateTimeOffset ParseNumber(ref Utf8JsonReader reader)
+        {
+            var numeric = reader.GetInt64();
+            return numeric > 9_999_999_999
+                ? DateTimeOffset.FromUnixTimeMilliseconds(numeric)
+                : DateTimeOffset.FromUnixTimeSeconds(numeric);
+        }
     }
 }
 

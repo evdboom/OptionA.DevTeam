@@ -14,6 +14,8 @@ var tests = new List<(string Name, Action Run)>
     ("Tool update check detects newer stable versions", TestToolUpdateCheckDetectsNewerStableVersions),
     ("Tool update command targets the global package", TestToolUpdateCommandTargetsGlobalPackage),
     ("SDK session config wires workspace MCP server", TestSdkSessionConfigWiresWorkspaceMcp),
+    ("SDK session config wires external MCP servers", TestSdkSessionConfigWiresExternalMcpServers),
+    ("Workspace loads MCP server definitions", TestWorkspaceLoadsMcpServers),
     ("Planning session is reused across planning retries", TestPlanningSessionIsReusedAcrossPlanningRetries),
     ("Issue retries reuse the same session", TestIssueRetriesReuseTheSameSession),
     ("Parallel pipelines keep isolated sessions", TestParallelPipelinesKeepIsolatedSessions),
@@ -21,6 +23,8 @@ var tests = new List<(string Name, Action Run)>
     ("Plan workflow blocks run before planning", TestPlanWorkflowBlocksRunBeforePlanning),
     ("Workspace loads default modes", TestWorkspaceLoadsModes),
     ("Set mode updates active mode and pipeline defaults", TestSetModeUpdatesRuntimeConfiguration),
+    ("Set keep-awake updates runtime configuration", TestSetKeepAwakeUpdatesRuntimeConfiguration),
+    ("Goal input resolver loads markdown from file", TestGoalInputResolverLoadsMarkdownFromFile),
     ("DevTeam assets load from .devteam-source first", TestPromptAssetsPreferDevTeamSource),
     ("Run-loop executes queued work with normal verbosity", TestRunLoopExecutesWork),
     ("Execution loop uses orchestrator-selected batch", TestExecutionLoopUsesOrchestratorSelectedBatch),
@@ -36,6 +40,7 @@ var tests = new List<(string Name, Action Run)>
     ("Parallel loop executes independent areas concurrently", TestParallelLoopExecutesIndependentAreas),
     ("Conflict prevention avoids same-area parallel runs", TestConflictPreventionAvoidsSameAreaRuns),
     ("Architect pipeline completion creates developer follow-up", TestArchitectPipelineCompletionCreatesDeveloperFollowUp),
+    ("Developer pipeline completion creates tester follow-up", TestDeveloperPipelineCompletionCreatesTesterFollowUp),
     ("Architect work gates non-architect execution", TestArchitectWorkGatesNonArchitectExecution),
     ("Priority gap can reduce pipeline concurrency", TestPriorityGapReducesPipelineConcurrency),
     ("Mode guardrails appear in agent prompt", TestModeGuardrailsAppearInPrompt),
@@ -43,14 +48,18 @@ var tests = new List<(string Name, Action Run)>
     ("Collapsed response headers still parse cleanly", TestCollapsedResponseHeadersParseCleanly),
     ("Run artifacts capture superpowers and tools used", TestRunArtifactsCaptureUsageMetadata),
     ("Legacy workspaces hydrate missing roles and superpowers", TestLegacyWorkspaceHydratesMetadata),
+    ("Workspace loads legacy execution selection timestamps", TestWorkspaceLoadsLegacyExecutionSelectionTimestamp),
     ("Friendly role names resolve to canonical roles", TestFriendlyRoleNamesResolve),
     ("External repos fall back to packaged prompt assets", TestExternalReposFallBackToPackagedAssets),
     ("Git helper initializes repository when missing", TestGitHelperInitializesRepository),
     ("Git helper stages only iteration changes", TestGitHelperStagesOnlyIterationChanges),
     ("Loop stages changed files after iteration", TestLoopStagesChangedFilesAfterIteration),
     ("Workspace manifest shards large collections", TestWorkspaceManifestShardsCollections),
+    ("Concurrent workspace saves remain parseable", TestConcurrentWorkspaceSavesRemainParseable),
+    ("Workspace save tolerates replace-blocking readers", TestWorkspaceSaveToleratesReplaceBlockingReaders),
     ("Prompt asset bodies are not persisted in state files", TestPromptAssetsAreNotPersisted),
-    ("Parallel heartbeats cover all running issues", TestParallelHeartbeatsCoverAllRunningIssues)
+    ("Execution orchestrator emits heartbeat while selecting batch", TestExecutionOrchestratorEmitsHeartbeat),
+    ("Existing pipeline follow-ups are normalized", TestExistingPipelineFollowUpsAreNormalized)
 };
 
 var failures = new List<string>();
@@ -222,6 +231,56 @@ static void TestSdkSessionConfigWiresWorkspaceMcp()
     AssertTrue(server.Args.Contains(harness.Store.WorkspacePath), "MCP command should target the workspace path.");
 }
 
+static void TestSdkSessionConfigWiresExternalMcpServers()
+{
+    using var harness = new TestHarness();
+    var request = new AgentInvocationRequest
+    {
+        Prompt = "Look up library docs.",
+        Model = "gpt-5.4",
+        SessionId = "dev-run-001",
+        WorkingDirectory = harness.RepoRoot,
+        EnableWorkspaceMcp = false,
+        ExternalMcpServers =
+        [
+            new McpServerDefinition
+            {
+                Name = "context7",
+                Command = "npx",
+                Args = ["-y", "@upstash/context7-mcp@latest"],
+                Enabled = true
+            },
+            new McpServerDefinition
+            {
+                Name = "disabled-server",
+                Command = "npx",
+                Args = ["-y", "some-disabled-mcp"],
+                Enabled = false
+            }
+        ]
+    };
+
+    var sessionConfig = WorkspaceMcpSessionConfigFactory.BuildSessionConfig(request);
+    var mcpServers = sessionConfig.McpServers ?? throw new InvalidOperationException("Session config should include external MCP servers.");
+    AssertTrue(mcpServers.ContainsKey("context7"), "Context7 MCP server should be registered.");
+    AssertTrue(!mcpServers.ContainsKey("disabled-server"), "Disabled MCP server should not be registered.");
+    var context7 = mcpServers["context7"] as GitHub.Copilot.SDK.McpLocalServerConfig;
+    AssertTrue(context7 is not null, "Context7 config should be a local MCP server.");
+    AssertEqual("npx", context7!.Command, "Context7 should launch via npx.");
+    AssertTrue(context7.Args.Contains("@upstash/context7-mcp@latest"), "Context7 should reference the correct package.");
+}
+
+static void TestWorkspaceLoadsMcpServers()
+{
+    using var harness = new TestHarness();
+
+    AssertTrue(harness.State.McpServers.Count >= 1, "Workspace should load MCP server definitions from MCP_SERVERS.json.");
+    AssertTrue(harness.State.McpServers.Any(s => s.Name == "context7"), "Context7 MCP server should be loaded.");
+    var context7 = harness.State.McpServers.First(s => s.Name == "context7");
+    AssertEqual("npx", context7.Command, "Context7 command should be npx.");
+    AssertTrue(context7.Enabled, "Context7 should be enabled by default.");
+}
+
 static void TestWorkspaceLoadsModes()
 {
     using var harness = new TestHarness();
@@ -376,6 +435,45 @@ static void TestSetModeUpdatesRuntimeConfiguration()
     AssertEqual("creative-writing", harness.State.Runtime.ActiveModeSlug, "Mode should update.");
     AssertTrue(harness.State.Runtime.DefaultPipelineRoles.SequenceEqual(["architect", "developer", "reviewer"]),
         "Creative writing mode should swap the default pipeline roles.");
+}
+
+static void TestSetKeepAwakeUpdatesRuntimeConfiguration()
+{
+    using var harness = new TestHarness();
+
+    AssertTrue(!harness.State.Runtime.KeepAwakeEnabled, "Keep-awake should be disabled by default.");
+    harness.Runtime.SetKeepAwake(harness.State, true);
+
+    AssertTrue(harness.State.Runtime.KeepAwakeEnabled, "Keep-awake should be enabled after the runtime update.");
+}
+
+static void TestGoalInputResolverLoadsMarkdownFromFile()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+    try
+    {
+        var goalPath = Path.Combine(tempRoot, "goal.md");
+        File.WriteAllText(goalPath, """
+# Vision
+Build an agent-native programming language.
+
+# Context
+- Must be understandable by coding agents
+- Must run broadly
+""");
+
+        var goal = GoalInputResolver.Resolve(null, "goal.md", tempRoot);
+
+        AssertTrue(goal is not null, "Goal file should resolve to goal text.");
+        var resolvedGoal = goal ?? throw new InvalidOperationException("Goal file should resolve to goal text.");
+        AssertTrue(resolvedGoal.Contains("# Vision", StringComparison.Ordinal), "Goal file markdown should be preserved.");
+        AssertTrue(resolvedGoal.Contains("understandable by coding agents", StringComparison.Ordinal), "Goal file body should be loaded.");
+    }
+    finally
+    {
+        TryCleanupTempRepo(tempRoot);
+    }
 }
 
 static void TestPromptAssetsPreferDevTeamSource()
@@ -780,6 +878,25 @@ static void TestArchitectPipelineCompletionCreatesDeveloperFollowUp()
     AssertTrue(developerIssue is not null, "Architect completion should create a developer follow-up.");
     AssertTrue(developerIssue!.DependsOnIssueIds.Contains(architectIssue.Id), "Developer follow-up should depend on the architect issue.");
     AssertTrue(developerIssue.PipelineId == architectIssue.PipelineId, "Follow-up should stay in the same pipeline.");
+    AssertEqual("Implement gameplay slice", developerIssue.Title, "Developer follow-up title should reflect the implementation stage.");
+    AssertTrue(developerIssue.Detail.Contains("Implement gameplay slice", StringComparison.Ordinal), "Developer follow-up detail should reflect the implementation stage.");
+}
+
+static void TestDeveloperPipelineCompletionCreatesTesterFollowUp()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    var developerIssue = harness.Runtime.AddIssue(harness.State, "Create HTML5 Canvas game scaffold with bird physics", "Create the scaffold and render loop.", "frontend-developer", 100, null, [], "game-core");
+
+    var queued = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, queued.QueuedRuns.Single().RunId, "completed", "Implementation complete.");
+
+    var testerIssue = harness.State.Issues.SingleOrDefault(issue => issue.ParentIssueId == developerIssue.Id && issue.RoleSlug == "tester");
+    AssertTrue(testerIssue is not null, "Developer completion should create a tester follow-up.");
+    AssertTrue(testerIssue!.DependsOnIssueIds.Contains(developerIssue.Id), "Tester follow-up should depend on the developer issue.");
+    AssertTrue(testerIssue.PipelineId == developerIssue.PipelineId, "Follow-up should stay in the same pipeline.");
+    AssertEqual("Test HTML5 Canvas game scaffold with bird physics", testerIssue.Title, "Tester follow-up title should reflect the validation stage.");
+    AssertTrue(testerIssue.Detail.Contains("Test HTML5 Canvas game scaffold with bird physics", StringComparison.Ordinal), "Tester follow-up detail should reflect the validation stage.");
 }
 
 static void TestArchitectWorkGatesNonArchitectExecution()
@@ -832,6 +949,8 @@ static void TestModeGuardrailsAppearInPrompt()
     AssertTrue(prompt.Contains("Active mode:", StringComparison.Ordinal), "Prompt should include the active mode.");
     AssertTrue(prompt.Contains("Always build the changed project or solution", StringComparison.Ordinal), "Develop guardrails should be included in the prompt.");
     AssertTrue(prompt.Contains("unit tests, integration tests", StringComparison.Ordinal), "Testing guardrails should be visible to the agent.");
+    AssertTrue(prompt.Contains(".gitignore", StringComparison.Ordinal), "Develop guardrails should require repo hygiene.");
+    AssertTrue(prompt.Contains("README.md", StringComparison.Ordinal), "Develop guardrails should require runnable documentation.");
 }
 
 static void TestPipelineHandoffAppearsInPrompt()
@@ -969,6 +1088,42 @@ static void TestLegacyWorkspaceHydratesMetadata()
     }
 }
 
+static void TestWorkspaceLoadsLegacyExecutionSelectionTimestamp()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+    try
+    {
+        var repoRoot = TestHarness.FindRepoRootForTests();
+        var store = new WorkspaceStore(Path.Combine(tempRoot, ".devteam"));
+        var state = store.Initialize(repoRoot, 25, 6);
+        state.ExecutionSelection = new ExecutionSelectionState
+        {
+            SelectedIssueIds = [3, 8],
+            Rationale = "Legacy orchestrator selection.",
+            SessionId = "legacy-session",
+            UpdatedAtUtc = new DateTimeOffset(2026, 03, 20, 11, 34, 50, TimeSpan.Zero)
+        };
+        store.Save(state);
+
+        var manifest = File.ReadAllText(store.StatePath)
+            .Replace("\"UpdatedAtUtc\": \"2026-03-20T11:34:50.0000000+00:00\"", "\"UpdatedAtUtc\": \"20/03/2026 11:34:50\"", StringComparison.Ordinal);
+        File.WriteAllText(store.StatePath, manifest);
+
+        var loaded = store.Load();
+        store.Save(loaded);
+        var persistedJson = File.ReadAllText(store.StatePath);
+
+        AssertTrue(loaded.ExecutionSelection.SelectedIssueIds.SequenceEqual([3, 8]), "Legacy execution selection should load.");
+        AssertEqual("legacy-session", loaded.ExecutionSelection.SessionId, "Legacy execution selection session should load.");
+        AssertTrue(persistedJson.Contains("\"UpdatedAtUtc\": \"2026-03-20T11:34:50.0000000", StringComparison.Ordinal), "Saving after load should rewrite the timestamp in round-trip format.");
+    }
+    finally
+    {
+        TryCleanupTempRepo(tempRoot);
+    }
+}
+
 static void TestFriendlyRoleNamesResolve()
 {
     using var harness = new TestHarness();
@@ -1086,6 +1241,71 @@ static void TestLoopStagesChangedFilesAfterIteration()
     }
 }
 
+static void TestConcurrentWorkspaceSavesRemainParseable()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+    try
+    {
+        var repoRoot = TestHarness.FindRepoRootForTests();
+        var store = new WorkspaceStore(Path.Combine(tempRoot, ".devteam"));
+        var state = store.Initialize(repoRoot, 25, 6);
+        for (var index = 0; index < 40; index++)
+        {
+            state.Issues.Add(new IssueItem
+            {
+                Id = state.NextIssueId++,
+                Title = $"Issue {index}",
+                Detail = new string('x', 200),
+                RoleSlug = "developer",
+                Priority = 50
+            });
+        }
+        store.Save(state);
+
+        var storeA = new WorkspaceStore(store.WorkspacePath);
+        var storeB = new WorkspaceStore(store.WorkspacePath);
+        var stateA = storeA.Load();
+        var stateB = storeB.Load();
+        var gate = new ManualResetEventSlim(false);
+
+        var taskA = Task.Run(() =>
+        {
+            gate.Wait();
+            for (var index = 0; index < 10; index++)
+            {
+                stateA.Budget.CreditsCommitted = index;
+                storeA.Save(stateA);
+            }
+        });
+
+        var taskB = Task.Run(() =>
+        {
+            gate.Wait();
+            for (var index = 0; index < 10; index++)
+            {
+                stateB.Budget.PremiumCreditsCommitted = index;
+                storeB.Save(stateB);
+            }
+        });
+
+        gate.Set();
+        Task.WaitAll(taskA, taskB);
+
+        var loaded = store.Load();
+        using var manifestJson = System.Text.Json.JsonDocument.Parse(File.ReadAllText(store.StatePath));
+        using var issuesJson = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(store.StateDirectoryPath, "issues.json")));
+
+        AssertTrue(loaded.Issues.Count >= 40, "Concurrent saves should leave the workspace parseable.");
+        AssertTrue(manifestJson.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object, "Manifest should remain valid JSON.");
+        AssertTrue(issuesJson.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array, "Issues collection should remain valid JSON.");
+    }
+    finally
+    {
+        TryCleanupTempRepo(tempRoot);
+    }
+}
+
 static void TestWorkspaceManifestShardsCollections()
 {
     using var harness = new TestHarness();
@@ -1105,6 +1325,40 @@ static void TestWorkspaceManifestShardsCollections()
     AssertTrue(questionsJson.Contains("support plugins", StringComparison.Ordinal), "Questions should be stored in the sharded questions file.");
 }
 
+static void TestWorkspaceSaveToleratesReplaceBlockingReaders()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+    try
+    {
+        var repoRoot = TestHarness.FindRepoRootForTests();
+        var store = new WorkspaceStore(Path.Combine(tempRoot, ".devteam"));
+        var state = store.Initialize(repoRoot, 25, 6);
+        store.Save(state);
+
+        var questionsPath = Path.Combine(store.WorkspacePath, "questions.md");
+        using var reader = new FileStream(questionsPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+
+        state.Questions.Add(new QuestionItem
+        {
+            Id = state.NextQuestionId++,
+            Text = "How should the player start the game?",
+            Status = QuestionStatus.Open,
+            IsBlocking = false
+        });
+
+        store.Save(state);
+
+        var questionsText = File.ReadAllText(questionsPath);
+        AssertTrue(questionsText.Contains("How should the player start the game?", StringComparison.Ordinal),
+            "Workspace save should succeed even when replace-style swaps are blocked by an open reader.");
+    }
+    finally
+    {
+        TryCleanupTempRepo(tempRoot);
+    }
+}
+
 static void TestPromptAssetsAreNotPersisted()
 {
     using var harness = new TestHarness();
@@ -1122,21 +1376,31 @@ static void TestPromptAssetsAreNotPersisted()
     AssertTrue(!File.Exists(superpowersPath), "Superpowers should not be persisted into the state directory.");
 }
 
-static void TestParallelHeartbeatsCoverAllRunningIssues()
+static void TestExecutionOrchestratorEmitsHeartbeat()
 {
     using var harness = new TestHarness();
     harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
-    harness.Runtime.AddIssue(harness.State, "Short task", "", "developer", 100, null, [], "alpha");
-    harness.Runtime.AddIssue(harness.State, "Long task", "", "tester", 90, null, [], "beta");
+    var issue = harness.Runtime.AddIssue(harness.State, "Plan gameplay architecture", "", "architect", 100, null, [], "gameplay");
     harness.Store.Save(harness.State);
     var messages = new List<string>();
     var executor = new LoopExecutor(
         harness.Runtime,
         harness.Store,
-        _ => new FakeStaggeredAgentClient(
-            "OUTCOME: completed\nSUMMARY:\nDone.",
-            TimeSpan.FromMilliseconds(150),
-            TimeSpan.FromMilliseconds(350)));
+        _ => new FakeStaggeredAgentClient("""
+OUTCOME: completed
+SUMMARY:
+Run the architect batch first.
+SELECTED_ISSUES:
+- ISSUE_ID
+ISSUES:
+(none)
+SUPERPOWERS_USED:
+(none)
+TOOLS_USED:
+(none)
+QUESTIONS:
+(none)
+""".Replace("ISSUE_ID", issue.Id.ToString(), StringComparison.Ordinal), TimeSpan.FromMilliseconds(150), TimeSpan.Zero));
 
     executor.RunAsync(
         harness.State,
@@ -1144,19 +1408,36 @@ static void TestParallelHeartbeatsCoverAllRunningIssues()
         {
             Backend = "sdk",
             MaxIterations = 1,
-            MaxSubagents = 2,
+            MaxSubagents = 1,
             HeartbeatInterval = TimeSpan.FromMilliseconds(100),
             Verbosity = LoopVerbosity.Normal
         },
         messages.Add).GetAwaiter().GetResult();
 
-    var firstOutcomeIndex = messages.FindIndex(message => message.Contains("Outcome:", StringComparison.Ordinal));
-    var heartbeat1Index = messages.FindIndex(message => message.Contains("Still running issue #1", StringComparison.Ordinal));
-    var heartbeat2Index = messages.FindIndex(message => message.Contains("Still running issue #2", StringComparison.Ordinal));
+    var heartbeatIndex = messages.FindIndex(message => message.Contains("Still running execution orchestrator", StringComparison.Ordinal));
+    var outcomeIndex = messages.FindIndex(message => message.Contains("Execution orchestrator outcome:", StringComparison.Ordinal));
 
-    AssertTrue(heartbeat1Index >= 0, "First issue should emit a heartbeat.");
-    AssertTrue(heartbeat2Index >= 0, "Second issue should emit a heartbeat while the first is still pending.");
-    AssertTrue(heartbeat2Index < firstOutcomeIndex, "Heartbeat for the second issue should appear before the first completion.");
+    AssertTrue(heartbeatIndex >= 0, "Execution orchestrator should emit a heartbeat while selecting a batch.");
+    AssertTrue(outcomeIndex > heartbeatIndex, "Execution orchestrator outcome should be logged after the heartbeat.");
+}
+
+static void TestExistingPipelineFollowUpsAreNormalized()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    var architectIssue = harness.Runtime.AddIssue(harness.State, "Design gameplay slice", "Outline the gameplay slice.", "architect", 100, null, [], "gameplay");
+
+    var queued = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, queued.QueuedRuns.Single().RunId, "completed", "Architecture complete.");
+
+    var developerIssue = harness.State.Issues.Single(issue => issue.ParentIssueId == architectIssue.Id && issue.RoleSlug == "developer");
+    developerIssue.Title = architectIssue.Title;
+    developerIssue.Detail = architectIssue.Detail;
+
+    _ = harness.Runtime.BuildStatusReport(harness.State);
+
+    AssertEqual("Implement gameplay slice", developerIssue.Title, "Existing inherited follow-up titles should be normalized.");
+    AssertTrue(developerIssue.Detail.Contains("Implement gameplay slice", StringComparison.Ordinal), "Existing inherited follow-up details should be normalized.");
 }
 
 static void AssertEqual<T>(T expected, T actual, string label)

@@ -69,12 +69,25 @@ Create or open a repository, then initialize DevTeam:
 devteam /init --workspace .devteam --goal "Build a Flappy Bird game"
 ```
 
+For longer goals or markdown-based project briefs, load the goal from a file:
+
+```powershell
+devteam /init --workspace .devteam --goal-file .\goal.md
+```
+
 This creates a local workspace and, if needed, initializes a git repository first.
 
 Start the interactive shell:
 
 ```powershell
 devteam /start --workspace .devteam
+```
+
+If you want DevTeam to keep Windows awake during long shell or loop sessions,
+enable it explicitly:
+
+```powershell
+devteam /set-keep-awake true --workspace .devteam
 ```
 
 Generate the first plan:
@@ -116,6 +129,7 @@ Common shell commands:
 /plan
 /questions
 /budget
+/keep-awake on
 /check-update
 /update
 /feedback Narrow the first milestone.
@@ -134,6 +148,12 @@ Initialize a workspace:
 devteam /init --workspace .devteam --goal "Build a CLI Tetris clone"
 ```
 
+You can also update the active goal from a markdown file later:
+
+```powershell
+devteam /set-goal --workspace .devteam --goal-file .\goal.md
+```
+
 Generate and inspect a plan:
 
 ```powershell
@@ -150,6 +170,12 @@ Run the loop:
 
 ```powershell
 devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3
+```
+
+One-off keep-awake override for a long run:
+
+```powershell
+devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3 --keep-awake true
 ```
 
 Check status:

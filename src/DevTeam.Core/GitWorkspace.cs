@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace DevTeam.Core;
 
@@ -114,6 +115,8 @@ public static class GitWorkspace
 
     private static GitCommandResult RunGit(string workingDirectory, IReadOnlyList<string> arguments)
     {
+        var stdout = new StringBuilder();
+        var stderr = new StringBuilder();
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -127,6 +130,21 @@ public static class GitWorkspace
             }
         };
 
+        process.OutputDataReceived += (_, args) =>
+        {
+            if (args.Data is not null)
+            {
+                stdout.AppendLine(args.Data);
+            }
+        };
+        process.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is not null)
+            {
+                stderr.AppendLine(args.Data);
+            }
+        };
+
         foreach (var argument in arguments)
         {
             process.StartInfo.ArgumentList.Add(argument);
@@ -137,19 +155,22 @@ public static class GitWorkspace
             throw new InvalidOperationException("Failed to start git.");
         }
 
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
         if (!process.WaitForExit(30_000))
         {
             try { process.Kill(); } catch { }
             throw new InvalidOperationException("Git command timed out after 30 seconds.");
         }
+        process.WaitForExit();
+        var stdoutText = stdout.ToString();
+        var stderrText = stderr.ToString();
         if (process.ExitCode != 0)
         {
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "Git command failed." : stderr.Trim());
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderrText) ? "Git command failed." : stderrText.Trim());
         }
 
-        return new GitCommandResult(process.ExitCode, stdout, stderr);
+        return new GitCommandResult(process.ExitCode, stdoutText, stderrText);
     }
 
     private sealed record GitCommandResult(int ExitCode, string StdOut, string StdErr);

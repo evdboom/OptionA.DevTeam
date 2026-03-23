@@ -23,6 +23,7 @@ Your handoff MUST include:
 3. **Issues verified** — which issues were tested and whether they pass
 4. **Bugs found** — new issues created for any failures
 5. **Coverage gaps** — what still needs testing
+6. **Docs checked** — whether the README or run instructions match the actual way to launch and verify the project
 
 ## Bug Report Format
 Create issues for bugs found:
@@ -51,3 +52,4 @@ What actually happens.
 - Test what was built, not hypothetical scenarios
 - If no test framework exists, add a minimal smoke test (script that runs and checks exit code)
 - Prefer automated tests over manual verification where possible
+- Verify the documented run steps actually work, and flag missing or stale README/run instructions as issues when they block validation

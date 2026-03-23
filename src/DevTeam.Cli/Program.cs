@@ -16,7 +16,7 @@ try
     switch (command)
     {
         case "start":
-            return await RunInteractiveShellAsync(store, runtime, loopExecutor, toolUpdateService);
+            return await RunInteractiveShellAsync(store, runtime, loopExecutor, toolUpdateService, options);
 
         case "check-update":
             return await CheckForToolUpdatesAsync(toolUpdateService);
@@ -43,10 +43,14 @@ try
             }
             var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
             var premiumCap = GetDoubleOption(options, "premium-credit-cap", 6);
-            var goal = GetOption(options, "goal") ?? GetPositionalValue(options);
+            var goal = GoalInputResolver.Resolve(
+                GetOption(options, "goal") ?? GetPositionalValue(options),
+                GetOption(options, "goal-file"),
+                Environment.CurrentDirectory);
             var gitInitialized = GitWorkspace.EnsureRepository(Environment.CurrentDirectory);
             var state = store.Initialize(Environment.CurrentDirectory, totalCap, premiumCap);
             var mode = GetOption(options, "mode");
+            state.Runtime.KeepAwakeEnabled = GetBoolOption(options, "keep-awake", state.Runtime.KeepAwakeEnabled);
             state.Runtime.WorkspaceMcpEnabled = GetBoolOption(options, "workspace-mcp", true);
             state.Runtime.PipelineSchedulingEnabled = GetBoolOption(options, "pipeline-scheduling", true);
             if (!string.IsNullOrWhiteSpace(mode))
@@ -83,7 +87,11 @@ try
         case "goal":
         {
             var state = store.Load();
-            var goal = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing goal text.");
+            var goal = GoalInputResolver.Resolve(
+                GetPositionalValue(options),
+                GetOption(options, "goal-file"),
+                Environment.CurrentDirectory)
+                ?? throw new InvalidOperationException("Missing goal text. Provide inline text or --goal-file PATH.");
             runtime.SetGoal(state, goal);
             store.Save(state);
             Console.WriteLine("Updated active goal.");
@@ -98,6 +106,19 @@ try
             runtime.SetMode(state, mode);
             store.Save(state);
             Console.WriteLine($"Updated active mode to {state.Runtime.ActiveModeSlug}.");
+            return 0;
+        }
+
+        case "set-keep-awake":
+        case "keep-awake":
+        {
+            var state = store.Load();
+            var requested = GetPositionalValue(options) ?? GetOption(options, "enabled")
+                ?? throw new InvalidOperationException("Usage: set-keep-awake <true|false> [--workspace PATH]");
+            var enabled = ParseBoolOrThrow(requested, "Usage: set-keep-awake <true|false> [--workspace PATH]");
+            runtime.SetKeepAwake(state, enabled);
+            store.Save(state);
+            Console.WriteLine($"Updated keep-awake setting to {(enabled ? "enabled" : "disabled")}.");
             return 0;
         }
 
@@ -298,12 +319,21 @@ static async Task<int> RunInteractiveShellAsync(
     WorkspaceStore store,
     DevTeamRuntime runtime,
     LoopExecutor loopExecutor,
-    ToolUpdateService toolUpdateService)
+    ToolUpdateService toolUpdateService,
+    Dictionary<string, List<string>> startOptions)
 {
+    using var keepAwakeController = new KeepAwakeController();
+    var shellKeepAwakeEnabled = GetNullableBoolOption(startOptions, "keep-awake");
     Console.WriteLine("DevTeam interactive shell");
     Console.WriteLine($"Workspace: {store.WorkspacePath}");
     Console.WriteLine("Type /help for commands. Type /exit to quit.");
     await NotifyAboutAvailableUpdateAsync(toolUpdateService);
+    TryLoadState(store, out var initialState);
+    if (shellKeepAwakeEnabled is null)
+    {
+        shellKeepAwakeEnabled = initialState?.Runtime.KeepAwakeEnabled ?? false;
+    }
+    ApplyKeepAwakeSetting(keepAwakeController, shellKeepAwakeEnabled.Value, interactiveShell: true, Console.WriteLine);
 
     while (true)
     {
@@ -405,10 +435,14 @@ static async Task<int> RunInteractiveShellAsync(
                     }
                     var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
                     var premiumCap = GetDoubleOption(options, "premium-credit-cap", 6);
-                    var goal = GetOption(options, "goal") ?? GetPositionalValue(options);
+                    var goal = GoalInputResolver.Resolve(
+                        GetOption(options, "goal") ?? GetPositionalValue(options),
+                        GetOption(options, "goal-file"),
+                        Environment.CurrentDirectory);
                     var gitInitialized = GitWorkspace.EnsureRepository(Environment.CurrentDirectory);
                     var initialized = store.Initialize(Environment.CurrentDirectory, totalCap, premiumCap);
                     var mode = GetOption(options, "mode");
+                    initialized.Runtime.KeepAwakeEnabled = GetBoolOption(options, "keep-awake", initialized.Runtime.KeepAwakeEnabled);
                     initialized.Runtime.WorkspaceMcpEnabled = GetBoolOption(options, "workspace-mcp", true);
                     initialized.Runtime.PipelineSchedulingEnabled = GetBoolOption(options, "pipeline-scheduling", true);
                     if (!string.IsNullOrWhiteSpace(mode))
@@ -468,7 +502,11 @@ static async Task<int> RunInteractiveShellAsync(
                 case "set-goal":
                 {
                     var current = store.Load();
-                    var goal = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing goal text.");
+                    var goal = GoalInputResolver.Resolve(
+                        GetPositionalValue(options),
+                        GetOption(options, "goal-file"),
+                        Environment.CurrentDirectory)
+                        ?? throw new InvalidOperationException("Missing goal text. Provide inline text or --goal-file PATH.");
                     runtime.SetGoal(current, goal);
                     store.Save(current);
                     Console.WriteLine("Updated active goal.");
@@ -483,6 +521,38 @@ static async Task<int> RunInteractiveShellAsync(
                     runtime.SetMode(current, mode);
                     store.Save(current);
                     Console.WriteLine($"Updated active mode to {current.Runtime.ActiveModeSlug}.");
+                    break;
+                }
+
+                case "keep-awake":
+                case "set-keep-awake":
+                {
+                    var current = TryLoadState(store, out var loadedState) ? loadedState : null;
+                    var requested = GetPositionalValue(options) ?? GetOption(options, "enabled");
+                    if (string.IsNullOrWhiteSpace(requested))
+                    {
+                        var persisted = current?.Runtime.KeepAwakeEnabled;
+                        Console.WriteLine($"Keep-awake for this shell: {(shellKeepAwakeEnabled == true ? "enabled" : "disabled")}.");
+                        if (persisted is not null)
+                        {
+                            Console.WriteLine($"Workspace default: {(persisted.Value ? "enabled" : "disabled")}.");
+                        }
+                        break;
+                    }
+
+                    var enabled = ParseBoolOrThrow(requested, "Usage: /keep-awake <on|off>");
+                    shellKeepAwakeEnabled = enabled;
+                    ApplyKeepAwakeSetting(keepAwakeController, enabled, interactiveShell: true);
+                    if (current is not null)
+                    {
+                        runtime.SetKeepAwake(current, enabled);
+                        store.Save(current);
+                        Console.WriteLine($"Keep-awake {(enabled ? "enabled" : "disabled")} for this shell and workspace.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Keep-awake {(enabled ? "enabled" : "disabled")} for this shell session.");
+                    }
                     break;
                 }
 
@@ -603,11 +673,14 @@ static async Task<LoopExecutionReport> RunLoopAsync(
     var maxIterations = GetIntOption(options, "max-iterations", 10);
     var timeoutSeconds = GetIntOption(options, "timeout-seconds", 600);
     var verbosity = ParseVerbosity(GetOption(options, "verbosity"));
+    using var keepAwakeController = new KeepAwakeController();
     using var renderer = interactiveShell && !Console.IsOutputRedirected
         ? new LoopConsoleRenderer()
         : null;
     Action<IReadOnlyList<RunProgressSnapshot>>? progressReporter = renderer is null ? null : snapshots => renderer.ReportProgress(snapshots);
     Action<string> logger = renderer is null ? Console.WriteLine : message => renderer.Log(message);
+    var keepAwakeEnabled = ResolveKeepAwakeEnabled(state, options);
+    ApplyKeepAwakeSetting(keepAwakeController, keepAwakeEnabled, interactiveShell, logger);
     var executionOptions = new LoopExecutionOptions
     {
         Backend = backend,
@@ -642,7 +715,7 @@ static async Task ShowPlanAsync(
             Console.WriteLine(interactive
                 ? "No plan has been written yet. Running the planner..."
                 : "No plan has been written yet. Running the planner first...");
-            return RunLoopAsync(store, runtime, loopExecutor, planningState, BuildPlanningOptions(options));
+            return RunLoopAsync(store, runtime, loopExecutor, planningState, BuildPlanningOptions(options), interactiveShell: interactive);
         });
 
     switch (result.Status)
@@ -695,6 +768,7 @@ static void PrintStatus(WorkspaceState state, DevTeamRuntime runtime)
     var report = runtime.BuildStatusReport(state);
     Console.WriteLine($"Phase: {state.Phase}");
     Console.WriteLine($"Mode: {state.Runtime.ActiveModeSlug}");
+    Console.WriteLine($"Keep awake: {(state.Runtime.KeepAwakeEnabled ? "enabled" : "disabled")}");
     Console.WriteLine(
         $"Counts: roadmap={report.Counts["roadmap"]}, issues={report.Counts["issues"]}, " +
         $"questions={report.Counts["questions"]}, runs={report.Counts["runs"]}, " +
@@ -819,11 +893,12 @@ static void PrintHelp()
 {
     Console.WriteLine("DevTeam CLI");
     Console.WriteLine("Commands (plain or slash-prefixed, for example `/init`):");
-    Console.WriteLine("  start [--workspace PATH]");
-    Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT] [--mode SLUG] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false]");
+    Console.WriteLine("  start [--keep-awake true|false] [--workspace PATH]");
+    Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false]");
     Console.WriteLine("  customize [--force]                Copy default roles, modes, and superpowers to .devteam-source/ for editing");
-    Console.WriteLine("  set-goal <TEXT> [--workspace PATH]");
+    Console.WriteLine("  set-goal <TEXT> [--goal-file PATH] [--workspace PATH]");
     Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
+    Console.WriteLine("  set-keep-awake <true|false> [--workspace PATH]");
     Console.WriteLine("  add-roadmap <TITLE> [--detail TEXT] [--priority N] [--workspace PATH]");
     Console.WriteLine("  add-issue <TITLE> --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]] [--workspace PATH]");
     Console.WriteLine("  add-question <TEXT> [--blocking] [--workspace PATH]");
@@ -836,7 +911,7 @@ static void PrintHelp()
     Console.WriteLine("  check-update");
     Console.WriteLine("  update");
     Console.WriteLine("  run-once [--max-subagents N] [--workspace PATH]");
-    Console.WriteLine("  run-loop [--backend sdk|cli] [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--verbosity quiet|normal|detailed] [--workspace PATH]");
+    Console.WriteLine("  run-loop [--backend sdk|cli] [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--verbosity quiet|normal|detailed] [--keep-awake true|false] [--workspace PATH]");
     Console.WriteLine("  complete-run --run-id N --outcome completed|failed|blocked --summary TEXT [--workspace PATH]");
     Console.WriteLine("  status [--workspace PATH]");
     Console.WriteLine("  agent-invoke [--backend sdk|cli] [--prompt TEXT] [--model NAME] [--timeout-seconds N] [--working-directory PATH] [--extra-arg ARG ...]");
@@ -846,21 +921,22 @@ static void PrintHelp()
 static void PrintInteractiveHelp()
 {
     Console.WriteLine("Interactive commands:");
-    Console.WriteLine("  /init \"goal text\" [--force] [--mode SLUG]");
+    Console.WriteLine("  /init \"goal text\" [--goal-file PATH] [--force] [--mode SLUG] [--keep-awake true|false]");
     Console.WriteLine("  /customize [--force]    Copy default assets to .devteam-source/ for editing");
     Console.WriteLine("  /status");
     Console.WriteLine("  /mode <slug>");
+    Console.WriteLine("  /keep-awake <on|off>");
     Console.WriteLine("  /add-issue \"title\" --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]]");
     Console.WriteLine("  /plan");
     Console.WriteLine("  /questions");
     Console.WriteLine("  /budget [--total N] [--premium N]");
     Console.WriteLine("  /check-update");
     Console.WriteLine("  /update");
-    Console.WriteLine("  /run [--max-iterations N] [--timeout-seconds N]");
+    Console.WriteLine("  /run [--max-iterations N] [--timeout-seconds N] [--keep-awake true|false]");
     Console.WriteLine("  /feedback <text>");
     Console.WriteLine("  /approve [note]");
     Console.WriteLine("  /answer <id> <text>");
-    Console.WriteLine("  /goal <text>");
+    Console.WriteLine("  /goal <text> [--goal-file PATH]");
     Console.WriteLine("  /exit");
     Console.WriteLine("If exactly one question is open, you can type a plain answer without `/answer`.");
     Console.WriteLine("While a plan is awaiting approval, plain text is treated as planning feedback and re-runs planning.");
@@ -965,6 +1041,84 @@ static bool GetBoolOption(Dictionary<string, List<string>> options, string key, 
         "false" or "0" or "no" or "off" => false,
         _ => fallback
     };
+}
+
+static bool? GetNullableBoolOption(Dictionary<string, List<string>> options, string key)
+{
+    var value = GetOption(options, key);
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    return ParseBoolOrThrow(value, $"Invalid boolean value '{value}'. Use true/false, yes/no, or on/off.");
+}
+
+static bool ParseBoolOrThrow(string value, string errorMessage)
+{
+    return value.Trim().ToLowerInvariant() switch
+    {
+        "true" or "1" or "yes" or "on" => true,
+        "false" or "0" or "no" or "off" => false,
+        _ => throw new InvalidOperationException(errorMessage)
+    };
+}
+
+static bool ResolveKeepAwakeEnabled(WorkspaceState state, Dictionary<string, List<string>> options) =>
+    GetNullableBoolOption(options, "keep-awake") ?? state.Runtime.KeepAwakeEnabled;
+
+static bool TryLoadState(WorkspaceStore store, out WorkspaceState? state)
+{
+    try
+    {
+        state = store.Load();
+        return true;
+    }
+    catch (InvalidOperationException)
+    {
+        state = null;
+        return false;
+    }
+    catch (IOException)
+    {
+        state = null;
+        return false;
+    }
+    catch (UnauthorizedAccessException)
+    {
+        state = null;
+        return false;
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        state = null;
+        return false;
+    }
+}
+
+static void ApplyKeepAwakeSetting(
+    KeepAwakeController controller,
+    bool enabled,
+    bool interactiveShell,
+    Action<string>? log = null)
+{
+    if (!enabled)
+    {
+        controller.SetEnabled(false);
+        return;
+    }
+
+    try
+    {
+        controller.SetEnabled(true);
+        log?.Invoke(interactiveShell
+            ? "Keep-awake enabled for this session."
+            : "Keep-awake enabled for this run.");
+    }
+    catch (InvalidOperationException ex)
+    {
+        log?.Invoke(ex.Message);
+    }
 }
 
 static int? GetNullableIntOption(Dictionary<string, List<string>> options, string key) =>
@@ -1202,8 +1356,10 @@ file sealed class LoopConsoleRenderer : IDisposable
             ClearProgressBlock();
             foreach (var snapshot in snapshots.OrderBy(item => item.IssueId))
             {
-                Console.WriteLine(
-                    $"Running {snapshot.RoleSlug,-12} issue #{snapshot.IssueId,-3} [{Truncate(snapshot.Title, 48)}] {snapshot.Elapsed.TotalSeconds,4:0}s");
+                var scope = snapshot.IssueId is null
+                    ? $"{snapshot.RoleSlug,-12} [{Truncate(snapshot.Title, 48)}]"
+                    : $"{snapshot.RoleSlug,-12} issue #{snapshot.IssueId,-3} [{Truncate(snapshot.Title, 48)}]";
+                Console.WriteLine($"Running {scope} {snapshot.Elapsed.TotalSeconds,4:0}s");
             }
             _progressLineCount = snapshots.Count;
         }

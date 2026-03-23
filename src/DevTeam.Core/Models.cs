@@ -22,6 +22,7 @@ public sealed class WorkspaceState
     public List<ModeDefinition> Modes { get; set; } = [];
     public List<RoleDefinition> Roles { get; set; } = [];
     public List<SuperpowerDefinition> Superpowers { get; set; } = [];
+    public List<McpServerDefinition> McpServers { get; set; } = [];
     public int NextRoadmapId { get; set; } = 1;
     public int NextIssueId { get; set; } = 1;
     public int NextQuestionId { get; set; } = 1;
@@ -33,6 +34,7 @@ public sealed class WorkspaceState
 public sealed class RuntimeConfiguration
 {
     public string ActiveModeSlug { get; set; } = "develop";
+    public bool KeepAwakeEnabled { get; set; }
     public bool WorkspaceMcpEnabled { get; set; } = true;
     public bool PipelineSchedulingEnabled { get; set; } = true;
     public string WorkspaceMcpServerName { get; set; } = "devteam-workspace";
@@ -188,6 +190,16 @@ public sealed class SuperpowerDefinition
     public string SourcePath { get; set; } = "";
     public string Body { get; set; } = "";
     public List<string> RequiredTools { get; set; } = [];
+}
+
+public sealed class McpServerDefinition
+{
+    public string Name { get; set; } = "";
+    public string Command { get; set; } = "";
+    public List<string> Args { get; set; } = [];
+    public string? Cwd { get; set; }
+    public string Description { get; set; } = "";
+    public bool Enabled { get; set; } = true;
 }
 
 public sealed class RoleModelPolicy

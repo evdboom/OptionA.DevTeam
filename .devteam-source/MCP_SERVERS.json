@@ -1,0 +1,9 @@
+[
+  {
+    "Name": "context7",
+    "Command": "npx",
+    "Args": ["-y", "@upstash/context7-mcp@latest"],
+    "Description": "Library documentation lookup via Context7. Resolves library IDs and retrieves up-to-date docs and code examples.",
+    "Enabled": true
+  }
+]

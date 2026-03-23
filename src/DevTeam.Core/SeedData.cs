@@ -9,6 +9,7 @@ internal static partial class SeedData
     private static readonly string[] ModeDirectoryCandidates = [".devteam-source\\modes"];
     private static readonly string[] SuperpowerDirectoryCandidates = [".devteam-source\\superpowers"];
     private static readonly string[] ModelFileCandidates = [".devteam-source\\MODELS.json"];
+    private static readonly string[] McpServerFileCandidates = [".devteam-source\\MCP_SERVERS.json"];
 
     private static readonly Dictionary<string, RoleModelPolicy> DefaultPolicies = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -44,6 +45,7 @@ internal static partial class SeedData
         state.Modes = LoadModes(repoRoot);
         state.Roles = LoadRoles(repoRoot);
         state.Superpowers = LoadSuperpowers(repoRoot);
+        state.McpServers = LoadMcpServers(repoRoot);
         return state;
     }
 
@@ -75,6 +77,12 @@ internal static partial class SeedData
         if (state.Superpowers.Count == 0)
         {
             state.Superpowers = LoadSuperpowers(repoRoot);
+            changed = true;
+        }
+
+        if (state.McpServers.Count == 0)
+        {
+            state.McpServers = LoadMcpServers(repoRoot);
             changed = true;
         }
 
@@ -291,6 +299,34 @@ internal static partial class SeedData
         }
 
         return items;
+    }
+
+    private static List<McpServerDefinition> LoadMcpServers(string repoRoot)
+    {
+        var filePath = ResolveFirstFile(repoRoot, McpServerFileCandidates);
+        if (!File.Exists(filePath))
+        {
+            return [];
+        }
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(filePath));
+        var servers = new List<McpServerDefinition>();
+        foreach (var element in doc.RootElement.EnumerateArray())
+        {
+            servers.Add(new McpServerDefinition
+            {
+                Name = element.GetProperty("Name").GetString() ?? "",
+                Command = element.GetProperty("Command").GetString() ?? "",
+                Args = element.TryGetProperty("Args", out var args)
+                    ? args.EnumerateArray().Select(a => a.GetString() ?? "").ToList()
+                    : [],
+                Cwd = element.TryGetProperty("Cwd", out var cwd) ? cwd.GetString() : null,
+                Description = element.TryGetProperty("Description", out var desc) ? desc.GetString() ?? "" : "",
+                Enabled = !element.TryGetProperty("Enabled", out var enabled) || enabled.GetBoolean()
+            });
+        }
+
+        return servers;
     }
 
     private static MarkdownAsset ParseMarkdownAsset(string path)

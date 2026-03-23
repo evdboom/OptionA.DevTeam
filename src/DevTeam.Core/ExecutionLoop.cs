@@ -165,6 +165,7 @@ public sealed class LoopExecutor(
                 }
             }
 
+            Log(log, options.Verbosity, "  Finalizing iteration and staging changed paths...");
             var stagedPaths = GitWorkspace.StagePathsChangedSince(state.RepoRoot, gitStatusBeforeIteration);
             if (stagedPaths.Count > 0)
             {
@@ -407,7 +408,8 @@ public sealed class LoopExecutor(
                 WorkspacePath = _store.WorkspacePath,
                 Timeout = options.AgentTimeout,
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
-                WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName
+                WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
+                ExternalMcpServers = state.McpServers
             }, cancellationToken);
             var parsed = AgentPromptBuilder.ParseResponse(response);
             return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Issues, parsed.SuperpowersUsed, parsed.ToolsUsed, parsed.Questions);
@@ -453,18 +455,28 @@ public sealed class LoopExecutor(
         var prompt = AgentPromptBuilder.BuildOrchestratorPrompt(state, candidates, options.MaxSubagents);
         var client = _agentClientFactory(options.Backend);
         Log(log, options.Verbosity, $"  Running execution orchestrator via {options.Backend} (session {orchestratorSession.SessionId}, candidates {candidates.Count}, max {options.MaxSubagents})");
-        var response = await client.InvokeAsync(new AgentInvocationRequest
-        {
-            Prompt = prompt,
-            Model = SeedData.GetPolicy(state, "orchestrator").PrimaryModel,
-            SessionId = orchestratorSession.SessionId,
-            WorkingDirectory = state.RepoRoot,
-            WorkspacePath = _store.WorkspacePath,
-            Timeout = options.AgentTimeout,
-            EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
-            WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName
-        }, cancellationToken);
+        var startedAtUtc = DateTimeOffset.UtcNow;
+        var response = await AwaitInvocationWithHeartbeatAsync(
+            client.InvokeAsync(new AgentInvocationRequest
+            {
+                Prompt = prompt,
+                Model = SeedData.GetPolicy(state, "orchestrator").PrimaryModel,
+                SessionId = orchestratorSession.SessionId,
+                WorkingDirectory = state.RepoRoot,
+                WorkspacePath = _store.WorkspacePath,
+                Timeout = options.AgentTimeout,
+                EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
+                WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
+                ExternalMcpServers = state.McpServers
+            }, cancellationToken),
+            options,
+            log,
+            startedAtUtc,
+            "execution orchestrator",
+            elapsed => new RunProgressSnapshot(null, "orchestrator", "Selecting next execution batch", elapsed),
+            cancellationToken);
         var parsed = AgentPromptBuilder.ParseResponse(response);
+        Log(log, options.Verbosity, $"  Execution orchestrator outcome: {parsed.Outcome}");
         _runtime.MergeWorkspaceAdditions(state, _store.Load());
         if (parsed.Questions.Count > 0)
         {
@@ -482,6 +494,11 @@ public sealed class LoopExecutor(
         if (state.ExecutionSelection.SelectedIssueIds.Count == 0 && selectedIssueIds.Count > 0)
         {
             _runtime.SetExecutionSelection(state, selectedIssueIds, parsed.Summary, orchestratorSession.SessionId, options.MaxSubagents);
+        }
+
+        if (selectedIssueIds.Count > 0)
+        {
+            Log(log, options.Verbosity, $"  Orchestrator selected: {string.Join(", ", selectedIssueIds.Select(id => $"#{id}"))}");
         }
 
         if (parsed.Outcome is "failed" or "blocked")
@@ -590,6 +607,41 @@ public sealed class LoopExecutor(
         }
 
         return selected;
+    }
+
+    private static async Task<T> AwaitInvocationWithHeartbeatAsync<T>(
+        Task<T> task,
+        LoopExecutionOptions options,
+        Action<string>? log,
+        DateTimeOffset startedAtUtc,
+        string label,
+        Func<TimeSpan, RunProgressSnapshot>? snapshotFactory,
+        CancellationToken cancellationToken)
+    {
+        if (options.Verbosity == LoopVerbosity.Quiet)
+        {
+            return await task;
+        }
+
+        while (true)
+        {
+            var delayTask = Task.Delay(options.HeartbeatInterval, cancellationToken);
+            var completionTask = await Task.WhenAny(task, delayTask);
+            if (completionTask != delayTask)
+            {
+                return await task;
+            }
+
+            var elapsed = DateTimeOffset.UtcNow - startedAtUtc;
+            if (options.ProgressReporter is null)
+            {
+                log?.Invoke($"    Still running {label} ({elapsed.TotalSeconds:0}s elapsed)...");
+            }
+            else if (snapshotFactory is not null)
+            {
+                options.ProgressReporter.Invoke([snapshotFactory(elapsed)]);
+            }
+        }
     }
 }
 
@@ -1155,7 +1207,7 @@ internal sealed record PendingAgentRun(
     DateTimeOffset StartedAtUtc);
 
 public sealed record RunProgressSnapshot(
-    int IssueId,
+    int? IssueId,
     string RoleSlug,
     string Title,
     TimeSpan Elapsed);

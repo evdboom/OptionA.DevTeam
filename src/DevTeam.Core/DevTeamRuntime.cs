@@ -46,6 +46,12 @@ public sealed class DevTeamRuntime
         RememberDecision(state, "Updated active mode", mode.Slug, "mode");
     }
 
+    public void SetKeepAwake(WorkspaceState state, bool enabled)
+    {
+        state.Runtime.KeepAwakeEnabled = enabled;
+        RememberDecision(state, "Updated keep-awake setting", enabled ? "enabled" : "disabled", "runtime");
+    }
+
     public ModeDefinition GetActiveMode(WorkspaceState state)
     {
         var active = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase));
@@ -623,6 +629,7 @@ public sealed class DevTeamRuntime
 
     public StatusReport BuildStatusReport(WorkspaceState state)
     {
+        EnsurePipelineAssignments(state);
         return new StatusReport
         {
             Counts = new Dictionary<string, int>
@@ -795,6 +802,7 @@ public sealed class DevTeamRuntime
         foreach (var issue in state.Issues.Where(item => !item.IsPlanningIssue))
         {
             EnsurePipelineForIssue(state, issue);
+            NormalizePipelineFollowUpIssue(state, issue);
         }
     }
 
@@ -925,8 +933,8 @@ public sealed class DevTeamRuntime
         {
             nextIssue = CreateIssue(
                 state,
-                issue.Title,
-                issue.Detail,
+                BuildPipelineFollowUpTitle(issue.Title, pipeline.RoleSequence[nextStageIndex]),
+                BuildPipelineFollowUpDetail(issue.Title, issue.Detail, pipeline.RoleSequence[nextStageIndex]),
                 pipeline.RoleSequence[nextStageIndex],
                 Math.Max(1, issue.Priority - 5),
                 issue.RoadmapItemId,
@@ -942,6 +950,98 @@ public sealed class DevTeamRuntime
         pipeline.ActiveIssueId = nextIssue.Id;
         pipeline.Status = nextIssue.Status == ItemStatus.Blocked ? PipelineStatus.Blocked : PipelineStatus.Open;
         pipeline.UpdatedAtUtc = DateTimeOffset.UtcNow;
+    }
+
+    private static void NormalizePipelineFollowUpIssue(WorkspaceState state, IssueItem issue)
+    {
+        if (issue.ParentIssueId is not int parentIssueId || issue.PipelineStageIndex is null or <= 0)
+        {
+            return;
+        }
+
+        var parentIssue = state.Issues.FirstOrDefault(item => item.Id == parentIssueId);
+        if (parentIssue is null)
+        {
+            return;
+        }
+
+        if (string.Equals(issue.Title, parentIssue.Title, StringComparison.Ordinal))
+        {
+            issue.Title = BuildPipelineFollowUpTitle(parentIssue.Title, issue.RoleSlug);
+        }
+
+        if (string.Equals(issue.Detail, parentIssue.Detail, StringComparison.Ordinal))
+        {
+            issue.Detail = BuildPipelineFollowUpDetail(parentIssue.Title, parentIssue.Detail, issue.RoleSlug);
+        }
+    }
+
+    private static string BuildPipelineFollowUpTitle(string priorTitle, string nextRoleSlug)
+    {
+        var subject = StripLeadingStageVerb(priorTitle);
+        var normalizedRole = nextRoleSlug.Trim().ToLowerInvariant();
+        return normalizedRole switch
+        {
+            "architect" => $"Design {subject}",
+            "developer" or "backend-developer" or "frontend-developer" or "fullstack-developer" => $"Implement {subject}",
+            "tester" => $"Test {subject}",
+            "reviewer" => $"Review {subject}",
+            "ux" => $"Refine UX for {subject}",
+            "user" => $"Validate {subject}",
+            "game-designer" => $"Design gameplay for {subject}",
+            _ => priorTitle.Trim()
+        };
+    }
+
+    private static string BuildPipelineFollowUpDetail(string priorTitle, string priorDetail, string nextRoleSlug)
+    {
+        var subject = StripLeadingStageVerb(priorTitle);
+        var normalizedRole = nextRoleSlug.Trim().ToLowerInvariant();
+        return normalizedRole switch
+        {
+            "architect" => $"Design {subject} and define the structure, boundaries, and handoff needed for the next implementation stage.",
+            "developer" or "backend-developer" or "frontend-developer" or "fullstack-developer" => $"Implement {subject} based on the approved prior-stage guidance and carry the design into working code.",
+            "tester" => $"Test {subject} and verify the prior implementation is working correctly, including regressions and integration behavior.",
+            "reviewer" => $"Review {subject} and capture any quality gaps, risks, or final recommendations before sign-off.",
+            "ux" => $"Refine UX for {subject} and validate the interaction flow, clarity, and usability of the delivered work.",
+            "user" => $"Validate {subject} from the user perspective and confirm it meets the intended outcome.",
+            "game-designer" => $"Design gameplay for {subject} and define the player-facing mechanics, progression, and feel.",
+            _ => priorDetail.Trim()
+        };
+    }
+
+    private static string StripLeadingStageVerb(string title)
+    {
+        var trimmed = title.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return "the work";
+        }
+
+        foreach (var prefix in new[]
+        {
+            "Design ",
+            "Draft ",
+            "Plan ",
+            "Create ",
+            "Build ",
+            "Implement ",
+            "Develop ",
+            "Review ",
+            "Verify ",
+            "Validate ",
+            "Test ",
+            "Refine "
+        })
+        {
+            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var subject = trimmed[prefix.Length..].Trim();
+                return string.IsNullOrWhiteSpace(subject) ? "the work" : subject;
+            }
+        }
+
+        return trimmed;
     }
 
     private static void UpdatePipelineStatus(WorkspaceState state, IssueItem issue, PipelineStatus status, int? activeIssueId)
