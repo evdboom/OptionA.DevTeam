@@ -1128,18 +1128,70 @@ public sealed class DevTeamRuntime
         var fallback = state.Models.FirstOrDefault(model => string.Equals(model.Name, policy.FallbackModel, StringComparison.OrdinalIgnoreCase))
             ?? defaultModel;
 
-        var totalAfter = state.Budget.CreditsCommitted + primary.Cost;
-        var premiumAfter = state.Budget.PremiumCreditsCommitted + (primary.IsPremium ? primary.Cost : 0);
-        var premiumAllowed = !primary.IsPremium || policy.AllowPremium;
+        var remaining = state.Budget.TotalCreditCap - state.Budget.CreditsCommitted;
+        var budgetRatio = state.Budget.TotalCreditCap > 0
+            ? remaining / state.Budget.TotalCreditCap
+            : 0;
 
-        if (totalAfter <= state.Budget.TotalCreditCap
-            && premiumAfter <= state.Budget.PremiumCreditCap
-            && premiumAllowed)
+        // Try primary: affordable, premium-allowed, and budget comfortable for its tier
+        if (CanAffordModel(state, primary)
+            && (!primary.IsPremium || policy.AllowPremium)
+            && IsBudgetComfortable(primary, budgetRatio))
         {
             return primary;
         }
 
-        return fallback;
+        // Try role fallback: affordable and budget comfortable
+        if (fallback.Cost > 0
+            && CanAffordModel(state, fallback)
+            && IsBudgetComfortable(fallback, budgetRatio))
+        {
+            return fallback;
+        }
+
+        // Try cheapest non-free model that's still affordable
+        var light = state.Models
+            .Where(model => model.Cost > 0 && model.Cost < (fallback.Cost > 0 ? fallback.Cost : double.MaxValue))
+            .OrderBy(model => model.Cost)
+            .FirstOrDefault();
+        if (light is not null && CanAffordModel(state, light))
+        {
+            return light;
+        }
+
+        return defaultModel;
+    }
+
+    private static bool CanAffordModel(WorkspaceState state, ModelDefinition model)
+    {
+        var totalAfter = state.Budget.CreditsCommitted + model.Cost;
+        if (totalAfter > state.Budget.TotalCreditCap)
+        {
+            return false;
+        }
+
+        if (model.IsPremium)
+        {
+            var premiumAfter = state.Budget.PremiumCreditsCommitted + model.Cost;
+            if (premiumAfter > state.Budget.PremiumCreditCap)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Budget pressure thresholds: downshift before running out, not after.
+    // Premium (cost>1): need >30% budget remaining to stay comfortable.
+    // Standard (cost>=1): need >15% budget remaining.
+    // Light/Free: always comfortable.
+    private static bool IsBudgetComfortable(ModelDefinition model, double budgetRatio)
+    {
+        if (model.Cost == 0) return true;
+        if (model.IsPremium) return budgetRatio > 0.30;
+        if (model.Cost >= 1) return budgetRatio > 0.15;
+        return true;
     }
 
     private static void CommitCredits(WorkspaceState state, ModelDefinition model)

@@ -13,24 +13,24 @@ internal static partial class SeedData
 
     private static readonly Dictionary<string, RoleModelPolicy> DefaultPolicies = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["orchestrator"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["planner"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["orchestrator"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
+        ["planner"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["architect"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
-        ["developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["backend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["frontend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["fullstack-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["tester"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
+        ["backend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
+        ["frontend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
+        ["fullstack-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
+        ["tester"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
         ["reviewer"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
-        ["ux"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["ux"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["user"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["game-designer"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["game-designer"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
         ["navigator"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
-        ["analyst"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["security"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["analyst"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
+        ["security"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["docs"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["devops"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["refactorer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5-mini", AllowPremium = false }
+        ["devops"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
+        ["refactorer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false }
     };
 
     public static WorkspaceState BuildInitialState(string repoRoot, double totalCreditCap, double premiumCreditCap)
