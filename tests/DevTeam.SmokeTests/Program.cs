@@ -17,6 +17,7 @@ var tests = new List<(string Name, Action Run)>
     ("Tool update command targets the global package", TestToolUpdateCommandTargetsGlobalPackage),
     ("Bug report command writes issue draft", TestBugReportCommandWritesIssueDraft),
     ("Plan command shows architect summary when approval is pending", TestPlanCommandShowsArchitectSummaryWhenApprovalPending),
+    ("Plan command shows latest architect summary during architect planning", TestPlanCommandShowsArchitectSummaryDuringArchitectPlanning),
     ("SDK session config wires workspace MCP server", TestSdkSessionConfigWiresWorkspaceMcp),
     ("SDK session config wires external MCP servers", TestSdkSessionConfigWiresExternalMcpServers),
     ("Workspace loads MCP server definitions", TestWorkspaceLoadsMcpServers),
@@ -318,6 +319,44 @@ static void TestPlanCommandShowsArchitectSummaryWhenApprovalPending()
     AssertTrue(result.StdOut.Contains("Execution issues created", StringComparison.Ordinal), "Plan should list execution issues when architect approval is pending.");
     AssertTrue(!result.StdOut.Contains("Run the loop to let the architect create execution issues", StringComparison.Ordinal),
         "Plan should not fall back to the generic architect-planning prompt when architect output already exists.");
+}
+
+static void TestPlanCommandShowsArchitectSummaryDuringArchitectPlanning()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a flappy bird game.");
+    var planning = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, planning.QueuedRuns[0].RunId, "completed", "Initial plan ready.");
+    harness.Runtime.ApprovePlan(harness.State, "Approved.");
+
+    var architectIssue = harness.State.Issues.Single(issue =>
+        !issue.IsPlanningIssue && string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase));
+    architectIssue.Status = ItemStatus.Open;
+    harness.State.AgentRuns.Add(new AgentRun
+    {
+        Id = harness.State.NextRunId++,
+        IssueId = architectIssue.Id,
+        RoleSlug = "architect",
+        ModelName = "claude-opus-4.6",
+        Status = AgentRunStatus.Completed,
+        Summary = "Keep frontend-developer and tester roles in the execution plan.",
+        UpdatedAtUtc = DateTimeOffset.UtcNow
+    });
+    harness.Runtime.AddIssue(harness.State, "Implement canvas shell", "", "frontend-developer", 90, architectIssue.RoadmapItemId, []);
+    harness.Runtime.AddIssue(harness.State, "Test gameplay loop", "", "tester", 80, architectIssue.RoadmapItemId, []);
+    Directory.CreateDirectory(harness.Store.WorkspacePath);
+    File.WriteAllText(Path.Combine(harness.Store.WorkspacePath, "plan.md"), "# Plan\n\nApproved.");
+    harness.Store.Save(harness.State);
+
+    var result = RunDevTeamCli(harness.RepoRoot, "plan", "--workspace", harness.Store.WorkspacePath);
+
+    AssertEqual(0, result.ExitCode, "Plan command exit code");
+    AssertTrue(result.StdOut.Contains("Architect Summary", StringComparison.Ordinal),
+        "Plan should show the latest architect summary throughout architect planning when output already exists.");
+    AssertTrue(result.StdOut.Contains("Execution issues created", StringComparison.Ordinal),
+        "Plan should continue listing the architect-created execution issues.");
+    AssertTrue(!result.StdOut.Contains("Run the loop to let the architect create execution issues", StringComparison.Ordinal),
+        "Plan should not hide the existing architect plan behind the generic architect-planning prompt.");
 }
 
 static void TestSdkSessionConfigWiresWorkspaceMcp()

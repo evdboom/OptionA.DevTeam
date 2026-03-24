@@ -1016,14 +1016,13 @@ static async Task ShowPlanAsync(
             break;
     }
 
-    if (PlanWorkflow.IsAwaitingArchitectApproval(state))
-    {
-        PrintArchitectSummary(state);
-        return;
-    }
-
     if (state.Phase == WorkflowPhase.ArchitectPlanning)
     {
+        if (PrintArchitectSummary(state))
+        {
+            return;
+        }
+
         Console.WriteLine($"High-level plan approved. Phase: {ConsoleTheme.Phase("ArchitectPlanning")}");
         Console.WriteLine(interactive
             ? $"Run {ConsoleTheme.Command("/run")} to let the architect create execution issues, then {ConsoleTheme.Command("/approve")} again."
@@ -1119,7 +1118,7 @@ static void PrintBudget(BudgetState budget)
         $"({ConsoleTheme.Number($"{budget.PremiumCreditCap - budget.PremiumCreditsCommitted:0.##}")} remaining)");
 }
 
-static void PrintArchitectSummary(WorkspaceState state)
+static bool PrintArchitectSummary(WorkspaceState state)
 {
     var architectRuns = state.AgentRuns
         .Where(run => string.Equals(run.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase)
@@ -1130,7 +1129,7 @@ static void PrintArchitectSummary(WorkspaceState state)
         .ToList();
     if (architectRuns.Count == 0)
     {
-        return;
+        return false;
     }
 
     Console.WriteLine();
@@ -1167,6 +1166,7 @@ static void PrintArchitectSummary(WorkspaceState state)
 
     Console.WriteLine();
     Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to begin execution or type feedback to revise.");
+    return true;
 }
 
 static void PrintQuestions(WorkspaceState state, WorkspaceStore store)
