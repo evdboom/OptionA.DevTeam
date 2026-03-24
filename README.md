@@ -51,6 +51,7 @@ In **autopilot** mode both approval gates are skipped automatically — agents d
 - Expose a workspace MCP server so agents can read and write project state
 - Connect external MCP servers (e.g., Context7 for library docs) to every spawned agent
 - Switch between modes such as `develop` and `creative-writing`
+- Generate a sanitized bug report draft with version, workspace state, and recent shell diagnostics
 
 ## Installation
 
@@ -126,6 +127,13 @@ Run the execution loop:
 /run --max-iterations 5 --max-subagents 3
 ```
 
+Capture a bug report draft you can paste into a GitHub issue:
+
+```text
+/bug
+/bug --save .\bugreport.md
+```
+
 ### Example session
 
 ```
@@ -172,6 +180,7 @@ devteam> /run --max-iterations 5 --max-subagents 3
 /questions                                List open questions
 /answer-question <ID> <answer>            Answer a question
 /budget [--total N] [--premium N]         Show or adjust budget
+/bug [--save PATH] [--redact-paths true|false]  Generate a bug report draft
 /keep-awake on|off                        Prevent Windows sleep during runs
 /check-update                             Check for newer versions
 /update                                   Update the global tool
@@ -190,6 +199,7 @@ devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3
 devteam /status --workspace .devteam
 devteam /questions --workspace .devteam
 devteam /answer-question 1 "Use keyboard controls only." --workspace .devteam
+devteam bug-report --workspace .devteam --save .\bugreport.md
 ```
 
 Update the goal later:
@@ -203,6 +213,15 @@ Keep Windows awake during a long run:
 ```powershell
 devteam /run --workspace .devteam --max-iterations 10 --keep-awake true
 ```
+
+Generate a GitHub-issue-ready bug report draft from the CLI:
+
+```powershell
+devteam bug-report --workspace .devteam
+devteam bug-report --workspace .devteam --save .\bugreport.md
+```
+
+By default the report redacts common local paths and includes the current DevTeam version, environment details, workspace phase, active goal, recent runs, and any recent interactive shell commands or errors captured in the current shell session.
 
 ## Modes
 

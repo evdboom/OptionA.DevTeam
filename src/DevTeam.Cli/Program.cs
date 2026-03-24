@@ -14,6 +14,8 @@ using var toolUpdateService = new ToolUpdateService();
 
 try
 {
+    CommandOptionValidator.ValidateCli(command, options);
+
     switch (command)
     {
         case "start":
@@ -82,6 +84,13 @@ try
             var target = Path.Combine(Environment.CurrentDirectory, ".devteam-source");
             var force = GetBoolOption(options, "force", false);
             CopyPackagedAssets(target, force);
+            return 0;
+        }
+
+        case "bug":
+        case "bug-report":
+        {
+            EmitBugReport(store, runtime, options, shellDiagnostics: null);
             return 0;
         }
 
@@ -357,6 +366,7 @@ static async Task<int> RunInteractiveShellAsync(
     Dictionary<string, List<string>> startOptions)
 {
     using var keepAwakeController = new KeepAwakeController();
+    var shellDiagnostics = new ShellSessionDiagnostics();
     var shellKeepAwakeEnabled = GetNullableBoolOption(startOptions, "keep-awake");
     Console.WriteLine(ConsoleTheme.Label("DevTeam interactive shell"));
     Console.WriteLine($"Workspace: {ConsoleTheme.Accent(store.WorkspacePath)}");
@@ -472,6 +482,14 @@ static async Task<int> RunInteractiveShellAsync(
 
         try
         {
+            if (!string.Equals(command, "bug", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(command, "bug-report", StringComparison.OrdinalIgnoreCase))
+            {
+                shellDiagnostics.RecordCommand(line);
+            }
+
+            CommandOptionValidator.ValidateInteractive(command, options);
+
             switch (command)
             {
                 case "exit":
@@ -494,6 +512,13 @@ static async Task<int> RunInteractiveShellAsync(
                     var target = Path.Combine(Environment.CurrentDirectory, ".devteam-source");
                     var force = GetBoolOption(options, "force", false);
                     CopyPackagedAssets(target, force);
+                    break;
+                }
+
+                case "bug":
+                case "bug-report":
+                {
+                    EmitBugReport(store, runtime, options, shellDiagnostics);
                     break;
                 }
 
@@ -793,12 +818,15 @@ static async Task<int> RunInteractiveShellAsync(
                 }
 
                 default:
-                    Console.WriteLine($"Unknown command '{ConsoleTheme.Warning(tokens[0])}'. Type {ConsoleTheme.Command("/help")}.");
+                    var unknownCommandMessage = $"Unknown command '{ConsoleTheme.Warning(tokens[0])}'. Type {ConsoleTheme.Command("/help")}.";
+                    shellDiagnostics.RecordError($"Unknown command: {tokens[0]}");
+                    Console.WriteLine(unknownCommandMessage);
                     break;
             }
         }
         catch (Exception ex)
         {
+            shellDiagnostics.RecordError(ex.Message);
             Console.WriteLine(ex.Message);
         }
     }
@@ -1219,6 +1247,7 @@ static void PrintHelp()
     Console.WriteLine("  start [--keep-awake true|false] [--workspace PATH]");
     Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false]");
     Console.WriteLine("  customize [--force]                Copy default roles, modes, and superpowers to .devteam-source/ for editing");
+    Console.WriteLine("  bug-report [--save PATH] [--redact-paths true|false] [--history-count N] [--error-count N] [--workspace PATH]");
     Console.WriteLine("  set-goal <TEXT> [--goal-file PATH] [--workspace PATH]");
     Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
     Console.WriteLine("  set-keep-awake <true|false> [--workspace PATH]");
@@ -1247,6 +1276,7 @@ static void PrintInteractiveHelp()
     Console.WriteLine(ConsoleTheme.Label("Interactive commands:"));
     Console.WriteLine($"  {ConsoleTheme.Command("/init")} \"goal text\" [--goal-file PATH] [--force] [--mode SLUG] [--keep-awake true|false]");
     Console.WriteLine($"  {ConsoleTheme.Command("/customize")} [--force]    Copy default assets to .devteam-source/ for editing");
+    Console.WriteLine($"  {ConsoleTheme.Command("/bug")} [--save PATH] [--redact-paths true|false]");
     Console.WriteLine($"  {ConsoleTheme.Command("/status")}");
     Console.WriteLine($"  {ConsoleTheme.Command("/mode")} <slug>");
     Console.WriteLine($"  {ConsoleTheme.Command("/keep-awake")} <on|off>");
@@ -1345,6 +1375,38 @@ static List<string> TokenizeInput(string input)
 
 static string NormalizeCommand(string value) =>
     value.Trim().TrimStart('/').ToLowerInvariant();
+
+static void EmitBugReport(
+    WorkspaceStore store,
+    DevTeamRuntime runtime,
+    Dictionary<string, List<string>> options,
+    ShellSessionDiagnostics? shellDiagnostics)
+{
+    var redactPaths = GetBoolOption(options, "redact-paths", true);
+    var historyCount = GetIntOption(options, "history-count", 8);
+    var errorCount = GetIntOption(options, "error-count", 5);
+    var reportText = BugReportBuilder.Build(store, runtime, shellDiagnostics, redactPaths, historyCount, errorCount);
+    var savePath = GetOption(options, "save");
+
+    if (!string.IsNullOrWhiteSpace(savePath))
+    {
+        var fullPath = Path.GetFullPath(
+            Path.IsPathRooted(savePath)
+                ? savePath
+                : Path.Combine(Environment.CurrentDirectory, savePath));
+        var directory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.WriteAllText(fullPath, reportText);
+        Console.WriteLine($"Saved bug report draft to {fullPath}");
+        Console.WriteLine();
+    }
+
+    Console.WriteLine(reportText.TrimEnd());
+}
 
 static string? GetOption(Dictionary<string, List<string>> options, string key) =>
     ResolveOptionValues(options, key) is { Count: > 0 } values ? string.Join(" ", values) : null;
@@ -1744,7 +1806,7 @@ file sealed class ShellAutoCompleteHandler : IAutoCompleteHandler
 {
     private static readonly string[] Commands =
     [
-        "/init", "/status", "/plan", "/run", "/approve", "/feedback",
+        "/init", "/bug", "/status", "/plan", "/run", "/approve", "/feedback",
         "/questions", "/answer", "/budget", "/goal", "/mode",
         "/keep-awake", "/auto-approve", "/add-issue", "/customize",
         "/check-update", "/update", "/exit", "/help"

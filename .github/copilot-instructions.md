@@ -41,3 +41,5 @@
 - Planning and architecture roles can propose concrete follow-on issues through the structured `ISSUES:` section.
 - Do not rely on `NEXT_ROLE` handoffs. The issue board is the workload queue, and each issue already names the role that should execute it.
 - Default runtime verbosity is `normal`. Use `--verbosity detailed` when diagnosing loop behavior and `--verbosity quiet` when embedding the command in automation.
+- Keep user-facing CLI documentation in sync with features. When adding or changing commands such as `/bug` / `bug-report`, update `README.md` and this `.github\copilot-instructions.md` file in the same change unless there is a strong reason not to.
+- `bug-report` is the non-interactive command and `/bug` is the interactive-shell alias for generating a GitHub-issue-ready bug report draft with version, environment, workspace snapshot, and recent shell diagnostics.

@@ -15,6 +15,7 @@ var tests = new List<(string Name, Action Run)>
     ("SDK CLI path resolver fails when copilot is missing", TestSdkCliPathResolverFailsWhenMissing),
     ("Tool update check detects newer stable versions", TestToolUpdateCheckDetectsNewerStableVersions),
     ("Tool update command targets the global package", TestToolUpdateCommandTargetsGlobalPackage),
+    ("Bug report command writes issue draft", TestBugReportCommandWritesIssueDraft),
     ("SDK session config wires workspace MCP server", TestSdkSessionConfigWiresWorkspaceMcp),
     ("SDK session config wires external MCP servers", TestSdkSessionConfigWiresExternalMcpServers),
     ("Workspace loads MCP server definitions", TestWorkspaceLoadsMcpServers),
@@ -67,7 +68,8 @@ var tests = new List<(string Name, Action Run)>
     ("Auto-approve skips both approval gates", TestAutoApproveSkipsBothGates),
     ("Autopilot mode enables auto-approve", TestAutopilotModeEnablesAutoApprove),
     ("Design-only roles receive file boundary enforcement", TestDesignOnlyRolesReceiveFileBoundary),
-    ("Planner cannot create duplicate architect issues", TestPlannerCannotCreateDuplicateArchitectIssues)
+    ("Planner cannot create duplicate architect issues", TestPlannerCannotCreateDuplicateArchitectIssues),
+    ("Init rejects misspelled goal option", TestInitRejectsMisspelledGoalOption)
 };
 
 var failures = new List<string>();
@@ -250,6 +252,32 @@ static void TestToolUpdateCommandTargetsGlobalPackage()
 
     AssertTrue(arguments.SequenceEqual(["tool", "update", "--global", "OptionA.DevTeam", "--version", "0.1.19"]),
         "The update command should target the global OptionA.DevTeam tool package.");
+}
+
+static void TestBugReportCommandWritesIssueDraft()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-bug-report-tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+
+    try
+    {
+        var workspacePath = Path.Combine(tempRoot, ".devteam");
+        var reportPath = Path.Combine(tempRoot, "bugreport.md");
+        var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--goal", "Build a Flappy bird game");
+        AssertEqual(0, initResult.ExitCode, "Bug report init exit code");
+
+        var result = RunDevTeamCli(tempRoot, "bug-report", "--workspace", workspacePath, "--save", reportPath);
+
+        AssertEqual(0, result.ExitCode, "Bug report exit code");
+        AssertTrue(result.StdOut.Contains("# DevTeam bug report draft", StringComparison.Ordinal), "Bug report output should include the draft heading.");
+        AssertTrue(result.StdOut.Contains("DevTeam version:", StringComparison.Ordinal), "Bug report should include tool version.");
+        AssertTrue(result.StdOut.Contains("Active goal: Build a Flappy bird game", StringComparison.Ordinal), "Bug report should include the active goal.");
+        AssertTrue(File.Exists(reportPath), "Bug report command should save the draft when --save is used.");
+    }
+    finally
+    {
+        TryCleanupTempRepo(tempRoot);
+    }
 }
 
 static void TestSdkSessionConfigWiresWorkspaceMcp()
@@ -1637,6 +1665,27 @@ static void TestPlannerCannotCreateDuplicateArchitectIssues()
     AssertEqual(1, architectCountAfter, "Architect issue count should remain 1");
 }
 
+static void TestInitRejectsMisspelledGoalOption()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-cli-tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+
+    try
+    {
+        var workspacePath = Path.Combine(tempRoot, ".devteam");
+        var result = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--goall", "Build a Flappy bird game");
+
+        AssertEqual(1, result.ExitCode, "Misspelled init option exit code");
+        AssertTrue(result.StdErr.Contains("Unknown option '--goall'", StringComparison.Ordinal), "Misspelled init option should be reported.");
+        AssertTrue(result.StdErr.Contains("--goal", StringComparison.Ordinal), "Misspelled init option should suggest --goal.");
+        AssertTrue(!File.Exists(Path.Combine(workspacePath, "workspace.json")), "Init should not create workspace state when option validation fails.");
+    }
+    finally
+    {
+        TryCleanupTempRepo(tempRoot);
+    }
+}
+
 static void AssertEqual<T>(T expected, T actual, string label)
 {
     if (!EqualityComparer<T>.Default.Equals(expected, actual))
@@ -1687,6 +1736,45 @@ static string RunGit(string workingDirectory, params string[] arguments)
     }
 
     return stdout;
+}
+
+static CliInvocationResult RunDevTeamCli(string workingDirectory, params string[] arguments)
+{
+    var cliAssemblyPath = typeof(GoalInputResolver).Assembly.Location;
+    using var process = new System.Diagnostics.Process
+    {
+        StartInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        }
+    };
+
+    process.StartInfo.ArgumentList.Add(cliAssemblyPath);
+    foreach (var argument in arguments)
+    {
+        process.StartInfo.ArgumentList.Add(argument);
+    }
+
+    if (!process.Start())
+    {
+        throw new InvalidOperationException("Failed to start devteam CLI in tests.");
+    }
+
+    var stdout = process.StandardOutput.ReadToEnd();
+    var stderr = process.StandardError.ReadToEnd();
+    process.WaitForExit();
+
+    return new CliInvocationResult
+    {
+        ExitCode = process.ExitCode,
+        StdOut = stdout,
+        StdErr = stderr
+    };
 }
 
 /// <summary>
@@ -1751,6 +1839,13 @@ file sealed class TestHarness : IDisposable
         }
         throw new InvalidOperationException("Could not locate repository root.");
     }
+}
+
+file sealed class CliInvocationResult
+{
+    public int ExitCode { get; init; }
+    public string StdOut { get; init; } = "";
+    public string StdErr { get; init; } = "";
 }
 
 file sealed class FakeCommandRunner : ICommandRunner
