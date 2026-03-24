@@ -232,7 +232,9 @@ try
             var feedback = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing feedback text.");
             runtime.RecordPlanningFeedback(state, feedback);
             store.Save(state);
-            Console.WriteLine("Captured planning feedback.");
+            Console.WriteLine(state.Phase == WorkflowPhase.ArchitectPlanning
+                ? "Captured architect plan feedback."
+                : "Captured planning feedback.");
             return 0;
         }
 
@@ -450,6 +452,10 @@ static async Task<int> RunInteractiveShellAsync(
                     {
                         Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to move forward or type feedback to revise the plan.");
                     }
+                    else if (PlanWorkflow.IsAwaitingArchitectApproval(state))
+                    {
+                        Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to move forward or type feedback to revise the architect plan.");
+                    }
                 }
                 else
                 {
@@ -458,15 +464,20 @@ static async Task<int> RunInteractiveShellAsync(
                 continue;
             }
 
-            if (state.Phase == WorkflowPhase.Planning
-                && state.Issues.Any(item => item.IsPlanningIssue && item.Status == ItemStatus.Done))
+            if ((state.Phase == WorkflowPhase.Planning
+                    && state.Issues.Any(item => item.IsPlanningIssue && item.Status == ItemStatus.Done))
+                || PlanWorkflow.IsAwaitingArchitectApproval(state))
             {
                 runtime.RecordPlanningFeedback(state, line);
                 store.Save(state);
-                Console.WriteLine("Captured planning feedback. Revising plan...");
+                Console.WriteLine(state.Phase == WorkflowPhase.ArchitectPlanning
+                    ? "Captured architect plan feedback. Revising architect plan..."
+                    : "Captured planning feedback. Revising plan...");
                 var report = await RunLoopAsync(store, runtime, loopExecutor, state, ParseOptions(["--max-iterations", "2"]), interactiveShell: true);
                 Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
-                Console.WriteLine("Use /plan to inspect the revised plan, or /approve to continue.");
+                Console.WriteLine(state.Phase == WorkflowPhase.ArchitectPlanning
+                    ? "Use /plan to inspect the revised architect plan, or /approve to continue."
+                    : "Use /plan to inspect the revised plan, or /approve to continue.");
                 continue;
             }
         }
@@ -726,10 +737,14 @@ static async Task<int> RunInteractiveShellAsync(
                     var feedback = GetPositionalValue(options) ?? throw new InvalidOperationException("Usage: /feedback <text>");
                     runtime.RecordPlanningFeedback(current, feedback);
                     store.Save(current);
-                    Console.WriteLine("Captured planning feedback. Revising plan...");
+                    Console.WriteLine(current.Phase == WorkflowPhase.ArchitectPlanning
+                        ? "Captured architect plan feedback. Revising architect plan..."
+                        : "Captured planning feedback. Revising plan...");
                     var report = await RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions(["--max-iterations", "2"]), interactiveShell: true);
                     Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
-                    Console.WriteLine("Use /plan to inspect the revised plan, or /approve to continue.");
+                    Console.WriteLine(current.Phase == WorkflowPhase.ArchitectPlanning
+                        ? "Use /plan to inspect the revised architect plan, or /approve to continue."
+                        : "Use /plan to inspect the revised plan, or /approve to continue.");
                     break;
                 }
 
@@ -752,6 +767,10 @@ static async Task<int> RunInteractiveShellAsync(
                         if (current.Phase == WorkflowPhase.Planning)
                         {
                             Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to move forward or type feedback to revise the plan.");
+                        }
+                        else if (PlanWorkflow.IsAwaitingArchitectApproval(current))
+                        {
+                            Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to move forward or type feedback to revise the architect plan.");
                         }
                     }
                     else
@@ -997,6 +1016,12 @@ static async Task ShowPlanAsync(
             break;
     }
 
+    if (PlanWorkflow.IsAwaitingArchitectApproval(state))
+    {
+        PrintArchitectSummary(state);
+        return;
+    }
+
     if (state.Phase == WorkflowPhase.ArchitectPlanning)
     {
         Console.WriteLine($"High-level plan approved. Phase: {ConsoleTheme.Phase("ArchitectPlanning")}");
@@ -1014,6 +1039,14 @@ static async Task ShowPlanAsync(
         Console.WriteLine(interactive
             ? $"Reply with feedback as plain text or use {ConsoleTheme.Command("/approve")} when the plan looks good."
             : "Review the plan, provide feedback with `feedback`, or use `approve-plan` when it looks good.");
+        return;
+    }
+
+    if (PlanWorkflow.IsAwaitingArchitectApproval(state))
+    {
+        Console.WriteLine(interactive
+            ? $"Reply with feedback as plain text or use {ConsoleTheme.Command("/approve")} when the architect plan looks good."
+            : "Review the architect output, provide feedback with `feedback`, or use `approve-plan` when it looks good.");
     }
 }
 

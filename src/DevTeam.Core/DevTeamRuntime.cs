@@ -109,6 +109,25 @@ public sealed class DevTeamRuntime
             throw new InvalidOperationException("Planning feedback cannot be empty.");
         }
 
+        if (state.Phase == WorkflowPhase.ArchitectPlanning)
+        {
+            RememberDecision(
+                state,
+                "Architect plan feedback from user",
+                normalized,
+                "architect-plan-feedback");
+
+            foreach (var architectIssue in state.Issues.Where(item =>
+                         !item.IsPlanningIssue
+                         && string.Equals(item.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase)
+                         && item.Status is ItemStatus.Done or ItemStatus.Blocked))
+            {
+                architectIssue.Status = ItemStatus.Open;
+            }
+
+            return;
+        }
+
         RememberDecision(
             state,
             "Planning feedback from user",

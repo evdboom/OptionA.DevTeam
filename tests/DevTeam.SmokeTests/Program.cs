@@ -16,6 +16,7 @@ var tests = new List<(string Name, Action Run)>
     ("Tool update check detects newer stable versions", TestToolUpdateCheckDetectsNewerStableVersions),
     ("Tool update command targets the global package", TestToolUpdateCommandTargetsGlobalPackage),
     ("Bug report command writes issue draft", TestBugReportCommandWritesIssueDraft),
+    ("Plan command shows architect summary when approval is pending", TestPlanCommandShowsArchitectSummaryWhenApprovalPending),
     ("SDK session config wires workspace MCP server", TestSdkSessionConfigWiresWorkspaceMcp),
     ("SDK session config wires external MCP servers", TestSdkSessionConfigWiresExternalMcpServers),
     ("Workspace loads MCP server definitions", TestWorkspaceLoadsMcpServers),
@@ -36,6 +37,7 @@ var tests = new List<(string Name, Action Run)>
     ("Planning run writes plan artifact for approval", TestPlanningRunWritesPlanArtifact),
     ("Init clears stale legacy workspace artifacts", TestInitClearsLegacyArtifacts),
     ("Planning feedback reopens the planning issue", TestPlanningFeedbackReopensPlanning),
+    ("Architect feedback reopens architect issue", TestArchitectFeedbackReopensArchitectIssue),
     ("Agent-generated issues keep the loop moving", TestAgentGeneratedIssues),
     ("Issue board markdown mirrors workspace state", TestIssueBoardMirror),
     ("Generated issue roles are normalized", TestGeneratedIssueRoleNormalization),
@@ -278,6 +280,42 @@ static void TestBugReportCommandWritesIssueDraft()
     {
         TryCleanupTempRepo(tempRoot);
     }
+}
+
+static void TestPlanCommandShowsArchitectSummaryWhenApprovalPending()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a flappy bird game.");
+    var planning = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, planning.QueuedRuns[0].RunId, "completed", "Initial plan ready.");
+    harness.Runtime.ApprovePlan(harness.State, "Approved.");
+
+    var architectIssue = harness.State.Issues.Single(issue =>
+        !issue.IsPlanningIssue && string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase));
+    architectIssue.Status = ItemStatus.Done;
+    harness.State.AgentRuns.Add(new AgentRun
+    {
+        Id = harness.State.NextRunId++,
+        IssueId = architectIssue.Id,
+        RoleSlug = "architect",
+        ModelName = "claude-opus-4.6",
+        Status = AgentRunStatus.Completed,
+        Summary = "Use frontend-developer and tester issues for execution.",
+        UpdatedAtUtc = DateTimeOffset.UtcNow
+    });
+    harness.Runtime.AddIssue(harness.State, "Implement canvas shell", "", "frontend-developer", 90, architectIssue.RoadmapItemId, []);
+    harness.Runtime.AddIssue(harness.State, "Test gameplay loop", "", "tester", 80, architectIssue.RoadmapItemId, []);
+    Directory.CreateDirectory(harness.Store.WorkspacePath);
+    File.WriteAllText(Path.Combine(harness.Store.WorkspacePath, "plan.md"), "# Plan\n\nApproved.");
+    harness.Store.Save(harness.State);
+
+    var result = RunDevTeamCli(harness.RepoRoot, "plan", "--workspace", harness.Store.WorkspacePath);
+
+    AssertEqual(0, result.ExitCode, "Plan command exit code");
+    AssertTrue(result.StdOut.Contains("Architect Summary", StringComparison.Ordinal), "Plan should show the architect summary when architect approval is pending.");
+    AssertTrue(result.StdOut.Contains("Execution issues created", StringComparison.Ordinal), "Plan should list execution issues when architect approval is pending.");
+    AssertTrue(!result.StdOut.Contains("Run the loop to let the architect create execution issues", StringComparison.Ordinal),
+        "Plan should not fall back to the generic architect-planning prompt when architect output already exists.");
 }
 
 static void TestSdkSessionConfigWiresWorkspaceMcp()
@@ -798,6 +836,25 @@ static void TestPlanningFeedbackReopensPlanning()
     AssertEqual(ItemStatus.Open, harness.State.Issues.Single(issue => issue.IsPlanningIssue).Status, "Planning feedback should reopen the planning issue");
     AssertTrue(harness.State.Decisions.Any(item => item.Source == "plan-feedback"),
         "Planning feedback should be persisted as a decision.");
+}
+
+static void TestArchitectFeedbackReopensArchitectIssue()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a flappy bird game.");
+    var planning = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, planning.QueuedRuns[0].RunId, "completed", "Initial plan ready.");
+    harness.Runtime.ApprovePlan(harness.State, "Approved.");
+
+    var architectIssue = harness.State.Issues.Single(issue =>
+        !issue.IsPlanningIssue && string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase));
+    architectIssue.Status = ItemStatus.Done;
+
+    harness.Runtime.RecordPlanningFeedback(harness.State, "We need different execution roles.");
+
+    AssertEqual(ItemStatus.Open, architectIssue.Status, "Architect feedback should reopen the architect issue");
+    AssertTrue(harness.State.Decisions.Any(item => item.Source == "architect-plan-feedback"),
+        "Architect feedback should be persisted as an architect-plan decision.");
 }
 
 static void TestAgentGeneratedIssues()
