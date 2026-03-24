@@ -103,6 +103,20 @@ public sealed class DevTeamRuntime
         RememberDecision(state, "Updated auto-approve setting", enabled ? "enabled" : "disabled", "runtime");
     }
 
+    public void SetDefaultMaxIterations(WorkspaceState state, int value)
+    {
+        if (value < 1) throw new InvalidOperationException("max-iterations must be at least 1.");
+        state.Runtime.DefaultMaxIterations = value;
+        RememberDecision(state, "Updated default max-iterations", value.ToString(), "runtime");
+    }
+
+    public void SetDefaultMaxSubagents(WorkspaceState state, int value)
+    {
+        if (value < 1) throw new InvalidOperationException("max-subagents must be at least 1.");
+        state.Runtime.DefaultMaxSubagents = value;
+        RememberDecision(state, "Updated default max-subagents", value.ToString(), "runtime");
+    }
+
     public void RecordPlanningFeedback(WorkspaceState state, string feedback)
     {
         var normalized = feedback.Trim();
@@ -371,7 +385,7 @@ public sealed class DevTeamRuntime
         IEnumerable<int> issueIds,
         string rationale,
         string? sessionId = null,
-        int maxSubagents = 1)
+        int maxSubagents = 4)
     {
         EnsurePipelineAssignments(state);
         var candidates = GetReadyIssueCandidates(state);
@@ -616,7 +630,7 @@ public sealed class DevTeamRuntime
         return created;
     }
 
-    public LoopResult RunOnce(WorkspaceState state, int maxSubagents = 3)
+    public LoopResult RunOnce(WorkspaceState state, int maxSubagents = 4)
     {
         var created = PrepareForLoop(state).ToList();
         var readyIssues = GetReadyIssues(state, maxSubagents);

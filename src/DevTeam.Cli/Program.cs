@@ -1,9 +1,14 @@
+using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Text;
 using DevTeam.Cli;
+using DevTeam.Cli.Shell;
 using DevTeam.Core;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using RazorConsole.Core;
+using RazorConsole.Core.Abstractions.Rendering;
 using Spectre.Console;
-using ReadLine = System.ReadLine;
 
 var command = NormalizeCommand(args.Length == 0 ? "help" : args[0]);
 var options = ParseOptions(args.Skip(1).ToArray());
@@ -20,7 +25,7 @@ try
     switch (command)
     {
         case "start":
-            return await RunInteractiveShellAsync(store, runtime, loopExecutor, toolUpdateService, options);
+            return await RunShellAsync(store, runtime, loopExecutor, toolUpdateService, options);
 
         case "check-update":
             return await CheckForToolUpdatesAsync(toolUpdateService);
@@ -361,6 +366,38 @@ catch (Exception ex)
     return 1;
 }
 
+static async Task<int> RunShellAsync(
+    WorkspaceStore store,
+    DevTeamRuntime runtime,
+    LoopExecutor loopExecutor,
+    ToolUpdateService toolUpdateService,
+    Dictionary<string, List<string>> startOptions)
+{
+    var startOpts = new ShellStartOptions(startOptions);
+    var host = Host.CreateDefaultBuilder()
+        .UseRazorConsole<DevTeamShell>(configure =>
+        {
+            configure.ConfigureServices(services =>
+            {
+                services.Configure<ConsoleAppOptions>(opts =>
+                {
+                    opts.AutoClearConsole = false;
+                    opts.EnableTerminalResizing = true;
+                });
+                services.AddSingleton(store);
+                services.AddSingleton(runtime);
+                services.AddSingleton(loopExecutor);
+                services.AddSingleton(toolUpdateService);
+                services.AddSingleton(startOpts);
+                services.AddSingleton<ShellService>();
+                services.AddTransient<ITranslationMiddleware, RawSpectreMarkupTranslator>();
+            });
+        })
+        .Build();
+    await host.RunAsync();
+    return 0;
+}
+
 static async Task<int> RunInteractiveShellAsync(
     WorkspaceStore store,
     DevTeamRuntime runtime,
@@ -384,8 +421,7 @@ static async Task<int> RunInteractiveShellAsync(
     }
     ApplyKeepAwakeSetting(keepAwakeController, shellKeepAwakeEnabled.Value, interactiveShell: true, Console.WriteLine);
 
-    ReadLine.HistoryEnabled = true;
-    ReadLine.AutoCompletionHandler = new ShellAutoCompleteHandler();
+    // ReadLine removed — shell uses RazorConsole TextInput
 
     // Background loop tracking.
     Task<LoopExecutionReport>? loopTask = null;
@@ -393,38 +429,74 @@ static async Task<int> RunInteractiveShellAsync(
     bool IsLoopRunning() => loopTask is { IsCompleted: false };
     string? lastContextKey = null;
 
-    while (true)
+    // Queue for log messages from background loop threads — drains before each prompt and on loop complete.
+    var pendingLog = new ConcurrentQueue<string>();
+    Action<string> backgroundLogger = msg => pendingLog.Enqueue(msg);
+    void DrainPendingLog()
     {
-        // Surface loop completion before printing the next prompt.
-        if (loopTask is { IsCompleted: true })
+        while (pendingLog.TryDequeue(out var m))
+            ChatConsole.WriteLoopLog(m);
+    }
+
+    // In-memory session history — last 50 entries.
+    var sessionHistory = new List<(DateTimeOffset At, string Entry)>();
+    void AddHistory(string entry)
+    {
+        sessionHistory.Add((DateTimeOffset.Now, entry));
+        if (sessionHistory.Count > 50)
+            sessionHistory.RemoveAt(0);
+    }
+
+    // Attach a fire-and-forget continuation so loop completion surfaces immediately,
+    // even while Console.ReadLine() is blocking on the main thread.
+    void NotifyOnLoopComplete(Task<LoopExecutionReport> task)
+    {
+        task.ContinueWith(t =>
         {
+            // Clear any partial input line and flush buffered log messages first.
+            Console.Write("\r\x1b[K");
+            DrainPendingLog();
             try
             {
-                var completedReport = await loopTask;
-                var completedState = store.Load();
-                Console.WriteLine();
-                ChatConsole.WriteSystem(
-                    $"Loop finished — [bold]{completedReport.IterationsExecuted}[/] iteration(s). Final state: [cyan]{Markup.Escape(completedReport.FinalState)}[/]",
-                    "loop complete");
-                PrintBudget(completedState.Budget);
-                if (completedReport.FinalState == "awaiting-architect-approval")
+                if (t.IsCanceled || (t.IsFaulted && t.Exception?.GetBaseException() is OperationCanceledException))
                 {
-                    PrintArchitectSummary(completedState);
+                    ChatConsole.WriteWarning("Loop was cancelled.");
                 }
-                // Questions and plan-ready panels are shown automatically at the next prompt.
+                else if (t.IsFaulted)
+                {
+                    ChatConsole.WriteError($"Loop failed: {t.Exception?.GetBaseException().Message}");
+                }
+                else
+                {
+                    var r = t.Result;
+                    var completedState = store.Load();
+                    ChatConsole.WriteSystem(
+                        $"Loop finished — [bold]{r.IterationsExecuted}[/] iteration(s). Final state: [cyan]{Markup.Escape(r.FinalState)}[/]",
+                        "loop complete");
+                    AddHistory($"loop complete — {r.IterationsExecuted} iteration(s), state: {r.FinalState}");
+                    PrintBudget(completedState.Budget);
+                    if (r.FinalState == "awaiting-architect-approval")
+                    {
+                        PrintArchitectSummary(completedState);
+                    }
+                }
             }
-            catch (AggregateException ae) when (ae.InnerException is OperationCanceledException)
-            {
-                Console.WriteLine($"\n{ConsoleTheme.Warning("Loop was cancelled.")}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"\n{ConsoleTheme.Error($"Loop failed: {ex.Message}")}");
-            }
+            catch { /* swallow — we're on a background continuation */ }
+            // Reprint the prompt so the cursor line is clean.
+            var prompt = IsLoopRunning() ? "devteam (running)> " : "devteam> ";
+            ChatConsole.WritePrompt(prompt);
+            lastContextKey = null; // force context refresh on next input
+        }, TaskScheduler.Default);
+    }
+
+    while (true)
+    {
+        // Edge case: if the task completed between the ContinueWith and here, clear it.
+        if (loopTask is { IsCompleted: true })
+        {
             loopTask = null;
             loopCts?.Dispose();
             loopCts = null;
-            lastContextKey = null; // force context refresh: question/plan panels show at next prompt
         }
 
         WorkspaceState? state = null;
@@ -476,9 +548,10 @@ static async Task<int> RunInteractiveShellAsync(
         {
         }
 
+        DrainPendingLog();
         var promptText = IsLoopRunning() ? "devteam (running)> " : "devteam> ";
         ChatConsole.WritePrompt(promptText);
-        var line = Console.IsInputRedirected ? Console.ReadLine() : ReadLine.Read("");
+        var line = Console.ReadLine();
         if (line is null)
         {
             return 0;
@@ -489,6 +562,8 @@ static async Task<int> RunInteractiveShellAsync(
         {
             continue;
         }
+
+        AddHistory(line);
 
         if (line.StartsWith("@", StringComparison.Ordinal) && state is not null)
         {
@@ -505,6 +580,7 @@ static async Task<int> RunInteractiveShellAsync(
                 ChatConsole.WriteWarning($"Unknown role '{roleInput}'. Known roles: {string.Join(", ", runtime.GetKnownRoleSlugs(state).OrderBy(s => s))}");
                 continue;
             }
+            ChatConsole.WriteHint($"[italic]You → {Markup.Escape(roleSlug)}:[/] [dim]{Markup.Escape(userMessage.Length > 120 ? userMessage[..117] + "..." : userMessage)}[/]");
             await InvokeRoleDirectAsync(store, runtime, state, roleSlug, userMessage);
             continue;
         }
@@ -556,7 +632,8 @@ static async Task<int> RunInteractiveShellAsync(
                 }
                 loopCts = new CancellationTokenSource();
                 var approveCts = loopCts;
-                loopTask = RunLoopAsync(store, runtime, loopExecutor, state, ParseOptions([]), interactiveShell: false, chatLogging: true, approveCts.Token);
+                loopTask = RunLoopAsync(store, runtime, loopExecutor, state, ParseOptions([]), interactiveShell: false, chatLogging: true, approveCts.Token, overrideLogger: backgroundLogger);
+                NotifyOnLoopComplete(loopTask);
                 ChatConsole.WriteHint("/stop to cancel · /wait to re-attach");
                 lastContextKey = null;
                 continue;
@@ -694,6 +771,28 @@ static async Task<int> RunInteractiveShellAsync(
                     PrintStatus(store.Load(), runtime);
                     break;
 
+                case "history":
+                {
+                    if (sessionHistory.Count == 0)
+                    {
+                        ChatConsole.WriteHint("No session history yet.");
+                        break;
+                    }
+                    var histTable = new Table { Border = TableBorder.Rounded, Expand = false };
+                    histTable.AddColumn(new TableColumn("[dim]+mm:ss[/]").RightAligned());
+                    histTable.AddColumn("[dim]Entry[/]");
+                    var start = sessionHistory[0].At;
+                    foreach (var (at, entry) in sessionHistory)
+                    {
+                        var elapsed = at - start;
+                        histTable.AddRow(
+                            $"[dim]+{(int)elapsed.TotalMinutes:D2}:{elapsed.Seconds:D2}[/]",
+                            Markup.Escape(entry));
+                    }
+                    AnsiConsole.Write(histTable);
+                    break;
+                }
+
                 case "add-issue":
                 {
                     var current = store.Load();
@@ -797,7 +896,8 @@ static async Task<int> RunInteractiveShellAsync(
                         ChatConsole.WriteSuccess("Architect plan approved. Starting execution loop...");
                         loopCts = new CancellationTokenSource();
                         var approveArchCts = loopCts;
-                        loopTask = RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: false, chatLogging: true, approveArchCts.Token);
+                        loopTask = RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: false, chatLogging: true, approveArchCts.Token, overrideLogger: backgroundLogger);
+                        NotifyOnLoopComplete(loopTask);
                         ChatConsole.WriteHint("/stop to cancel · /wait to re-attach");
                     }
                     else
@@ -809,7 +909,8 @@ static async Task<int> RunInteractiveShellAsync(
                             : "Plan approved. Starting execution loop...");
                         loopCts = new CancellationTokenSource();
                         var approvePlanCts = loopCts;
-                        loopTask = RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: false, chatLogging: true, approvePlanCts.Token);
+                        loopTask = RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: false, chatLogging: true, approvePlanCts.Token, overrideLogger: backgroundLogger);
+                        NotifyOnLoopComplete(loopTask);
                         ChatConsole.WriteHint("/stop to cancel · /wait to re-attach");
                     }
                     lastContextKey = null;
@@ -833,6 +934,67 @@ static async Task<int> RunInteractiveShellAsync(
                         store.Save(current);
                     }
                     Console.WriteLine($"Auto-approve {(enabled ? "enabled" : "disabled")}.");
+                    break;
+                }
+
+                case "set-max-iterations":
+                case "max-iterations":
+                {
+                    var current = TryLoadState(store, out var loadedState) ? loadedState : null;
+                    var requested = GetPositionalValue(options) ?? GetOption(options, "value");
+                    if (string.IsNullOrWhiteSpace(requested))
+                    {
+                        Console.WriteLine($"Default max-iterations: {current?.Runtime.DefaultMaxIterations ?? 10}. Usage: /max-iterations <N>");
+                        break;
+                    }
+                    if (!int.TryParse(requested, out var n) || n < 1)
+                    {
+                        ChatConsole.WriteError("max-iterations must be a positive integer.");
+                        break;
+                    }
+                    if (current is not null)
+                    {
+                        runtime.SetDefaultMaxIterations(current, n);
+                        store.Save(current);
+                        ChatConsole.WriteSuccess($"Default max-iterations set to {n}. All future /run calls will use this unless overridden.");
+                    }
+                    else
+                    {
+                        ChatConsole.WriteWarning("No workspace loaded — run /init first.");
+                    }
+                    break;
+                }
+
+                case "set-max-subagents":
+                case "max-subagents":
+                {
+                    var current = TryLoadState(store, out var loadedState) ? loadedState : null;
+                    var requested = GetPositionalValue(options) ?? GetOption(options, "value");
+                    if (string.IsNullOrWhiteSpace(requested))
+                    {
+                        Console.WriteLine($"Default max-subagents: {current?.Runtime.DefaultMaxSubagents ?? 1}. Usage: /max-subagents <N>");
+                        ChatConsole.WriteHint("1 = sequential (safe default) · 2–4 = parallel pipelines · higher = more concurrent agents");
+                        break;
+                    }
+                    if (!int.TryParse(requested, out var n) || n < 1)
+                    {
+                        ChatConsole.WriteError("max-subagents must be a positive integer.");
+                        break;
+                    }
+                    if (current is not null)
+                    {
+                        runtime.SetDefaultMaxSubagents(current, n);
+                        store.Save(current);
+                        ChatConsole.WriteSuccess($"Default max-subagents set to {n}. All future /run calls will use this unless overridden.");
+                        if (n > 4)
+                        {
+                            ChatConsole.WriteHint("High subagent count can increase credit consumption quickly.");
+                        }
+                    }
+                    else
+                    {
+                        ChatConsole.WriteWarning("No workspace loaded — run /init first.");
+                    }
                     break;
                 }
 
@@ -898,10 +1060,15 @@ static async Task<int> RunInteractiveShellAsync(
                         Console.WriteLine("A plan is ready. Use /plan to review, type feedback to revise, or /approve to continue.");
                         break;
                     }
+                    // Show which defaults will be used if not explicitly overridden on this invocation
+                    var usingIterations = options.ContainsKey("max-iterations") ? int.Parse(options["max-iterations"][0]) : current.Runtime.DefaultMaxIterations;
+                    var usingSubagents = options.ContainsKey("max-subagents") ? int.Parse(options["max-subagents"][0]) : current.Runtime.DefaultMaxSubagents;
+                    ChatConsole.WriteHint($"max-iterations: [bold]{usingIterations}[/] · max-subagents: [bold]{usingSubagents}[/] [dim](change with /max-iterations N or /max-subagents N)[/]");
                     loopCts = new CancellationTokenSource();
                     var bgOptions = options;
                     var bgCts = loopCts;
-                    loopTask = RunLoopAsync(store, runtime, loopExecutor, current, bgOptions, interactiveShell: false, chatLogging: true, bgCts.Token);
+                    loopTask = RunLoopAsync(store, runtime, loopExecutor, current, bgOptions, interactiveShell: false, chatLogging: true, bgCts.Token, overrideLogger: backgroundLogger);
+                    NotifyOnLoopComplete(loopTask);
                     ChatConsole.WriteEvent("🚀", "Loop started — running in the background. You can type commands while work progresses.", "green");
                     ChatConsole.WriteHint("/stop to cancel · /wait to re-attach · /status to check progress");
                     break;
@@ -1085,11 +1252,12 @@ static async Task<LoopExecutionReport> RunLoopAsync(
     Dictionary<string, List<string>> options,
     bool interactiveShell = false,
     bool chatLogging = false,
-    CancellationToken cancellationToken = default)
+    CancellationToken cancellationToken = default,
+    Action<string>? overrideLogger = null)
 {
     var backend = GetOption(options, "backend") ?? "sdk";
-    var maxSubagents = GetIntOption(options, "max-subagents", 1);
-    var maxIterations = GetIntOption(options, "max-iterations", 10);
+    var maxSubagents = GetIntOption(options, "max-subagents", state.Runtime.DefaultMaxSubagents);
+    var maxIterations = GetIntOption(options, "max-iterations", state.Runtime.DefaultMaxIterations);
     var timeoutSeconds = GetIntOption(options, "timeout-seconds", 600);
     var verbosity = ParseVerbosity(GetOption(options, "verbosity"));
     using var keepAwakeController = new KeepAwakeController();
@@ -1099,11 +1267,13 @@ static async Task<LoopExecutionReport> RunLoopAsync(
         ? new LoopConsoleRenderer()
         : null;
     Action<IReadOnlyList<RunProgressSnapshot>>? progressReporter = renderer is null ? null : snapshots => renderer.ReportProgress(snapshots);
-    Action<string> logger = renderer is not null
-        ? message => renderer.Log(message)
-        : chatLogging
-            ? ChatConsole.WriteLoopLog
-            : Console.WriteLine;
+    Action<string> logger = overrideLogger is not null
+        ? overrideLogger
+        : renderer is not null
+            ? message => renderer.Log(message)
+            : chatLogging
+                ? ChatConsole.WriteLoopLog
+                : Console.WriteLine;
     var keepAwakeEnabled = ResolveKeepAwakeEnabled(state, options);
     ApplyKeepAwakeSetting(keepAwakeController, keepAwakeEnabled, interactiveShell, logger);
     var executionOptions = new LoopExecutionOptions
@@ -1218,44 +1388,105 @@ static Dictionary<string, List<string>> BuildPlanningOptions(Dictionary<string, 
 static void PrintStatus(WorkspaceState state, DevTeamRuntime runtime)
 {
     var report = runtime.BuildStatusReport(state);
-    Console.WriteLine($"{ConsoleTheme.Label("Phase:")} {ConsoleTheme.Phase(state.Phase.ToString())}");
-    Console.WriteLine($"{ConsoleTheme.Label("Mode:")} {ConsoleTheme.Accent(state.Runtime.ActiveModeSlug)}");
-    Console.WriteLine($"{ConsoleTheme.Label("Keep awake:")} {(state.Runtime.KeepAwakeEnabled ? ConsoleTheme.Success("enabled") : ConsoleTheme.Muted("disabled"))}");
-    Console.WriteLine($"{ConsoleTheme.Label("Auto-approve:")} {(state.Runtime.AutoApproveEnabled ? ConsoleTheme.Success("enabled") : ConsoleTheme.Muted("disabled"))}");
-    Console.WriteLine(
-        $"Counts: roadmap={report.Counts["roadmap"]}, issues={report.Counts["issues"]}, " +
-        $"questions={report.Counts["questions"]}, runs={report.Counts["runs"]}, " +
-        $"modes={state.Modes.Count}, " +
-        $"decisions={report.Counts["decisions"]}, roles={report.Counts["roles"]}, superpowers={report.Counts["superpowers"]}");
-    Console.WriteLine(
-        $"{ConsoleTheme.Label("Budget:")} {ConsoleTheme.BudgetUsage(report.Budget.CreditsCommitted, report.Budget.TotalCreditCap)} credits " +
-        $"({ConsoleTheme.Number($"{report.Budget.TotalCreditCap - report.Budget.CreditsCommitted:0.##}")} remaining), " +
-        $"premium {ConsoleTheme.BudgetUsage(report.Budget.PremiumCreditsCommitted, report.Budget.PremiumCreditCap)} " +
-        $"({ConsoleTheme.Number($"{report.Budget.PremiumCreditCap - report.Budget.PremiumCreditsCommitted:0.##}")} remaining)");
-    if (report.QueuedRuns.Count > 0)
+
+    // Header line
+    AnsiConsole.MarkupLine($"[bold]Phase:[/] [cyan]{Markup.Escape(state.Phase.ToString())}[/]  " +
+        $"[bold]Mode:[/] [cyan]{Markup.Escape(state.Runtime.ActiveModeSlug)}[/]  " +
+        $"[bold]Max-iter:[/] {state.Runtime.DefaultMaxIterations}  " +
+        $"[bold]Max-sub:[/] {state.Runtime.DefaultMaxSubagents}");
+
+    // Issue table
+    var issues = state.Issues.OrderBy(i => i.Id).ToList();
+    if (issues.Count > 0)
     {
-        Console.WriteLine(ConsoleTheme.Label("Queued runs:"));
-        foreach (var run in report.QueuedRuns)
+        var table = new Table { Border = TableBorder.Rounded, Expand = false };
+        table.AddColumn(new TableColumn("[dim]#[/]").RightAligned());
+        table.AddColumn("[dim]Role[/]");
+        table.AddColumn("[dim]Status[/]");
+        table.AddColumn("[dim]Title[/]");
+        table.AddColumn(new TableColumn("[dim]Pri[/]").RightAligned());
+        table.AddColumn("[dim]Pipeline[/]");
+
+        foreach (var issue in issues)
         {
-            Console.WriteLine($"  - #{ConsoleTheme.Number(run.Id.ToString())} issue #{ConsoleTheme.Number(run.IssueId.ToString())} {ConsoleTheme.Role(run.RoleSlug)} via {ConsoleTheme.Accent(run.ModelName)}");
+            var statusColor = issue.Status switch
+            {
+                ItemStatus.Done => "green",
+                ItemStatus.InProgress => "yellow",
+                ItemStatus.Blocked => "red",
+                _ => "dim"
+            };
+            var title = issue.Title.Length > 60 ? issue.Title[..57] + "..." : issue.Title;
+            var pipelineCell = FormatPipelineCell(state, issue);
+            table.AddRow(
+                $"[dim]{issue.Id}[/]",
+                $"[cyan]{Markup.Escape(issue.RoleSlug)}[/]",
+                $"[{statusColor}]{issue.Status}[/]",
+                Markup.Escape(title),
+                $"[dim]{issue.Priority}[/]",
+                pipelineCell);
         }
+        AnsiConsole.Write(table);
     }
+    else
+    {
+        AnsiConsole.MarkupLine("[dim]No issues.[/]");
+    }
+
+    // Budget summary
+    AnsiConsole.MarkupLine(
+        $"[bold]Budget:[/] {report.Budget.CreditsCommitted:0.##}/{report.Budget.TotalCreditCap} credits " +
+        $"[dim]({report.Budget.TotalCreditCap - report.Budget.CreditsCommitted:0.##} remaining)[/]  " +
+        $"premium {report.Budget.PremiumCreditsCommitted:0.##}/{report.Budget.PremiumCreditCap} " +
+        $"[dim]({report.Budget.PremiumCreditCap - report.Budget.PremiumCreditsCommitted:0.##} remaining)[/]");
+
+    // Open questions
     if (report.OpenQuestions.Count > 0)
     {
-        Console.WriteLine(ConsoleTheme.Label("Open questions:"));
-        foreach (var question in report.OpenQuestions)
+        AnsiConsole.MarkupLine($"\n[bold yellow]{report.OpenQuestions.Count} open question(s)[/]");
+        foreach (var q in report.OpenQuestions)
         {
-            Console.WriteLine($"  - #{ConsoleTheme.Number(question.Id.ToString())} ({(question.IsBlocking ? ConsoleTheme.Warning("blocking") : ConsoleTheme.Muted("non-blocking"))}) {question.Text}");
+            var tag = q.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
+            AnsiConsole.MarkupLine($"  [dim]#{q.Id}[/] [{tag}] {Markup.Escape(q.Text)}");
         }
     }
-    if (report.RecentDecisions.Count > 0)
+
+    // Queued/running runs
+    if (report.QueuedRuns.Count > 0)
     {
-        Console.WriteLine(ConsoleTheme.Label("Recent decisions:"));
-        foreach (var decision in report.RecentDecisions)
+        AnsiConsole.MarkupLine($"\n[bold]{report.QueuedRuns.Count} queued/running run(s)[/]");
+        foreach (var run in report.QueuedRuns)
         {
-            Console.WriteLine($"  - #{ConsoleTheme.Number(decision.Id.ToString())} [{ConsoleTheme.Accent(decision.Source)}] {decision.Title}");
+            AnsiConsole.MarkupLine($"  [dim]#{run.Id}[/] issue [dim]#{run.IssueId}[/] [cyan]{Markup.Escape(run.RoleSlug)}[/] via {Markup.Escape(run.ModelName)}");
         }
     }
+}
+
+static string FormatPipelineCell(WorkspaceState state, IssueItem issue)
+{
+    if (issue.PipelineId is null)
+    {
+        return "[dim]—[/]";
+    }
+    var pipeline = state.Pipelines.FirstOrDefault(p => p.Id == issue.PipelineId);
+    if (pipeline is null)
+    {
+        return $"[dim]#{issue.PipelineId}[/]";
+    }
+    var stageIndex = issue.PipelineStageIndex ?? 0;
+    var roles = pipeline.RoleSequence;
+    var parts = new List<string>();
+    for (var i = 0; i < roles.Count; i++)
+    {
+        var r = Markup.Escape(roles[i]);
+        if (i == stageIndex)
+            parts.Add($"[bold cyan]{r}[/]");
+        else if (i < stageIndex)
+            parts.Add($"[green]{r}[/]");
+        else
+            parts.Add($"[dim]{r}[/]");
+    }
+    return $"[dim]#{pipeline.Id}[/] {string.Join(" → ", parts)}";
 }
 
 static void PrintBudget(BudgetState budget)
@@ -1367,12 +1598,12 @@ static void PrintPlan(WorkspaceStore store)
     var path = Path.Combine(store.WorkspacePath, "plan.md");
     if (!File.Exists(path))
     {
-        Console.WriteLine("No plan has been written yet.");
+        ChatConsole.WriteHint("No plan has been written yet.");
         return;
     }
 
-    Console.WriteLine($"Plan file: {path}");
-    Console.WriteLine(File.ReadAllText(path).TrimEnd());
+    var content = File.ReadAllText(path).TrimEnd();
+    ChatConsole.WriteSystem(Markup.Escape(content), "plan");
 }
 
 static void PrintLoopResult(LoopResult result)
@@ -1434,6 +1665,8 @@ static void PrintHelp()
     Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
     Console.WriteLine("  set-keep-awake <true|false> [--workspace PATH]");
     Console.WriteLine("  set-auto-approve <true|false> [--workspace PATH]");
+    Console.WriteLine("  max-iterations <N> [--workspace PATH]    Set workspace default for max loop iterations");
+    Console.WriteLine("  max-subagents <N> [--workspace PATH]     Set workspace default for max parallel subagents");
     Console.WriteLine("  add-roadmap <TITLE> [--detail TEXT] [--priority N] [--workspace PATH]");
     Console.WriteLine("  add-issue <TITLE> --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]] [--workspace PATH]");
     Console.WriteLine("  add-question <TEXT> [--blocking] [--workspace PATH]");
@@ -1460,6 +1693,7 @@ static void PrintInteractiveHelp()
     Console.WriteLine($"  {ConsoleTheme.Command("/customize")} [--force]    Copy default assets to .devteam-source/ for editing");
     Console.WriteLine($"  {ConsoleTheme.Command("/bug")} [--save PATH] [--redact-paths true|false]");
     Console.WriteLine($"  {ConsoleTheme.Command("/status")}");
+    Console.WriteLine($"  {ConsoleTheme.Command("/history")}              Show session command history (last 50)");
     Console.WriteLine($"  {ConsoleTheme.Command("/mode")} <slug>");
     Console.WriteLine($"  {ConsoleTheme.Command("/keep-awake")} <on|off>");
     Console.WriteLine($"  {ConsoleTheme.Command("/add-issue")} \"title\" --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]]");
@@ -1468,7 +1702,9 @@ static void PrintInteractiveHelp()
     Console.WriteLine($"  {ConsoleTheme.Command("/budget")} [--total N] [--premium N]");
     Console.WriteLine($"  {ConsoleTheme.Command("/check-update")}");
     Console.WriteLine($"  {ConsoleTheme.Command("/update")}");
-    Console.WriteLine($"  {ConsoleTheme.Command("/run")} [--max-iterations N] [--timeout-seconds N] [--keep-awake true|false]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
+    Console.WriteLine($"  {ConsoleTheme.Command("/max-iterations")} <N>    Set workspace default max iterations (used by all future /run calls)");
+    Console.WriteLine($"  {ConsoleTheme.Command("/max-subagents")} <N>     Set workspace default max subagents (1=sequential, 2–4=parallel)");
+    Console.WriteLine($"  {ConsoleTheme.Command("/run")} [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--keep-awake true|false]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
     Console.WriteLine($"  {ConsoleTheme.Command("/stop")}              Cancel the running loop (waits for current agent call to finish)");
     Console.WriteLine($"  {ConsoleTheme.Command("/wait")}              Re-attach to the running loop and wait for it to finish");
     Console.WriteLine($"  {ConsoleTheme.Command("/feedback")} <text>");
@@ -1993,42 +2229,4 @@ file sealed class LoopConsoleRenderer : IDisposable
     }
 }
 
-file sealed class ShellAutoCompleteHandler : IAutoCompleteHandler
-{
-    private static readonly string[] Commands =
-    [
-        "/init", "/bug", "/status", "/plan", "/run", "/stop", "/wait", "/approve", "/feedback",
-        "/questions", "/answer", "/budget", "/goal", "/mode",
-        "/keep-awake", "/auto-approve", "/add-issue", "/customize",
-        "/check-update", "/update", "/exit", "/help"
-    ];
-
-    private static readonly string[] RoleMentions =
-    [
-        "@planner", "@architect", "@orchestrator",
-        "@developer", "@backend-developer", "@frontend-developer", "@fullstack-developer",
-        "@tester", "@reviewer", "@ux", "@user", "@game-designer",
-        "@navigator", "@analyst", "@security", "@docs", "@devops", "@refactorer"
-    ];
-
-    public char[] Separators { get; set; } = [' '];
-
-    public string[] GetSuggestions(string text, int index)
-    {
-        if (string.IsNullOrEmpty(text))
-        {
-            return Commands;
-        }
-
-        if (text.StartsWith("@", StringComparison.Ordinal))
-        {
-            return RoleMentions
-                .Where(r => r.StartsWith(text, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-        }
-
-        return Commands
-            .Where(cmd => cmd.StartsWith(text, StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-    }
-}
+// ShellAutoCompleteHandler removed — shell uses RazorConsole TextInput

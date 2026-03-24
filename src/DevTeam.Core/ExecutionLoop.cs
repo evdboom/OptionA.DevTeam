@@ -4,8 +4,8 @@ namespace DevTeam.Core;
 
 public sealed class LoopExecutionOptions
 {
-    public int MaxIterations { get; set; } = 10;
-    public int MaxSubagents { get; set; } = 1;
+    public int MaxIterations { get; set; } = 15;
+    public int MaxSubagents { get; set; } = 4;
     public string Backend { get; set; } = "sdk";
     public TimeSpan AgentTimeout { get; set; } = TimeSpan.FromMinutes(10);
     public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(10);
@@ -97,6 +97,14 @@ public sealed class LoopExecutor(
             }
 
             Log(log, options.Verbosity, $"Iteration {iteration}: {state.Phase}");
+            if (iteration == 1 && state.Phase == WorkflowPhase.Execution && options.MaxSubagents == 1)
+            {
+                var readyCount = _runtime.GetReadyIssuesPreview(state, 10).Count;
+                if (readyCount >= 4)
+                {
+                    Log(log, options.Verbosity, $"  Hint: {readyCount} issues are ready. Running sequentially (max-subagents=1). Use /max-subagents 3 to run up to 3 in parallel and speed things up.");
+                }
+            }
             if (created.Length > 0)
             {
                 LogDetailed(log, options.Verbosity, $"  Bootstrapped: {string.Join(", ", created)}");
@@ -118,6 +126,17 @@ public sealed class LoopExecutor(
                 var sessionId = session.SessionId;
                 _runtime.StartRun(state, queuedRun.RunId, sessionId);
                 Log(log, options.Verbosity, $"  Running issue #{queuedRun.IssueId} as {queuedRun.RoleSlug} via {queuedRun.ModelName}");
+                var runIssue = state.Issues.FirstOrDefault(i => i.Id == queuedRun.IssueId);
+                if (runIssue?.PipelineId is int pid)
+                {
+                    var pipeline = state.Pipelines.FirstOrDefault(p => p.Id == pid);
+                    if (pipeline is not null)
+                    {
+                        var stageIdx = runIssue.PipelineStageIndex ?? 0;
+                        var chain = string.Join(" → ", pipeline.RoleSequence.Select((r, i) => i == stageIdx ? $"[{r}]" : r));
+                        Log(log, options.Verbosity, $"    pipeline #{pid} · {chain}");
+                    }
+                }
                 LogDetailed(log, options.Verbosity, $"    Session {sessionId}, scope {session.ScopeKind}, area {(string.IsNullOrWhiteSpace(queuedRun.Area) ? "none" : queuedRun.Area)}, timeout {options.AgentTimeout.TotalSeconds:0}s");
                 pendingRuns.Add(new PendingAgentRun(
                     queuedRun,
@@ -146,14 +165,38 @@ public sealed class LoopExecutor(
                 var persistedRun = state.AgentRuns.First(run => run.Id == completed.Run.RunId);
                 WriteRunArtifact(_store.WorkspacePath, completed.Run, persistedRun, completed.Response, completed.Outcome, completed.Summary);
                 WriteDecisionArtifact(_store.WorkspacePath, decision);
-                if (state.Issues.First(issue => issue.Id == completed.Run.IssueId).IsPlanningIssue)
+                var completedIssue = state.Issues.First(issue => issue.Id == completed.Run.IssueId);
+                var isArchitectRun = !completedIssue.IsPlanningIssue
+                    && string.Equals(completedIssue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase)
+                    && completed.Outcome == "completed";
+                if (completedIssue.IsPlanningIssue)
                 {
-                    WritePlanArtifact(_store.WorkspacePath, state, completed.Summary);
+                    WritePlanArtifact(_store.WorkspacePath, state, completed.Summary, "High-level plan");
+                }
+                else if (isArchitectRun)
+                {
+                    WritePlanArtifact(_store.WorkspacePath, state, completed.Summary, "Detailed execution plan (architect)");
                 }
                 _store.Save(state);
 
                 Log(log, options.Verbosity, $"    Outcome: {completed.Outcome}");
-                if (state.Issues.First(issue => issue.Id == completed.Run.IssueId).IsPlanningIssue)
+                if (completedIssue.PipelineId is int completedPid && completed.Outcome == "completed")
+                {
+                    var completedPipeline = state.Pipelines.FirstOrDefault(p => p.Id == completedPid);
+                    if (completedPipeline is not null && completedPipeline.ActiveIssueId is int nextId && nextId != completedIssue.Id)
+                    {
+                        var nextIssue = state.Issues.FirstOrDefault(i => i.Id == nextId);
+                        if (nextIssue is not null)
+                        {
+                            Log(log, options.Verbosity, $"    Pipeline handoff → #{nextId} {nextIssue.RoleSlug}: {nextIssue.Title}");
+                        }
+                    }
+                    else if (completedPipeline?.Status == PipelineStatus.Completed)
+                    {
+                        Log(log, options.Verbosity, $"    Pipeline #{completedPid} completed");
+                    }
+                }
+                if (completedIssue.IsPlanningIssue || isArchitectRun)
                 {
                     LogPlanSummary(log, options.Verbosity, completed.Summary);
                     Log(log, options.Verbosity, $"    Plan file: {Path.Combine(_store.WorkspacePath, "plan.md")}");
@@ -353,7 +396,7 @@ public sealed class LoopExecutor(
         File.WriteAllText(path, content);
     }
 
-    private static void WritePlanArtifact(string workspacePath, WorkspaceState state, string summary)
+    private static void WritePlanArtifact(string workspacePath, WorkspaceState state, string summary, string header = "Current plan")
     {
         var path = Path.Combine(workspacePath, "plan.md");
         var pendingIssues = state.Issues
@@ -380,7 +423,7 @@ public sealed class LoopExecutor(
                 openQuestions.Select(question => $"- #{question.Id} [{(question.IsBlocking ? "blocking" : "non-blocking")}] {question.Text}"));
 
         var content = $"""
-        # Current plan
+        # {header}
 
         ## Planning summary
 

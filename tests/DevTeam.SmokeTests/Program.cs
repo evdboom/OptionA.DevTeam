@@ -74,7 +74,9 @@ var tests = new List<(string Name, Action Run)>
     ("Autopilot mode enables auto-approve", TestAutopilotModeEnablesAutoApprove),
     ("Design-only roles receive file boundary enforcement", TestDesignOnlyRolesReceiveFileBoundary),
     ("Planner cannot create duplicate architect issues", TestPlannerCannotCreateDuplicateArchitectIssues),
-    ("Init rejects misspelled goal option", TestInitRejectsMisspelledGoalOption)
+    ("Init rejects misspelled goal option", TestInitRejectsMisspelledGoalOption),
+    ("Architect run updates plan artifact with execution details", TestArchitectRunUpdatesPlanArtifact),
+    ("Conflict prevention holds at max-subagents 4", TestConflictPreventionHoldsAtHighSubagentCount)
 };
 
 var failures = new List<string>();
@@ -1828,6 +1830,75 @@ static void TestInitRejectsMisspelledGoalOption()
     {
         TryCleanupTempRepo(tempRoot);
     }
+}
+
+static void TestArchitectRunUpdatesPlanArtifact()
+{
+    using var harness = new TestHarness();
+    // Start in Execution phase (no architect issues — ApprovePlan skips architect planning).
+    harness.Runtime.ApprovePlan(harness.State, "Plan approved.");
+    // Add a non-planning architect issue (a real execution-phase architect issue).
+    harness.Runtime.AddIssue(harness.State, "Design data model", "Define the core domain entities.", "architect", 100, null, []);
+    harness.Store.Save(harness.State);
+
+    var executor = new LoopExecutor(
+        harness.Runtime,
+        harness.Store,
+        _ => new FakeAgentClient("""
+            OUTCOME: completed
+            SUMMARY:
+            Use a flat ECS data model: Position, Velocity, Sprite components; PhysicsSystem, RenderSystem.
+            QUESTIONS:
+            (none)
+            """));
+
+    executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 2,
+            MaxSubagents = 1,
+            Verbosity = LoopVerbosity.Normal
+        }).GetAwaiter().GetResult();
+
+    var planPath = Path.Combine(harness.Store.WorkspacePath, "plan.md");
+    AssertTrue(File.Exists(planPath), "Architect run should write a plan.md artifact");
+    var planContent = File.ReadAllText(planPath);
+    AssertTrue(planContent.Contains("flat ECS data model", StringComparison.Ordinal),
+        "plan.md should contain the architect summary");
+    AssertTrue(planContent.Contains("Detailed execution plan", StringComparison.Ordinal),
+        "plan.md should use the architect header, not the planner header");
+}
+
+static void TestConflictPreventionHoldsAtHighSubagentCount()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+    // Two issues in the same area (only one can run at a time) + two in distinct areas.
+    harness.Runtime.AddIssue(harness.State, "Build bird entity", "Implement bird state.", "developer", 90, null, [], "gameplay");
+    harness.Runtime.AddIssue(harness.State, "Tune flap physics", "Adjust gravity.", "developer", 85, null, [], "gameplay");
+    harness.Runtime.AddIssue(harness.State, "Build score UI", "Show score on screen.", "developer", 80, null, [], "ui");
+    harness.Runtime.AddIssue(harness.State, "Add score tests", "Test scoring.", "tester", 75, null, [], "testing");
+
+    var agent = new FakeConcurrentAgentClient("OUTCOME: completed\nSUMMARY:\nCompleted the task.");
+    var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+
+    executor.RunAsync(
+        harness.State,
+        new LoopExecutionOptions
+        {
+            Backend = "sdk",
+            MaxIterations = 1,
+            MaxSubagents = 4,
+            Verbosity = LoopVerbosity.Normal
+        }).GetAwaiter().GetResult();
+
+    // With 4 capacity but 2 same-area issues: expect 1 gameplay + 1 ui + 1 testing = 3 concurrent.
+    AssertTrue(agent.MaxConcurrentInvocations <= 3,
+        "Conflict prevention should cap same-area concurrent runs even at max-subagents=4.");
+    AssertTrue(agent.MaxConcurrentInvocations >= 3,
+        "Three independent areas should run concurrently when max-subagents=4.");
 }
 
 static void AssertEqual<T>(T expected, T actual, string label)

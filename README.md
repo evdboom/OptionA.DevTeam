@@ -277,6 +277,44 @@ View or adjust the budget:
 
 The budget is displayed after each loop iteration so you can see spend in real time.
 
+## Parallel subagents
+
+By default the loop runs four agent at a time (`--max-subagents 4`). Raising/Lowering this lets independent areas execute concurrently, which is the main lever for throughput.
+
+Set a workspace default so every future `/run` uses it:
+
+```text
+/max-subagents 3
+```
+
+Or pass it directly for a single run:
+
+```text
+/run --max-subagents 3
+```
+
+### Recommended settings
+
+| Situation | `max-subagents` | Notes |
+|-----------|----------------|-------|
+| Exploratory / unknown scope | **1** | Sequential, easiest to follow and debug |
+| Standard execution | **2–3** | Good throughput without burning premium budget quickly |
+| High parallelism | **4** | Useful when 4+ issue areas exist; monitor budget closely |
+| GitHub mode / spike work | **1** | Long-running exploratory agents rarely gain from parallelism |
+
+### Credit burn-rate tradeoff
+
+Each additional concurrent subagent multiplies your real-time credit spend. With 6 premium credits (the default cap) and `max-subagents 3`, you can run approximately 3 premium architect calls in a single iteration — which can exhaust premium credits in one pass.
+
+Practical guidance:
+- Use **max-subagents 1–2** during architecture/planning phases to stay within premium budget.
+- Raise to **3–4** during execution phases when most work lands on standard or light models (developer, tester, docs).
+- If you ever see the first iteration consuming most of your budget, lower max-subagents and rerun.
+
+### Conflict prevention
+
+The runtime automatically prevents same-area issues from running in parallel. If two issues share the same `area` value, only the higher-priority one is included in each batch — even if `max-subagents` capacity would allow more. This prevents merge conflicts on shared files.
+
 ## Pipelines
 
 When work is approved, the runtime automatically creates multi-role pipelines. For example, a feature issue assigned to `architect` will, on completion, generate a follow-up for `developer`, and then `tester`. Each stage must complete before the next starts.

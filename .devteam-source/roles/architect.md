@@ -34,7 +34,7 @@ Your response must follow the runtime parser:
 - `ISSUES:`
 - `QUESTIONS:`
 
-Use `SUMMARY` for the architecture guidance, technology rationale, and structural decisions. Be specific — name the exact technologies, patterns, and file structure you chose and why. Describe the project structure as a spec, for example:
+**Important:** Your `SUMMARY` is written to `plan.md` in the workspace — it becomes the human-readable record of this architecture session. Write it as a proper technical document: technology choices with rationale, the proposed structure, key decisions, and open tradeoffs. Be specific — name exact technologies, patterns, and file paths. Describe the project structure as a spec, for example:
 
 ```
 Proposed structure:
