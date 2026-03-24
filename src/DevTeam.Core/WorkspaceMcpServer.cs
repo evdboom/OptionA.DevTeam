@@ -149,6 +149,16 @@ public sealed class WorkspaceMcpServer(string workspacePath)
                     GetOptionalString(arguments, "sessionId"));
                 return new { decision.Id, decision.Title, decision.Source };
             }, save: true)),
+            "get_runtime_capabilities" => BuildToolResult(BuildRuntimeCapabilities()),
+            "update_issue_status" => BuildToolResult(WithWorkspace((runtime, state) =>
+            {
+                var issue = runtime.UpdateIssueStatus(
+                    state,
+                    GetInt(arguments, "issueId", 0),
+                    GetRequiredString(arguments, "status"),
+                    GetOptionalString(arguments, "notes"));
+                return new { issue.Id, issue.Title, Status = issue.Status.ToString(), issue.Notes };
+            }, save: true)),
             _ => throw new InvalidOperationException($"Tool '{toolName}' is not supported.")
         };
     }
@@ -255,6 +265,34 @@ public sealed class WorkspaceMcpServer(string workspacePath)
                     },
                     ["required"] = new JsonArray("title", "detail"),
                     ["additionalProperties"] = false
+                }),
+            BuildToolDefinition(
+                "get_runtime_capabilities",
+                "Describe which concerns are fully managed by the DevTeam runtime so agents know what NOT to ask the user about.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject(),
+                    ["additionalProperties"] = false
+                }),
+            BuildToolDefinition(
+                "update_issue_status",
+                "Update the status of an existing issue. Use this instead of editing workspace state files directly.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject
+                    {
+                        ["issueId"] = IntegerSchema(),
+                        ["status"] = new JsonObject
+                        {
+                            ["type"] = "string",
+                            ["enum"] = new JsonArray("open", "in-progress", "done", "blocked")
+                        },
+                        ["notes"] = StringSchema()
+                    },
+                    ["required"] = new JsonArray("issueId", "status"),
+                    ["additionalProperties"] = false
                 })
         ];
     }
@@ -266,7 +304,48 @@ public sealed class WorkspaceMcpServer(string workspacePath)
             ["description"] = description,
             ["inputSchema"] = schema
         };
-
+    private static object BuildRuntimeCapabilities() => new
+    {
+        ManagedConcerns = new[]
+        {
+            new
+            {
+                Area = "Budget and model selection",
+                Description = "The runtime enforces credit caps (total and premium), selects the appropriate model tier for each issue based on available budget and budget-pressure thresholds, and falls back to cheaper tiers automatically. Agents must never ask the user whether to switch model tiers, enforce credit caps, or restrict premium usage."
+            },
+            new
+            {
+                Area = "Phase transitions",
+                Description = "The runtime is the sole authority for moving the workspace through phases (Planning → ArchitectPlanning → Execution). Agents must not ask the user to trigger or approve phase changes."
+            },
+            new
+            {
+                Area = "Issue status tracking",
+                Description = "Issue status (open, in-progress, done, blocked) must be updated via the update_issue_status MCP tool. Agents must never edit workspace state files (.devteam/state/*.json) directly. If the workspace state appears stale or conflicting, trust the runtime's authoritative copy and call update_issue_status to record the intended final status."
+            },
+            new
+            {
+                Area = "Run lifecycle",
+                Description = "The runtime queues, starts, marks complete, and fails agent runs. Agents do not need to manage run records."
+            },
+            new
+            {
+                Area = "Pipeline scheduling",
+                Description = "When pipeline scheduling is enabled, the runtime automatically chains architect → developer → tester stages. Agents should not manually create the entire chain; create only the next-stage issue when a handoff is truly required."
+            },
+            new
+            {
+                Area = "Question routing",
+                Description = "Questions created via create_question are routed to the user by the runtime. Agents must not ask users questions interactively; all user input requests must go through create_question."
+            },
+            new
+            {
+                Area = "Approval gates",
+                Description = "Plan and architect-plan approvals are managed by the user through the interactive shell. Agents must not prompt for or block on approval."
+            }
+        },
+        Guidance = "Do NOT create a question for any concern listed above. If you encounter a situation covered by one of these areas (e.g. budget pressure, a stale issue status, a phase-change event), handle it using the appropriate MCP tool or simply record a decision noting what you observed."
+    };
     private static JsonObject StringSchema() => new() { ["type"] = "string" };
 
     private static JsonObject IntegerSchema() => new() { ["type"] = "integer" };

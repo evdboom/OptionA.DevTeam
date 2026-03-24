@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Text;
 using DevTeam.Cli;
 using DevTeam.Core;
+using Spectre.Console;
 using ReadLine = System.ReadLine;
 
 var command = NormalizeCommand(args.Length == 0 ? "help" : args[0]);
@@ -370,15 +371,12 @@ static async Task<int> RunInteractiveShellAsync(
     using var keepAwakeController = new KeepAwakeController();
     var shellDiagnostics = new ShellSessionDiagnostics();
     var shellKeepAwakeEnabled = GetNullableBoolOption(startOptions, "keep-awake");
-    Console.WriteLine(ConsoleTheme.Label("DevTeam interactive shell"));
-    Console.WriteLine($"Workspace: {ConsoleTheme.Accent(store.WorkspacePath)}");
-    Console.WriteLine($"Type {ConsoleTheme.Command("/help")} for commands. {ConsoleTheme.Command("/exit")} to quit. {ConsoleTheme.Muted("Tab to autocomplete.")}"  );
+    ChatConsole.WriteBanner(store.WorkspacePath);
     await NotifyAboutAvailableUpdateAsync(toolUpdateService);
     TryLoadState(store, out var initialState);
     if (initialState is null)
     {
-        Console.WriteLine();
-        Console.WriteLine($"No workspace found. Use {ConsoleTheme.Command("/init")} --goal \"<your goal>\" to get started.");
+        ChatConsole.WriteNoWorkspace();
     }
     if (shellKeepAwakeEnabled is null)
     {
@@ -389,23 +387,97 @@ static async Task<int> RunInteractiveShellAsync(
     ReadLine.HistoryEnabled = true;
     ReadLine.AutoCompletionHandler = new ShellAutoCompleteHandler();
 
+    // Background loop tracking.
+    Task<LoopExecutionReport>? loopTask = null;
+    CancellationTokenSource? loopCts = null;
+    bool IsLoopRunning() => loopTask is { IsCompleted: false };
+    string? lastContextKey = null;
+
     while (true)
     {
+        // Surface loop completion before printing the next prompt.
+        if (loopTask is { IsCompleted: true })
+        {
+            try
+            {
+                var completedReport = await loopTask;
+                var completedState = store.Load();
+                Console.WriteLine();
+                ChatConsole.WriteSystem(
+                    $"Loop finished — [bold]{completedReport.IterationsExecuted}[/] iteration(s). Final state: [cyan]{Markup.Escape(completedReport.FinalState)}[/]",
+                    "loop complete");
+                PrintBudget(completedState.Budget);
+                if (completedReport.FinalState == "awaiting-architect-approval")
+                {
+                    PrintArchitectSummary(completedState);
+                }
+                // Questions and plan-ready panels are shown automatically at the next prompt.
+            }
+            catch (AggregateException ae) when (ae.InnerException is OperationCanceledException)
+            {
+                Console.WriteLine($"\n{ConsoleTheme.Warning("Loop was cancelled.")}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"\n{ConsoleTheme.Error($"Loop failed: {ex.Message}")}");
+            }
+            loopTask = null;
+            loopCts?.Dispose();
+            loopCts = null;
+            lastContextKey = null; // force context refresh: question/plan panels show at next prompt
+        }
+
         WorkspaceState? state = null;
+        List<QuestionItem> openQuestions = [];
         try
         {
             state = store.Load();
-            var openQuestions = state.Questions.Where(item => item.Status == QuestionStatus.Open).ToList();
-            if (openQuestions.Count > 0)
+            openQuestions = state.Questions.Where(item => item.Status == QuestionStatus.Open).ToList();
+
+            var planAwaiting = !IsLoopRunning()
+                && state.Phase == WorkflowPhase.Planning
+                && state.Issues.Any(i => i.IsPlanningIssue && i.Status == ItemStatus.Done)
+                && openQuestions.Count == 0;
+            var archAwaiting = !IsLoopRunning()
+                && PlanWorkflow.IsAwaitingArchitectApproval(state)
+                && openQuestions.Count == 0;
+            var contextKey = $"{state.Phase}|q:{string.Join(",", openQuestions.Select(q => q.Id))}|pa:{planAwaiting}|arch:{archAwaiting}|loop:{IsLoopRunning()}";
+
+            if (contextKey != lastContextKey)
             {
-                Console.WriteLine($"{ConsoleTheme.Warning($"{openQuestions.Count} open question{(openQuestions.Count == 1 ? "" : "s")}")} — use {ConsoleTheme.Command("/questions")} to list or {ConsoleTheme.Command("/answer")} <id> <text>");
+                lastContextKey = contextKey;
+                if (openQuestions.Count > 0 && !IsLoopRunning())
+                {
+                    var q = openQuestions[0];
+                    ChatConsole.WriteQuestion(q.Text, q.Id, q.IsBlocking, 1, openQuestions.Count);
+                    ChatConsole.WriteHint(openQuestions.Count > 1
+                        ? $"Type your answer (question 1 of {openQuestions.Count}), or [dim]/questions[/] to see all."
+                        : "Type your answer below.");
+                }
+                else if (openQuestions.Count > 0)
+                {
+                    ChatConsole.WriteWarning($"{openQuestions.Count} open question(s) — the loop may be paused. Use /answer <id> <text>.");
+                }
+                else if (planAwaiting)
+                {
+                    ChatConsole.WriteSystem(
+                        "A plan is ready. Type [bold]approve[/] to proceed into execution, or type feedback to revise it. Use [dim]/plan[/] to review.",
+                        "plan ready ✓");
+                }
+                else if (archAwaiting)
+                {
+                    ChatConsole.WriteSystem(
+                        "The architect plan is ready. Type [bold]approve[/] to begin execution, or share feedback to revise.",
+                        "architect plan ready ✓");
+                }
             }
         }
         catch
         {
         }
 
-        ConsoleTheme.WritePrompt("devteam> ");
+        var promptText = IsLoopRunning() ? "devteam (running)> " : "devteam> ";
+        ChatConsole.WritePrompt(promptText);
         var line = Console.IsInputRedirected ? Console.ReadLine() : ReadLine.Read("");
         if (line is null)
         {
@@ -425,12 +497,12 @@ static async Task<int> RunInteractiveShellAsync(
             var userMessage = spaceIndex > 1 ? line[(spaceIndex + 1)..].Trim() : "";
             if (string.IsNullOrWhiteSpace(userMessage))
             {
-                Console.WriteLine($"Usage: {ConsoleTheme.Command("@role")} <message>");
+                ChatConsole.WriteHint("Usage: [cyan]@role[/] <message>");
                 continue;
             }
             if (!runtime.TryResolveRoleSlug(state, roleInput, out var roleSlug))
             {
-                Console.WriteLine($"Unknown role '{ConsoleTheme.Warning(roleInput)}'. Known roles: {string.Join(", ", runtime.GetKnownRoleSlugs(state).OrderBy(s => s))}");
+                ChatConsole.WriteWarning($"Unknown role '{roleInput}'. Known roles: {string.Join(", ", runtime.GetKnownRoleSlugs(state).OrderBy(s => s))}");
                 continue;
             }
             await InvokeRoleDirectAsync(store, runtime, state, roleSlug, userMessage);
@@ -439,28 +511,54 @@ static async Task<int> RunInteractiveShellAsync(
 
         if (!line.StartsWith("/", StringComparison.Ordinal) && state is not null)
         {
-            var openQuestions = state.Questions.Where(item => item.Status == QuestionStatus.Open).ToList();
-            if (openQuestions.Count == 1)
+            // Answer the currently shown question (the first open one).
+            if (openQuestions.Count > 0 && !IsLoopRunning())
             {
-                runtime.AnswerQuestion(state, openQuestions[0].Id, line);
+                var q = openQuestions[0];
+                runtime.AnswerQuestion(state, q.Id, line);
                 store.Save(state);
-                var stillOpen = state.Questions.Count(q => q.Status == QuestionStatus.Open);
-                if (stillOpen == 0)
+                var stillOpen = state.Questions.Count(question => question.Status == QuestionStatus.Open);
+                ChatConsole.WriteSuccess(stillOpen == 0
+                    ? "Got it! All questions answered."
+                    : $"Got it! {stillOpen} question(s) remaining.");
+                lastContextKey = null; // force refresh so the next question shows automatically
+                continue;
+            }
+
+            // "approve" / "yes" shortcut — acts like /approve and immediately starts the loop.
+            if (IsApproveIntent(line))
+            {
+                if (IsLoopRunning())
                 {
-                    Console.WriteLine($"Answered question #{openQuestions[0].Id}. {ConsoleTheme.Success("All questions resolved.")}");
-                    if (state.Phase == WorkflowPhase.Planning)
-                    {
-                        Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to move forward or type feedback to revise the plan.");
-                    }
-                    else if (PlanWorkflow.IsAwaitingArchitectApproval(state))
-                    {
-                        Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to move forward or type feedback to revise the architect plan.");
-                    }
+                    ChatConsole.WriteWarning("A loop is running. Use /stop first, then approve.");
+                    continue;
+                }
+                var canApproveArch = state.Phase == WorkflowPhase.ArchitectPlanning && PlanWorkflow.IsAwaitingArchitectApproval(state);
+                var canApprovePlan = state.Phase == WorkflowPhase.Planning && state.Issues.Any(i => i.IsPlanningIssue && i.Status == ItemStatus.Done);
+                if (!canApproveArch && !canApprovePlan)
+                {
+                    ChatConsole.WriteHint("Nothing to approve right now. Use [dim]/plan[/] to generate a plan first.");
+                    continue;
+                }
+                if (canApproveArch)
+                {
+                    runtime.ApproveArchitectPlan(state, "Approved via chat.");
+                    store.Save(state);
+                    ChatConsole.WriteSuccess("Architect plan approved. Starting execution loop...");
                 }
                 else
                 {
-                    Console.WriteLine($"Answered question #{openQuestions[0].Id}. {ConsoleTheme.Muted($"{stillOpen} remaining.")}");
+                    runtime.ApprovePlan(state, "Approved via chat.");
+                    store.Save(state);
+                    ChatConsole.WriteSuccess(state.Phase == WorkflowPhase.ArchitectPlanning
+                        ? "Plan approved. Running architect planning..."
+                        : "Plan approved. Starting execution loop...");
                 }
+                loopCts = new CancellationTokenSource();
+                var approveCts = loopCts;
+                loopTask = RunLoopAsync(store, runtime, loopExecutor, state, ParseOptions([]), interactiveShell: false, chatLogging: true, approveCts.Token);
+                ChatConsole.WriteHint("/stop to cancel · /wait to re-attach");
+                lastContextKey = null;
                 continue;
             }
 
@@ -468,16 +566,22 @@ static async Task<int> RunInteractiveShellAsync(
                     && state.Issues.Any(item => item.IsPlanningIssue && item.Status == ItemStatus.Done))
                 || PlanWorkflow.IsAwaitingArchitectApproval(state))
             {
+                if (IsLoopRunning())
+                {
+                    ChatConsole.WriteWarning("A loop is running. Use /stop first before sending planning feedback.");
+                    continue;
+                }
                 runtime.RecordPlanningFeedback(state, line);
                 store.Save(state);
-                Console.WriteLine(state.Phase == WorkflowPhase.ArchitectPlanning
-                    ? "Captured architect plan feedback. Revising architect plan..."
-                    : "Captured planning feedback. Revising plan...");
+                ChatConsole.WriteEvent("✎", state.Phase == WorkflowPhase.ArchitectPlanning
+                    ? "Captured architect plan feedback. Revising..."
+                    : "Captured planning feedback. Revising...", "cyan");
                 var report = await RunLoopAsync(store, runtime, loopExecutor, state, ParseOptions(["--max-iterations", "2"]), interactiveShell: true);
-                Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
-                Console.WriteLine(state.Phase == WorkflowPhase.ArchitectPlanning
-                    ? "Use /plan to inspect the revised architect plan, or /approve to continue."
-                    : "Use /plan to inspect the revised plan, or /approve to continue.");
+                ChatConsole.WriteEvent("✓", $"Revision complete ({report.IterationsExecuted} iteration(s)). Final state: {report.FinalState}", "green");
+                ChatConsole.WriteHint(state.Phase == WorkflowPhase.ArchitectPlanning
+                    ? "Type [bold]approve[/] to begin execution, or use [dim]/plan[/] to review."
+                    : "Type [bold]approve[/] to proceed, or use [dim]/plan[/] to review.");
+                lastContextKey = null;
                 continue;
             }
         }
@@ -505,6 +609,10 @@ static async Task<int> RunInteractiveShellAsync(
             {
                 case "exit":
                 case "quit":
+                    if (IsLoopRunning())
+                    {
+                        loopCts?.Cancel();
+                    }
                     return 0;
 
                 case "help":
@@ -540,6 +648,11 @@ static async Task<int> RunInteractiveShellAsync(
                     {
                         Console.WriteLine($"Workspace already initialized at {store.WorkspacePath}.");
                         Console.WriteLine("Use /init --force to reinitialize (this will reset all workspace state).");
+                        break;
+                    }
+                    if (force && IsLoopRunning())
+                    {
+                        Console.WriteLine($"A loop is running. Use {ConsoleTheme.Command("/stop")} first before reinitializing the workspace.");
                         break;
                     }
                     var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
@@ -670,44 +783,36 @@ static async Task<int> RunInteractiveShellAsync(
                 case "approve":
                 case "approve-plan":
                 {
+                    if (IsLoopRunning())
+                    {
+                        ChatConsole.WriteWarning("A loop is running. Use /stop first, then /approve.");
+                        break;
+                    }
                     var current = store.Load();
                     var note = GetOption(options, "note") ?? GetPositionalValue(options) ?? "User approved the current plan.";
-                    if (current.Phase == WorkflowPhase.ArchitectPlanning)
+                    if (current.Phase == WorkflowPhase.ArchitectPlanning && PlanWorkflow.IsAwaitingArchitectApproval(current))
                     {
                         runtime.ApproveArchitectPlan(current, note);
                         store.Save(current);
-                        Console.WriteLine(ConsoleTheme.Success("Approved the architect plan. Execution phase begins."));
-                        Console.Write($"Run the execution loop now? ({ConsoleTheme.Command("Y")}/n) ");
-                        var answer = (Console.IsInputRedirected ? Console.ReadLine() : ReadLine.Read(""))?.Trim();
-                        if (string.IsNullOrEmpty(answer) || answer.StartsWith("y", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var report = await RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: true);
-                            Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
-                            PrintBudget(current.Budget);
-                        }
+                        ChatConsole.WriteSuccess("Architect plan approved. Starting execution loop...");
+                        loopCts = new CancellationTokenSource();
+                        var approveArchCts = loopCts;
+                        loopTask = RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: false, chatLogging: true, approveArchCts.Token);
+                        ChatConsole.WriteHint("/stop to cancel · /wait to re-attach");
                     }
                     else
                     {
                         runtime.ApprovePlan(current, note);
                         store.Save(current);
-                        if (current.Phase == WorkflowPhase.ArchitectPlanning)
-                        {
-                            Console.WriteLine(ConsoleTheme.Success("Approved the high-level plan.") + $" Phase: {ConsoleTheme.Phase("ArchitectPlanning")}");
-                            Console.Write($"Run the architect planning loop now? ({ConsoleTheme.Command("Y")}/n) ");
-                            var answer = (Console.IsInputRedirected ? Console.ReadLine() : ReadLine.Read(""))?.Trim();
-                            if (string.IsNullOrEmpty(answer) || answer.StartsWith("y", StringComparison.OrdinalIgnoreCase))
-                            {
-                                var report = await RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: true);
-                                Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
-                                PrintBudget(current.Budget);
-                                PrintArchitectSummary(current);
-                            }
-                        }
-                        else
-                        {
-                            Console.WriteLine(ConsoleTheme.Success("Approved the current plan."));
-                        }
+                        ChatConsole.WriteSuccess(current.Phase == WorkflowPhase.ArchitectPlanning
+                            ? "Plan approved. Running architect planning..."
+                            : "Plan approved. Starting execution loop...");
+                        loopCts = new CancellationTokenSource();
+                        var approvePlanCts = loopCts;
+                        loopTask = RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions([]), interactiveShell: false, chatLogging: true, approvePlanCts.Token);
+                        ChatConsole.WriteHint("/stop to cancel · /wait to re-attach");
                     }
+                    lastContextKey = null;
                     break;
                 }
 
@@ -733,18 +838,24 @@ static async Task<int> RunInteractiveShellAsync(
 
                 case "feedback":
                 {
+                    if (IsLoopRunning())
+                    {
+                        ChatConsole.WriteWarning("A loop is running. Use /stop first, then /feedback.");
+                        break;
+                    }
                     var current = store.Load();
                     var feedback = GetPositionalValue(options) ?? throw new InvalidOperationException("Usage: /feedback <text>");
                     runtime.RecordPlanningFeedback(current, feedback);
                     store.Save(current);
-                    Console.WriteLine(current.Phase == WorkflowPhase.ArchitectPlanning
-                        ? "Captured architect plan feedback. Revising architect plan..."
-                        : "Captured planning feedback. Revising plan...");
+                    ChatConsole.WriteEvent("✎", current.Phase == WorkflowPhase.ArchitectPlanning
+                        ? "Captured architect plan feedback. Revising..."
+                        : "Captured planning feedback. Revising...", "cyan");
                     var report = await RunLoopAsync(store, runtime, loopExecutor, current, ParseOptions(["--max-iterations", "2"]), interactiveShell: true);
-                    Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
-                    Console.WriteLine(current.Phase == WorkflowPhase.ArchitectPlanning
-                        ? "Use /plan to inspect the revised architect plan, or /approve to continue."
-                        : "Use /plan to inspect the revised plan, or /approve to continue.");
+                    ChatConsole.WriteEvent("✓", $"Revision complete ({report.IterationsExecuted} iteration(s)). Final state: {report.FinalState}", "green");
+                    ChatConsole.WriteHint(current.Phase == WorkflowPhase.ArchitectPlanning
+                        ? "Type [bold]approve[/] to begin execution, or use [dim]/plan[/] to review."
+                        : "Type [bold]approve[/] to proceed, or use [dim]/plan[/] to review.");
+                    lastContextKey = null;
                     break;
                 }
 
@@ -761,28 +872,21 @@ static async Task<int> RunInteractiveShellAsync(
                     runtime.AnswerQuestion(current, int.Parse(values[0]), string.Join(" ", values.Skip(1)));
                     store.Save(current);
                     var remaining = current.Questions.Count(q => q.Status == QuestionStatus.Open);
-                    if (remaining == 0)
-                    {
-                        Console.WriteLine($"Answered question #{values[0]}. {ConsoleTheme.Success("All questions resolved.")}");
-                        if (current.Phase == WorkflowPhase.Planning)
-                        {
-                            Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to move forward or type feedback to revise the plan.");
-                        }
-                        else if (PlanWorkflow.IsAwaitingArchitectApproval(current))
-                        {
-                            Console.WriteLine($"Use {ConsoleTheme.Command("/approve")} to move forward or type feedback to revise the architect plan.");
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Answered question #{values[0]}. {ConsoleTheme.Muted($"{remaining} remaining.")}");
-                    }
+                    ChatConsole.WriteSuccess(remaining == 0
+                        ? $"Got it! All questions answered."
+                        : $"Got it! {remaining} question(s) remaining.");
+                    lastContextKey = null;
                     break;
                 }
 
                 case "run":
                 case "run-loop":
                 {
+                    if (IsLoopRunning())
+                    {
+                        Console.WriteLine($"A loop is already running. Use {ConsoleTheme.Command("/stop")} to cancel it or {ConsoleTheme.Command("/wait")} to re-attach.");
+                        break;
+                    }
                     var current = store.Load();
                     if (PlanWorkflow.RequiresPlanningBeforeRun(current, store))
                     {
@@ -794,26 +898,66 @@ static async Task<int> RunInteractiveShellAsync(
                         Console.WriteLine("A plan is ready. Use /plan to review, type feedback to revise, or /approve to continue.");
                         break;
                     }
-                    var report = await RunLoopAsync(store, runtime, loopExecutor, current, options, interactiveShell: true);
-                    Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
-                    PrintBudget(current.Budget);
-                    if (report.FinalState == "waiting-for-user")
+                    loopCts = new CancellationTokenSource();
+                    var bgOptions = options;
+                    var bgCts = loopCts;
+                    loopTask = RunLoopAsync(store, runtime, loopExecutor, current, bgOptions, interactiveShell: false, chatLogging: true, bgCts.Token);
+                    ChatConsole.WriteEvent("🚀", "Loop started — running in the background. You can type commands while work progresses.", "green");
+                    ChatConsole.WriteHint("/stop to cancel · /wait to re-attach · /status to check progress");
+                    break;
+                }
+
+                case "stop":
+                {
+                    if (!IsLoopRunning())
                     {
-                        Console.WriteLine($"Check {Path.Combine(store.WorkspacePath, "questions.md")} and answer with /answer.");
+                        ChatConsole.WriteHint("No loop is currently running.");
+                        break;
                     }
-                    else if (report.FinalState == "awaiting-plan-approval")
+                    loopCts?.Cancel();
+                    ChatConsole.WriteWarning("Stop requested — the loop will finish its current agent call then stop.");
+                    break;
+                }
+
+                case "wait":
+                {
+                    if (loopTask is null || loopTask.IsCompleted)
                     {
-                        Console.WriteLine("Use /plan to review, type feedback to revise, or /approve to move into execution.");
+                        ChatConsole.WriteHint("No loop is currently running.");
+                        break;
                     }
-                    else if (report.FinalState == "awaiting-architect-approval")
+                    ChatConsole.WriteEvent("⏳", "Waiting for loop to complete...", "dim");
+                    try
                     {
-                        PrintArchitectSummary(current);
+                        var completedReport = await loopTask;
+                        var current = store.Load();
+                        ChatConsole.WriteSystem(
+                            $"Loop finished — [bold]{completedReport.IterationsExecuted}[/] iteration(s). Final state: [cyan]{Markup.Escape(completedReport.FinalState)}[/]",
+                            "loop complete");
+                        PrintBudget(current.Budget);
+                        if (completedReport.FinalState == "awaiting-architect-approval")
+                        {
+                            PrintArchitectSummary(current);
+                        }
                     }
+                    catch (OperationCanceledException)
+                    {
+                        ChatConsole.WriteWarning("Loop was cancelled.");
+                    }
+                    loopTask = null;
+                    loopCts?.Dispose();
+                    loopCts = null;
+                    lastContextKey = null;
                     break;
                 }
 
                 case "run-once":
                 {
+                    if (IsLoopRunning())
+                    {
+                        ChatConsole.WriteWarning("A loop is running. Use /stop first.");
+                        break;
+                    }
                     var current = store.Load();
                     if (PlanWorkflow.RequiresPlanningBeforeRun(current, store))
                     {
@@ -881,7 +1025,7 @@ static async Task InvokeRoleDirectAsync(
 
     var prompt = AgentPromptBuilder.BuildAdHocPrompt(state, roleSlug, userMessage);
     var sessionId = $"devteam-adhoc-{roleSlug}";
-    Console.WriteLine($"Invoking {ConsoleTheme.Role(roleSlug)} via {ConsoleTheme.Muted(model)}...");
+    ChatConsole.WriteEvent("→", $"Asking {roleSlug} via {model}...", "dim cyan");
 
     var client = AgentClientFactory.Create("sdk");
     try
@@ -907,9 +1051,7 @@ static async Task InvokeRoleDirectAsync(
 
         var parsed = AgentPromptBuilder.ParseResponse(response);
 
-        Console.WriteLine();
-        Console.WriteLine(ConsoleTheme.Label($"── {roleSlug} ──"));
-        Console.WriteLine(parsed.Summary);
+        ChatConsole.WriteAgent(roleSlug, string.IsNullOrWhiteSpace(parsed.Summary) ? "(no summary)" : parsed.Summary);
 
         if (parsed.Issues.Count > 0)
         {
@@ -917,15 +1059,13 @@ static async Task InvokeRoleDirectAsync(
             if (anchor is not null)
             {
                 runtime.AddGeneratedIssues(state, anchor.Id, parsed.Issues);
-                Console.WriteLine();
-                Console.WriteLine($"{ConsoleTheme.Accent($"{parsed.Issues.Count} issue(s) proposed")} and added to the board.");
+                ChatConsole.WriteSuccess($"{parsed.Issues.Count} issue(s) proposed and added to the board.");
             }
         }
         if (parsed.Questions.Count > 0)
         {
             runtime.AddQuestions(state, parsed.Questions);
-            Console.WriteLine();
-            Console.WriteLine($"{ConsoleTheme.Warning($"{parsed.Questions.Count} question(s)")} added. Use {ConsoleTheme.Command("/questions")} to review.");
+            ChatConsole.WriteWarning($"{parsed.Questions.Count} question(s) added — they'll appear at the prompt.");
         }
 
         runtime.MergeWorkspaceAdditions(state, store.Load());
@@ -943,7 +1083,9 @@ static async Task<LoopExecutionReport> RunLoopAsync(
     LoopExecutor loopExecutor,
     WorkspaceState state,
     Dictionary<string, List<string>> options,
-    bool interactiveShell = false)
+    bool interactiveShell = false,
+    bool chatLogging = false,
+    CancellationToken cancellationToken = default)
 {
     var backend = GetOption(options, "backend") ?? "sdk";
     var maxSubagents = GetIntOption(options, "max-subagents", 1);
@@ -951,11 +1093,17 @@ static async Task<LoopExecutionReport> RunLoopAsync(
     var timeoutSeconds = GetIntOption(options, "timeout-seconds", 600);
     var verbosity = ParseVerbosity(GetOption(options, "verbosity"));
     using var keepAwakeController = new KeepAwakeController();
+    // Don't use the cursor-clearing renderer when running in background (interactiveShell=false);
+    // it would race with user input. Plain Console.WriteLine is used instead.
     using var renderer = interactiveShell && !Console.IsOutputRedirected
         ? new LoopConsoleRenderer()
         : null;
     Action<IReadOnlyList<RunProgressSnapshot>>? progressReporter = renderer is null ? null : snapshots => renderer.ReportProgress(snapshots);
-    Action<string> logger = renderer is null ? Console.WriteLine : message => renderer.Log(message);
+    Action<string> logger = renderer is not null
+        ? message => renderer.Log(message)
+        : chatLogging
+            ? ChatConsole.WriteLoopLog
+            : Console.WriteLine;
     var keepAwakeEnabled = ResolveKeepAwakeEnabled(state, options);
     ApplyKeepAwakeSetting(keepAwakeController, keepAwakeEnabled, interactiveShell, logger);
     var executionOptions = new LoopExecutionOptions
@@ -971,7 +1119,8 @@ static async Task<LoopExecutionReport> RunLoopAsync(
     var report = await loopExecutor.RunAsync(
         state,
         executionOptions,
-        logger);
+        logger,
+        cancellationToken);
     store.Save(state);
     return report;
 }
@@ -1319,14 +1468,17 @@ static void PrintInteractiveHelp()
     Console.WriteLine($"  {ConsoleTheme.Command("/budget")} [--total N] [--premium N]");
     Console.WriteLine($"  {ConsoleTheme.Command("/check-update")}");
     Console.WriteLine($"  {ConsoleTheme.Command("/update")}");
-    Console.WriteLine($"  {ConsoleTheme.Command("/run")} [--max-iterations N] [--timeout-seconds N] [--keep-awake true|false]");
+    Console.WriteLine($"  {ConsoleTheme.Command("/run")} [--max-iterations N] [--timeout-seconds N] [--keep-awake true|false]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
+    Console.WriteLine($"  {ConsoleTheme.Command("/stop")}              Cancel the running loop (waits for current agent call to finish)");
+    Console.WriteLine($"  {ConsoleTheme.Command("/wait")}              Re-attach to the running loop and wait for it to finish");
     Console.WriteLine($"  {ConsoleTheme.Command("/feedback")} <text>");
     Console.WriteLine($"  {ConsoleTheme.Command("/approve")} [note]");
-    Console.WriteLine($"  {ConsoleTheme.Command("/answer")} <id> <text>");
+    Console.WriteLine($"  {ConsoleTheme.Command("/answer")} <id> <text>  {ConsoleTheme.Muted("works while the loop is running")}");
     Console.WriteLine($"  {ConsoleTheme.Command("/goal")} <text> [--goal-file PATH]");
     Console.WriteLine($"  {ConsoleTheme.Command("/exit")}");
     Console.WriteLine("If exactly one question is open, you can type a plain answer without `/answer`.");
     Console.WriteLine("While a plan is awaiting approval, plain text is treated as planning feedback and re-runs planning.");
+    Console.WriteLine($"{ConsoleTheme.Muted("/answer")}, {ConsoleTheme.Muted("/questions")}, {ConsoleTheme.Muted("/status")}, {ConsoleTheme.Muted("/budget")}, and {ConsoleTheme.Muted("@role")} messages are all safe to use while the loop runs.");
     Console.WriteLine("If no plan exists yet, `/plan` runs the planner and then shows the generated plan.");
     Console.WriteLine();
     Console.WriteLine(ConsoleTheme.Label("Direct role invocation:"));
@@ -1449,6 +1601,12 @@ static int GetIntOption(Dictionary<string, List<string>> options, string key, in
 
 static double GetDoubleOption(Dictionary<string, List<string>> options, string key, double fallback) =>
     double.TryParse(GetOption(options, key), out var value) ? value : fallback;
+
+static bool IsApproveIntent(string line) =>
+    line.Equals("approve", StringComparison.OrdinalIgnoreCase) ||
+    line.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+    line.Equals("y", StringComparison.OrdinalIgnoreCase) ||
+    line.StartsWith("approve ", StringComparison.OrdinalIgnoreCase);
 
 static bool GetBoolOption(Dictionary<string, List<string>> options, string key, bool fallback)
 {
@@ -1839,7 +1997,7 @@ file sealed class ShellAutoCompleteHandler : IAutoCompleteHandler
 {
     private static readonly string[] Commands =
     [
-        "/init", "/bug", "/status", "/plan", "/run", "/approve", "/feedback",
+        "/init", "/bug", "/status", "/plan", "/run", "/stop", "/wait", "/approve", "/feedback",
         "/questions", "/answer", "/budget", "/goal", "/mode",
         "/keep-awake", "/auto-approve", "/add-issue", "/customize",
         "/check-update", "/update", "/exit", "/help"

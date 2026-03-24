@@ -780,7 +780,15 @@ public static class AgentPromptBuilder
         {(tools.Count == 0 ? "(none declared)" : string.Join(", ", tools))}
 
         Workspace MCP:
-        {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Prefer using it to inspect current workspace state and to persist newly discovered issues, questions, and decisions." : "No workspace MCP server is available in this session.")}
+        {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Prefer using it to inspect current workspace state and to persist newly discovered issues, questions, and decisions. Use update_issue_status to set issue status instead of editing workspace files directly. Call get_runtime_capabilities for a full list of concerns the runtime manages automatically." : "No workspace MCP server is available in this session.")}
+
+        Runtime-managed — do NOT create a QUESTION or ask the user about any of the following:
+        - Budget, credit caps, or model tier selection: the runtime enforces these automatically.
+        - Phase transitions (Planning → ArchitectPlanning → Execution): the runtime drives these.
+        - Issue status updates: call update_issue_status (MCP) with status "in-progress", "done", or "blocked".
+        - Run lifecycle (queuing, starting, completing runs): managed entirely by the runtime.
+        - Pipeline stage chaining: the runtime chains architect → developer → tester automatically.
+        - Workspace state file conflicts: trust the runtime's authoritative state; use update_issue_status to record your final status.
 
         Pipeline handoff context:
         {BuildPipelineContextBlock(state, issue)}
@@ -851,7 +859,9 @@ public static class AgentPromptBuilder
         {superpowerBlock}
 
         Workspace MCP:
-        {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Use it to inspect current workspace state and to persist newly discovered issues, questions, and decisions." : "No workspace MCP server is available in this session.")}
+        {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Use it to inspect current workspace state and to persist newly discovered issues, questions, and decisions. Use update_issue_status to set issue status. Call get_runtime_capabilities to see what the runtime manages automatically." : "No workspace MCP server is available in this session.")}
+
+        Runtime-managed — do NOT ask the user about: budget/model selection, phase transitions, issue status (use update_issue_status MCP), run lifecycle, pipeline chaining, or workspace state file conflicts.
 
         Open questions:
         {BuildQuestionBlock(state)}

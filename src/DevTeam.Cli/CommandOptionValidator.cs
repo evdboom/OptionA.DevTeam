@@ -193,6 +193,8 @@ internal static class CommandOptionValidator
             ["run"] = CreateOptionSet("backend", "max-iterations", "max-subagents", "timeout-seconds", "verbosity", "keep-awake"),
             ["run-loop"] = CreateOptionSet("backend", "max-iterations", "max-subagents", "timeout-seconds", "verbosity", "keep-awake"),
             ["run-once"] = CreateOptionSet("max-subagents"),
+            ["stop"] = CreateOptionSet(),
+            ["wait"] = CreateOptionSet(),
             ["budget"] = CreateOptionSet("total", "premium")
         };
 

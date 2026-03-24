@@ -171,6 +171,30 @@ public sealed class DevTeamRuntime
         int? pipelineStageIndex = null)
         => CreateIssue(state, title, detail, roleSlug, priority, roadmapItemId, dependsOn, area, familyKey, parentIssueId, pipelineId, pipelineStageIndex);
 
+    public IssueItem UpdateIssueStatus(WorkspaceState state, int issueId, string status, string? notes = null)
+    {
+        var issue = state.Issues.FirstOrDefault(i => i.Id == issueId)
+            ?? throw new InvalidOperationException($"Issue #{issueId} not found.");
+
+        issue.Status = status.ToLowerInvariant() switch
+        {
+            "open" => ItemStatus.Open,
+            "in-progress" or "inprogress" => ItemStatus.InProgress,
+            "done" or "completed" => ItemStatus.Done,
+            "blocked" => ItemStatus.Blocked,
+            _ => throw new InvalidOperationException($"Unknown status '{status}'. Valid values: open, in-progress, done, blocked.")
+        };
+
+        if (!string.IsNullOrWhiteSpace(notes))
+        {
+            issue.Notes = string.IsNullOrWhiteSpace(issue.Notes)
+                ? notes
+                : $"{issue.Notes}\n{notes}";
+        }
+
+        return issue;
+    }
+
     public WorkspaceSnapshot BuildWorkspaceSnapshot(WorkspaceState state)
     {
         EnsurePipelineAssignments(state);
@@ -242,6 +266,17 @@ public sealed class DevTeamRuntime
         foreach (var question in externalState.Questions.Where(item => state.Questions.All(existing => existing.Id != item.Id)))
         {
             state.Questions.Add(question);
+        }
+
+        // Sync answers written externally (e.g. user answers via shell while loop is running).
+        foreach (var externalQuestion in externalState.Questions.Where(q => q.Status == QuestionStatus.Answered))
+        {
+            var existing = state.Questions.FirstOrDefault(q => q.Id == externalQuestion.Id);
+            if (existing is { Status: QuestionStatus.Open })
+            {
+                existing.Status = externalQuestion.Status;
+                existing.Answer = externalQuestion.Answer;
+            }
         }
 
         foreach (var issue in externalState.Issues.Where(item => state.Issues.All(existing => existing.Id != item.Id)))

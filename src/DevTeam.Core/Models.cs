@@ -85,6 +85,7 @@ public sealed class IssueItem
     public int? ParentIssueId { get; set; }
     public int? PipelineId { get; set; }
     public int? PipelineStageIndex { get; set; }
+    public string Notes { get; set; } = "";
 }
 
 public sealed class QuestionItem

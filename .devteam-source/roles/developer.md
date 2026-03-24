@@ -26,9 +26,10 @@ Your handoff MUST include:
 6. **Blockers** — anything that prevented completion
 
 ## Issue Workflow
-- When starting an issue: update its status to `in-progress`
-- When done: update status to `done` and check off acceptance criteria
-- If blocked: update status to `blocked` and explain in Notes
+- When starting an issue: call `update_issue_status` (MCP) with `status: "in-progress"`
+- When done: call `update_issue_status` (MCP) with `status: "done"` and check off acceptance criteria
+- If blocked: call `update_issue_status` (MCP) with `status: "blocked"` and set `notes` to explain the blocker
+- **Never directly edit `.devteam/` state files** — the runtime owns all workspace state. Use the MCP tools to read and write state.
 
 ## Suggested Model
 `gpt-5.4` (1 credit) — strong all-around coder with excellent reasoning at standard cost.
