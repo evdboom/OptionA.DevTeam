@@ -82,7 +82,9 @@ devteam /help
 ## Requirements
 
 - [.NET SDK 10](https://dotnet.microsoft.com/download/dotnet/10.0)
-- [GitHub Copilot SDK](https://github.com/features/copilot) — the runtime uses the Copilot .NET SDK as its default backend. You must be authenticated with GitHub Copilot (via `gh auth login` or an active Copilot subscription).
+- [GitHub Copilot SDK](https://github.com/features/copilot) — the runtime uses the Copilot .NET SDK as its default backend.
+- [GitHub Copilot CLI](https://github.com/github/copilot-cli) installed and available on `PATH` as `copilot`. DevTeam uses your installed Copilot CLI instead of packaging its own copy, so Copilot updates do not require a DevTeam republish.
+- You must be authenticated with GitHub Copilot (via `gh auth login` or an active Copilot subscription).
 
 ## Quick start
 

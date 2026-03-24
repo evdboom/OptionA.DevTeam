@@ -11,6 +11,8 @@ var tests = new List<(string Name, Action Run)>
     ("Role suggested model overrides default policy", TestRoleSuggestedModelOverridesDefaultPolicy),
     ("CLI agent client builds a copilot invocation", TestCliAgentClientInvocationShape),
     ("SDK agent client is the default integration backend", TestSdkAgentClientFactory),
+    ("SDK CLI path resolver prefers installed copilot", TestSdkCliPathResolverPrefersInstalledCopilot),
+    ("SDK CLI path resolver fails when copilot is missing", TestSdkCliPathResolverFailsWhenMissing),
     ("Tool update check detects newer stable versions", TestToolUpdateCheckDetectsNewerStableVersions),
     ("Tool update command targets the global package", TestToolUpdateCommandTargetsGlobalPackage),
     ("SDK session config wires workspace MCP server", TestSdkSessionConfigWiresWorkspaceMcp),
@@ -193,6 +195,44 @@ static void TestSdkAgentClientFactory()
 {
     var client = AgentClientFactory.Create("sdk");
     AssertEqual("copilot-sdk", client.Name, "SDK backend name");
+}
+
+static void TestSdkCliPathResolverPrefersInstalledCopilot()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-smoke", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+
+    try
+    {
+        var executableName = OperatingSystem.IsWindows() ? "copilot.exe" : "copilot";
+        var fakeCopilotPath = Path.Combine(tempRoot, executableName);
+        File.WriteAllText(fakeCopilotPath, string.Empty);
+
+        var resolvedPath = CopilotCliPathResolver.TryResolveFromPath(tempRoot);
+
+        AssertEqual(fakeCopilotPath, resolvedPath, "PATH lookup should prefer an installed Copilot executable.");
+    }
+    finally
+    {
+        if (Directory.Exists(tempRoot))
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+}
+
+static void TestSdkCliPathResolverFailsWhenMissing()
+{
+    try
+    {
+        CopilotCliPathResolver.Resolve(string.Empty);
+        throw new InvalidOperationException("Missing PATH should have failed Copilot CLI resolution.");
+    }
+    catch (InvalidOperationException ex)
+    {
+        AssertTrue(ex.Message.Contains("available on PATH", StringComparison.Ordinal),
+            "Missing PATH should produce a clear Copilot installation error.");
+    }
 }
 
 static void TestToolUpdateCheckDetectsNewerStableVersions()
