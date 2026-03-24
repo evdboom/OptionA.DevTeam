@@ -38,6 +38,8 @@ var tests = new List<(string Name, Action Run)>
     ("Init clears stale legacy workspace artifacts", TestInitClearsLegacyArtifacts),
     ("Planning feedback reopens the planning issue", TestPlanningFeedbackReopensPlanning),
     ("Architect feedback reopens architect issue", TestArchitectFeedbackReopensArchitectIssue),
+    ("Architect feedback queues architect rerun", TestArchitectFeedbackQueuesArchitectRerun),
+    ("Architect rerun heals stale reopened planning issue", TestArchitectRerunHealsStaleReopenedPlanningIssue),
     ("Agent-generated issues keep the loop moving", TestAgentGeneratedIssues),
     ("Issue board markdown mirrors workspace state", TestIssueBoardMirror),
     ("Generated issue roles are normalized", TestGeneratedIssueRoleNormalization),
@@ -855,6 +857,52 @@ static void TestArchitectFeedbackReopensArchitectIssue()
     AssertEqual(ItemStatus.Open, architectIssue.Status, "Architect feedback should reopen the architect issue");
     AssertTrue(harness.State.Decisions.Any(item => item.Source == "architect-plan-feedback"),
         "Architect feedback should be persisted as an architect-plan decision.");
+}
+
+static void TestArchitectFeedbackQueuesArchitectRerun()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a flappy bird game.");
+    var planning = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, planning.QueuedRuns[0].RunId, "completed", "Initial plan ready.");
+    harness.Runtime.ApprovePlan(harness.State, "Approved.");
+
+    var architectIssue = harness.State.Issues.Single(issue =>
+        !issue.IsPlanningIssue && string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase));
+    architectIssue.Status = ItemStatus.Done;
+
+    harness.Runtime.RecordPlanningFeedback(harness.State, "Use different execution roles.");
+
+    var rerun = harness.Runtime.RunOnce(harness.State, 1);
+
+    AssertEqual("queued", rerun.State, "Architect feedback should make architect work queue again");
+    AssertEqual(1, rerun.QueuedRuns.Count, "Architect feedback should queue one architect rerun");
+    AssertEqual("architect", rerun.QueuedRuns[0].RoleSlug, "Architect feedback should rerun the architect stage");
+    AssertEqual(architectIssue.Id, rerun.QueuedRuns[0].IssueId, "Architect feedback should rerun the existing architect issue");
+}
+
+static void TestArchitectRerunHealsStaleReopenedPlanningIssue()
+{
+    using var harness = new TestHarness();
+    harness.Runtime.SetGoal(harness.State, "Build a flappy bird game.");
+    var planning = harness.Runtime.RunOnce(harness.State, 1);
+    harness.Runtime.CompleteRun(harness.State, planning.QueuedRuns[0].RunId, "completed", "Initial plan ready.");
+    harness.Runtime.ApprovePlan(harness.State, "Approved.");
+
+    var planningIssue = harness.State.Issues.Single(issue => issue.IsPlanningIssue);
+    var architectIssue = harness.State.Issues.Single(issue =>
+        !issue.IsPlanningIssue && string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase));
+
+    planningIssue.Status = ItemStatus.Open; // Simulate state left behind by the older bug.
+    architectIssue.Status = ItemStatus.Done;
+
+    harness.Runtime.RecordPlanningFeedback(harness.State, "Revise the architect plan.");
+
+    var rerun = harness.Runtime.RunOnce(harness.State, 1);
+
+    AssertEqual(ItemStatus.Done, planningIssue.Status, "Architect rerun should heal stale reopened planning issues.");
+    AssertEqual("queued", rerun.State, "Architect rerun should still queue after healing stale planning state.");
+    AssertEqual("architect", rerun.QueuedRuns[0].RoleSlug, "Architect rerun should select the architect issue after healing.");
 }
 
 static void TestAgentGeneratedIssues()

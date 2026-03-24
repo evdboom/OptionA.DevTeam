@@ -72,6 +72,7 @@ public sealed class DevTeamRuntime
 
     public void ApprovePlan(WorkspaceState state, string note)
     {
+        EnsureApprovedPlanningIssuesClosed(state);
         var hasArchitectWork = state.Issues.Any(issue =>
             !issue.IsPlanningIssue
             && string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase)
@@ -87,6 +88,7 @@ public sealed class DevTeamRuntime
 
     public void ApproveArchitectPlan(WorkspaceState state, string note)
     {
+        EnsureApprovedPlanningIssuesClosed(state);
         state.Phase = WorkflowPhase.Execution;
         RememberDecision(
             state,
@@ -196,6 +198,7 @@ public sealed class DevTeamRuntime
 
     public IReadOnlyList<string> PrepareForLoop(WorkspaceState state)
     {
+        EnsureApprovedPlanningIssuesClosed(state);
         var created = EnsureBootstrapPlan(state);
         EnsurePipelineAssignments(state);
         return created;
@@ -857,6 +860,19 @@ public sealed class DevTeamRuntime
 
     private static bool HasBlockingQuestions(WorkspaceState state) =>
         state.Questions.Any(question => question.Status == QuestionStatus.Open && question.IsBlocking);
+
+    private static void EnsureApprovedPlanningIssuesClosed(WorkspaceState state)
+    {
+        if (state.Phase == WorkflowPhase.Planning)
+        {
+            return;
+        }
+
+        foreach (var planningIssue in state.Issues.Where(item => item.IsPlanningIssue && item.Status != ItemStatus.Done))
+        {
+            planningIssue.Status = ItemStatus.Done;
+        }
+    }
 
     private static bool IsIssueEligibleForPhase(WorkflowPhase phase, IssueItem issue) =>
         phase switch
