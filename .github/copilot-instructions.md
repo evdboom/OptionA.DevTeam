@@ -43,3 +43,12 @@
 - Default runtime verbosity is `normal`. Use `--verbosity detailed` when diagnosing loop behavior and `--verbosity quiet` when embedding the command in automation.
 - Keep user-facing CLI documentation in sync with features. When adding or changing commands such as `/bug` / `bug-report`, update `README.md` and this `.github\copilot-instructions.md` file in the same change unless there is a strong reason not to.
 - `bug-report` is the non-interactive command and `/bug` is the interactive-shell alias for generating a GitHub-issue-ready bug report draft with version, environment, workspace snapshot, and recent shell diagnostics.
+
+## Code hygiene conventions
+
+These apply when editing any source in this repo. DevTeam role prompts should mirror them for target repos.
+
+- **Keep files small and focused.** No file should own multiple concerns. When a file grows past ~400 lines, split it by theme into separate files. Prefer more small files over fewer large ones.
+- **Separate presentation from logic.** Blazor `.razor` files contain markup and minimal binding glue only. All logic lives in the paired `.razor.cs` code-behind file. Never put real logic inside `@code { }` blocks. The same principle applies broadly: a file that mixes rendering and domain logic should be split.
+- **Entry points are bootstrap only.** `Program.cs` (or equivalent top-level file) should be ≤ ~30 lines: wire DI, resolve the dispatcher, call it. All logic belongs in focused service classes.
+- **When adding a feature**, check whether an existing file is already close to the size limit before adding to it. If so, extract first, then add.

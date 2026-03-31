@@ -1,104 +1,11 @@
 # DevTeam Roadmap
-
-Stepwise plan for the remaining tracked work. Each section is self-contained — items within a section can be worked on independently. Sections are roughly ordered by dependency and value.
-
----
-
-## 0 — Housekeeping (do this first)
-
-| Step | Action |
-|---|---|
-| 0.1 | `git commit` the base state of `OptionA.DevTeam` before any loop runs against it |
-| 0.2 | For each clone workspace, `git init` and commit the initial snapshot so the diff is clean after a loop run |
-| 0.3 | Set `max-subagents` default: for UX work use 2–3; for GitHub integration use 1 (it's exploratory) |
-
----
-
-## 1 — Chat layout: RazorConsole migration
-
-**Goal:** Fixed input line at the bottom, scrolling chat history above — the Squad UX. Removes the mid-line heartbeat problem permanently.
-
-**Why it needs its own section:** Requires adding `Microsoft.NET.Sdk.Razor` and `RazorConsole` as dependencies to `DevTeam.Cli.csproj`, which is a one-way door. Do this after the polish work (item 2) is merged so there's a clean baseline.
-
-| Step | Owner | Detail |
-|---|---|---|
-| 1.1 | architect | ✅ Evaluate `RazorConsole` — specifically `LLMAgentTUI` example. Define the component map: chat pane (scrollable), input pane (fixed), status bar (1-line). Produce an issue breakdown. |
-| 1.2 | developer | ✅ Add `RazorConsole` package to `DevTeam.Cli.csproj`. Wire up the shell host and a minimal skeleton that boots without crashing. |
-| 1.3 | developer | ✅ Migrate `ChatConsole.WriteAgent`, `WriteSystem`, `WriteQuestion` to Razor components rendered into the chat pane. |
-| 1.4 | developer | ✅ Migrate `WriteLoopLog`, heartbeat, and background-task output to the chat pane — this replaces the `ConsoleOutputLock` workaround entirely. |
-| 1.5 | developer | ✅ Migrate the input line: `ReadLine`-based prompt → Razor input component pinned to the bottom. Commands, tab-complete, and `/` prefix all stay. |
-| 1.6 | tester | ✅ Verify: (a) heartbeat never overwrites the input line, (b) all existing `/` commands work, (c) 74 smoke tests still pass (smoke tests use headless path, not Razor). |
-
-**Goal file:** `devteam-razor-migration.md` (create when step 1.1 is ready to run)
-
----
-
-## 2 — Near-term polish (run the existing goal file on the clone)
-
-The `devteam-ux-improvements.md` goal file covers these. Let the clone loop run them. After the loop finishes, review diffs and port any clean changes back to main.
-
-| Step | Detail |
-|---|---|
-| 2.1 | ✅ `/plan` output as a formatted panel (same style as question/plan-ready panels) |
-| 2.2 | ✅ `@role` echo — "You → developer: …" line before the agent response |
-| 2.3 | ✅ `/status` rendered as a Spectre.Console Table with pipeline column |
-| 2.4 | ✅ `ConsoleOutputLock` — `ConcurrentQueue<string>` buffers background log messages; main thread drains before each prompt and on loop complete |
-| 2.5 | ✅ `/history` — in-memory session log, last 50 entries rendered as a Spectre Table with elapsed time |
-
-**Note:** Item 2.4 (`ConsoleOutputLock`) is a stopgap until item 1 (RazorConsole) is complete. Keep it simple.
-
----
-
-## 3 — Architect writes plan.md (not just issues)
-
-**Root cause:** `WritePlanArtifact` in `ExecutionLoop.cs` is only called when `issue.IsPlanningIssue == true`. Architect issues don't have this flag, so their summary never updates `plan.md` even though they produce the detailed execution breakdown.
-
-**Why it matters:** After architect approval the plan file still shows the high-level planner output, not the detailed architect design. `/plan` shows stale information.
-
-| Step | Detail |
-|---|---|
-| 3.1 | ✅ In `ExecutionLoop.cs`, also call `WritePlanArtifact` after any architect issue completes (`issue.RoleSlug == "architect" && !issue.IsPlanningIssue`). |
-| 3.2 | ✅ `WritePlanArtifact` accepts a `string header` — planner: "High-level plan", architect: "Detailed execution plan (architect)". |
-| 3.3 | ✅ Architect role prompt updated to state SUMMARY goes to `plan.md`. |
-| 3.4 | ✅ Smoke test added: `Architect run updates plan artifact with execution details` — verifies that a completed architect run writes `plan.md` with the architect header and summary. |
-
-**Estimated scope:** Small — 2–3 files, no new dependencies.
-
----
-
-## 4 — Pipeline visibility (current role + next role)
-
-**Problem:** When the loop is running, it's not clear which pipeline stage is active or what comes next.
-
-| Step | Detail |
-|---|---|
-| 4.1 | ✅ `/status` table shows per-issue pipeline column with color-coded stage progression (done=green, current=bold cyan, upcoming=dim). |
-| 4.2 | ✅ Execution loop logs `pipeline #P · [role]` context when starting an issue with a pipeline. |
-| 4.3 | ✅ Combined with 4.1 — pipeline column in `/status` table. |
-| 4.4 | ✅ Execution loop logs `Pipeline handoff → #N role: title` on stage completion and `Pipeline #P completed` on final stage. |
-
-**Estimated scope:** Medium — touches `ExecutionLoop.cs`, `DevTeamRuntime.cs`, `ChatConsole.cs`, and `Program.cs`.
-
----
-
-## 5 — Parallel subagent cap (Squad-style)
-
-**Problem:** Default is 1 (sequential). Squad runs everything in parallel. We want a configurable sweet spot — probably 3–4 for most projects.
-
-| Step | Detail |
-|---|---|
-| 5.1 | **Done (this session):** `DefaultMaxSubagents` is persisted in `RuntimeConfiguration` and settable via `/max-subagents N`. |
-| 5.2 | ✅ Hint logged on iteration 1 when max-subagents==1 and 4+ issues ready. |
-| 5.3 | ✅ Smoke test added: `Conflict prevention holds at max-subagents 4` — four-area scenario with two same-area issues; verifies at most 3 run concurrently. |
-| 5.4 | ✅ Documented in `README.md` — new `## Parallel subagents` section with recommended settings table, credit burn-rate guidance, and conflict prevention note. |
-
----
-
 ## 6 — GitHub mode (major feature)
 
-**Goal:** Run DevTeam against a real GitHub repository. Use GitHub Issues as the issue board, assign issues to Copilot, use PRs for implementation output, reviewer role does the PR review.
+**Goal:** Run DevTeam against a real GitHub repository. Use GitHub Issues as the issue board, assign issues to Copilot, use PRs for implementation output, reviewer role does the PR review. While keeping the strength of the multi agent role scoped runs.
 
 **Architecture decision point:** This is a parallel mode to the existing local workspace mode. The switch is `--mode github` on init.
+
+**Discover:** options to have the flow work inside github (loop running, user feedback) and have devteam cli communicate with github.
 
 | Step | Detail |
 |---|---|
@@ -112,20 +19,131 @@ The `devteam-ux-improvements.md` goal file covers these. Let the clone loop run 
 | 6.8 | **Interactive shell** — `/sync` command to pull latest GitHub state into the local workspace snapshot. `/pr <id>` to attach to an open PR. |
 | 6.9 | Smoke tests for the GitHub adapter (can use a mock `IGitHubClient` to avoid hitting the real API in CI). |
 
-**Pre-requisites:** Items 3 (plan.md), 4 (pipeline visibility), and 5 (parallel cap) should be done first — they make the GitHub mode easier to use once it's live.
-
 **Estimated scope:** Large — probably 6–10 architect issues, 10–15 developer issues across 2–3 runs.
 
 ---
 
-## Quick-reference: recommended run order
+## 7 — Agent Personas (fun / polish)
 
-```
-1. git commit current state (do manually)
-2. Run clone on devteam-ux-improvements.md  → ships items 2.1–2.5
-3. Implement item 3 (architect plan.md)      → small, do directly
-4. Implement item 4 (pipeline visibility)    → medium, use devteam on itself
-5. Validate item 5.3 (parallel cap tests)    → small
-6. Plan RazorConsole migration (item 1)      → architect spike first
-7. Start GitHub mode (item 6)               → architect spike, then phased
-```
+**Inspiration:** [pixel-agents](https://github.com/pablodelucca/pixel-agents) — agents as living characters you can watch work.
+
+**Goal:** Replace the plain "running developer on issue #5…" status lines with a live activity panel where each running agent has a named persona, a role-appropriate avatar, and an animated state. Especially satisfying with parallel runs — you see the whole team at their desks simultaneously.
+
+**Concept:** Each role gets a character. The character has an idle pose, a "thinking" animation (tool calls in flight), and a "done" flash. When multiple agents run in parallel, they all appear in a side-by-side grid. Role suggestion:
+
+| Role | Avatar | Flavour |
+|---|---|---|
+| planner | `📋` | "sketching the strategy…" |
+| architect | `🏗️` | "drawing the blueprints…" |
+| developer | `💻` | "pushing code…" |
+| backend-developer | `⚙️` | "wiring the pipes…" |
+| frontend-developer | `🎨` | "pixel-pushing…" |
+| tester | `🧪` | "breaking things on purpose…" |
+| reviewer | `🔍` | "reading every line…" |
+| orchestrator | `🎼` | "conducting the ensemble…" |
+
+**Rendering approach:** Spectre.Console `Live` display + `Table` or a grid of `Panel`s (one per active agent). The shell's RazorConsole layer already supports `Panel`; the live activity view can slot in as a dedicated `RunningAgentsPanel` component rendered during loop execution, replacing or augmenting the existing `ProgressReporter` callback.
+
+| Step | Detail |
+|---|---|
+| 7.1 | Add `AgentPersona` record to `Models` — `RoleSlug`, `Avatar`, `DisplayName`, `ActiveFlavour`, `DoneFlavour`. Seed defaults for all known roles. |
+| 7.2 | `RunningAgentsPanel` Razor component — accepts `IReadOnlyList<RunProgressSnapshot>`, renders a live grid of persona cards (avatar + name + elapsed + flavour text). Heartbeat ticks animate a spinner on the elapsed time. |
+| 7.3 | Wire `ProgressReporter` in `LoopExecutor` to push snapshots to the panel instead of (or alongside) the console text lines. |
+| 7.4 | Parallel layout — when >1 agents run simultaneously, cards appear side-by-side in a `Columns` layout. Single agent falls back to a single-panel view. |
+| 7.5 | "Done" flash — when a run completes, card briefly shows the outcome emoji (✅ / ❌ / 🔒) and the one-line summary before the card disappears from the live grid. |
+| 7.6 | `--personas off` flag (or `Runtime.PersonasEnabled` config) to revert to plain text for automation/CI contexts. |
+
+**Estimated scope:** Small-medium — 1 architect issue, 3–4 developer issues. Entirely additive; no existing behaviour changes.
+
+---
+
+## 8 — Navigator as inline scout (sub-agent preflight)
+
+**Inspiration:** The VS Code Copilot "Explore" subagent pattern — a cheap, read-only reconnaissance call launched *within* an active turn to map the codebase before making changes, rather than a separate, heavyweight planning step.
+
+**Context:** A `navigator` role already exists and works well as a first-class issue on the board. The gap is granularity: Navigator currently requires its own full iteration to run. For complex Execution issues a developer agent would benefit from a *same-turn* scout pass — reading the blast radius, identifying relevant files, flagging merge-conflict candidates — all before writing a single line of code.
+
+**Two related questions the architect should resolve:**
+1. **Issue-queue approach (near-term):** Should `LoopExecutor` / the orchestrator role automatically inject a Navigator prerequisite issue when a developer issue exceeds a complexity threshold? This is additive and works today.
+2. **Inline subagent approach (future):** Since DevTeam wraps the Copilot SDK, can executor roles spawn a bounded sub-session scoped to read-only tooling? The SDK already supports nested agent calls; the role prompts may just need nudging. A `scout` superpower that any role can invoke could expose this without runtime changes.
+
+| Step | Detail |
+|---|---|
+| 8.1 | **Architect spike** — decide between issue-queue pre-flight vs. inline sub-session. Document trade-offs: latency (extra iteration), cost (separate model call), context fidelity (inline has fresher state). |
+| 8.2 | **Complexity signal** — add a `ComplexityHint` field to `IssueItem` (or derive from `Priority` + `Area` + dependency count). `LoopExecutor` uses it to decide whether to auto-prefix a Navigator issue. |
+| 8.3 | **Scout superpower** — if inline path chosen: create `.devteam-source\superpowers\scout.md`. Any role can include `use scout` in its prompt; the superpower describes how to launch a bounded sub-call with read-only tools and return a file manifest into the current context window. |
+| 8.4 | **Orchestrator nudge** — update `orchestrator.md` role prompt to explicitly consider prefixing Navigator issues for complex developer issues it queues. |
+| 8.5 | **Navigator role update** — add a `lightweight` output mode: just the file manifest + area tags (no full dependency essay), suitable for inline preflight where brevity matters. |
+| 8.6 | Smoke tests: verify Navigator issue auto-injection and that a navigator issue's SUMMARY feeds into the dependent developer issue's context. |
+
+**Estimated scope:** Medium — 1 architect issue, 3–5 developer issues. Core loop change in 8.2–8.3 is the risky part; 8.4–8.5 are prompt-only.
+
+---
+
+## 9 — Project hygiene conventions (instructions + role awareness)
+
+**Background:** These conventions emerged from refactoring this repo's own codebase (Program.cs 2155 → 22 lines, SmokeTests 2273 → 111 lines). Two hygiene rules proved high-value and should be codified so both Copilot (working on this repo) *and* DevTeam agents (working on target repos) follow them without being reminded.
+
+**Rule 1 — Keep files small and focused.** No single file should own multiple concerns. When a file grows past ~300–400 lines, split it by theme. Prefer more small files over fewer large ones.
+
+**Rule 2 — Separate presentation from logic.** Specific case: Blazor `.razor` files contain *only* markup and minimal binding glue. All logic lives in the paired `.razor.cs` code-behind file. No `@code { }` blocks with real logic. More generally: any file that mixes rendering and domain logic should be split.
+
+**Three places these rules need to live:**
+
+| Location | Why |
+|---|---|
+| `.github/copilot-instructions.md` | Copilot follows them when editing this repo's own source |
+| Developer / frontend / fullstack role prompts | DevTeam agents follow them when working on target repos |
+| Architect role prompt | Architect produces narrowly-scoped issues that respect these boundaries, not "implement the whole feature in one file" issues |
+
+| Step | Detail |
+|---|---|
+| 9.1 | Add a `## Code hygiene conventions` section to `.github/copilot-instructions.md` — file-size guideline, Blazor code-behind rule, general separation-of-concerns principle. |
+| 9.2 | Update `developer.md` role prompt — add a `Constraints` bullet: split files exceeding ~400 lines, never inline `@code` logic in `.razor` files. |
+| 9.3 | Update `frontend-developer.md` role prompt — same constraints, plus: always prefer `.razor.cs` over `@code` blocks. |
+| 9.4 | Update `fullstack-developer.md` role prompt — same as developer + frontend. |
+| 9.5 | Update `architect.md` role prompt — add a sizing guideline for the issues it produces: each issue should touch ≤ ~5 files and produce ≤ ~400 lines of new/changed code. If larger, split into sub-issues. |
+| 9.6 | Consider a `hygiene` superpower (`.devteam-source\superpowers\hygiene.md`) that any role can load: describes the full set of hygiene rules in a terse, referenceable format. |
+| 9.7 | Smoke test: add a test verifying that a developer role response that would create a 500-line file gets flagged (or that the role prompt addition is present in the loaded role text). |
+
+**Estimated scope:** Small — almost entirely prompt/markdown edits. Step 9.7 is the only runtime touchpoint.
+
+---
+
+## 10 — Orchestrator-driven loop (agents own the iteration)
+
+**The question:** Could the iteration pipeline *just* be the orchestrator spawning subagents — instead of the external `LoopExecutor` picking issues by priority and calling one agent per iteration?
+
+**Current model (external loop):** `LoopExecutor` lives *outside* agents. It picks ready issues by priority/dependency, calls one agent per issue, parses the structured `OUTCOME/SUMMARY/ISSUES/QUESTIONS` response, updates `workspace.json`, and repeats. Agents are stateless per call.
+
+**Proposed model (internal orchestration):** One orchestrator session stays alive per loop batch. It reads the issue board, spawns bounded sub-sessions for each issue *as tool calls* (via a `spawn_agent` tool exposed by `WorkspaceMcpServer`), collects results into its context window, and decides what to queue next. The loop lives inside the agent's own reasoning.
+
+**Why this is better:**
+- Orchestrator sees *all* results in context — richer sequencing than a priority-sorted state machine
+- Natural fit for the Copilot SDK (nested tool calls → child sessions are a first-class pattern)
+- Enables the orchestrator to dynamically adjust what runs next based on what just completed — not possible with the current pre-queued model
+- Parallel execution becomes the orchestrator's choice, not a `max-subagents` knob
+
+**Why the external loop must stay as the durability layer:**
+- If the orchestrator session crashes, `workspace.json` checkpoints survive
+- Long orchestrator sessions hit context window limits; external iteration resets cleanly
+- Cost per agent call remains trackable at the runtime level
+- `/stop` and `/wait` need a managed `Task` to cancel/await — internal orchestration has no clean save point
+
+**The hybrid architecture:** `LoopExecutor` becomes minimal — boot the orchestrator, wait for it to flag `batch_complete`, persist state, optionally repeat. The orchestrator *owns* what runs in parallel within a batch; the runtime handles child sessions, budget, and persistence around it.
+
+**Relationship to item 8:** The scout/navigator inline sub-call (item 8) is the first instance of this pattern. Generalising `spawn_agent` to all executor roles gives the full orchestrator-driven model. Item 8 is the proof-of-concept; item 10 is the architectural completion.
+
+| Step | Detail |
+|---|---|
+| 10.1 | **Architect spike** — define the transition: what does `LoopExecutor.RunAsync` look like when the orchestrator drives the batch? What's the contract for `batch_complete` vs the current iteration count? |
+| 10.2 | **`spawn_agent` tool** — expose `spawn_agent(role_slug, issue_id, context_hint)` via `WorkspaceMcpServer`. The runtime creates a child session, runs it to completion, writes the result to `workspace.json`, and returns a compact result summary to the caller's context. |
+| 10.3 | **Orchestrator role update** — rewrite `orchestrator.md` to use `spawn_agent` as its primary execution mechanism. It reads the board, decides what to spawn (and in parallel), calls `spawn_agent` for each, reviews results, and either queues more work or signals `OUTCOME: completed`. |
+| 10.4 | **Durability bridge** — ensure every `spawn_agent` call persists its result to `workspace.json` before returning to the orchestrator. If the orchestrator session is lost, the external loop can reconstruct state from the store and restart cleanly. |
+| 10.5 | **Budget propagation** — child sessions spawned via `spawn_agent` must deduct from the same `WorkspaceBudget` as the parent. Add a shared budget context passed through the session factory. |
+| 10.6 | **Backwards compatibility** — keep the current priority-queue path as a fallback when no orchestrator role is present (or when `--mode sequential` is set). The issue board remains the source of truth regardless of execution path. |
+| 10.7 | Smoke tests for the orchestrator-driven path: verify that a batch started by the orchestrator produces the same `workspace.json` outcome as the current `LoopExecutor` path on identical input. |
+
+**Estimated scope:** Large — significant runtime change. Items 10.2 and 10.4 are the core risk. Requires item 8 as a prerequisite (shared sub-session infrastructure). Likely 1 architect issue + 5–7 developer issues.
+
+---

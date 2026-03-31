@@ -109,7 +109,7 @@ public sealed class WorkspaceMcpServer(string workspacePath)
                     GetIntList(arguments, "issueIds"),
                     GetRequiredString(arguments, "rationale"),
                     GetOptionalString(arguments, "sessionId"),
-                    GetInt(arguments, "maxSubagents", 1));
+                    GetInt(arguments, "maxSubagents", 4));
                 return new { selection.SelectedIssueIds, selection.Rationale, selection.SessionId };
             }, save: true)),
             "create_issue" => BuildToolResult(WithWorkspace((runtime, state) =>
