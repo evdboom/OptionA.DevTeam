@@ -223,6 +223,49 @@ public sealed class LoopExecutor(
         };
     }
 
+    /// <summary>
+    /// Execute a single specific issue as a sub-agent call. Used by the spawn_agent MCP tool
+    /// so an orchestrator agent can run a child issue within an MCP server session.
+    /// </summary>
+    public async Task<string> SpawnIssueAsync(
+        int issueId,
+        string? contextHint,
+        string backend,
+        TimeSpan agentTimeout,
+        CancellationToken cancellationToken)
+    {
+        var state = _store.Load();
+        var queuedRun = _runtime.QueueSingleIssue(state, issueId);
+        _store.Save(state);
+
+        var options = new LoopExecutionOptions
+        {
+            Backend = backend,
+            MaxSubagents = 1,
+            MaxIterations = 1,
+            AgentTimeout = agentTimeout,
+            HeartbeatInterval = TimeSpan.FromSeconds(5),
+            Verbosity = LoopVerbosity.Normal
+        };
+
+        var session = _runtime.GetOrCreateAgentSession(state, queuedRun.RunId);
+        _runtime.StartRun(state, queuedRun.RunId, session.SessionId);
+        _store.Save(state);
+
+        var result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, cancellationToken);
+
+        _runtime.MergeWorkspaceAdditions(state, _store.Load());
+        if (result.Questions.Count > 0) _runtime.AddQuestions(state, result.Questions);
+        if (result.Issues.Count > 0) _runtime.AddGeneratedIssues(state, result.Run.IssueId, result.Issues);
+        _runtime.CompleteRun(state, result.Run.RunId, result.Outcome, result.Summary, result.SuperpowersUsed, result.ToolsUsed);
+        var persistedRun = state.AgentRuns.First(r => r.Id == result.Run.RunId);
+        WriteRunArtifact(_store.WorkspacePath, result.Run, persistedRun, result.Response, result.Outcome, result.Summary);
+        WriteDecisionArtifact(_store.WorkspacePath, state.Decisions.Last());
+        _store.Save(state);
+
+        return $"Issue #{issueId} completed with outcome: {result.Outcome}. Summary: {result.Summary}";
+    }
+
     private static async Task<AgentExecutionResult> AwaitNextCompletionAsync(
         IReadOnlyList<PendingAgentRun> pendingRuns,
         LoopExecutionOptions options,

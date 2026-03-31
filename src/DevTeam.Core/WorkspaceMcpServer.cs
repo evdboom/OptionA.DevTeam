@@ -4,7 +4,9 @@ using System.Text.Json.Nodes;
 
 namespace DevTeam.Core;
 
-public sealed class WorkspaceMcpServer(string workspacePath)
+public sealed class WorkspaceMcpServer(
+    string workspacePath,
+    Func<int, string?, CancellationToken, Task<string>>? subAgentRunner = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -12,6 +14,7 @@ public sealed class WorkspaceMcpServer(string workspacePath)
     };
 
     private readonly string _workspacePath = Path.GetFullPath(workspacePath);
+    private readonly Func<int, string?, CancellationToken, Task<string>>? _subAgentRunner = subAgentRunner;
 
     public async Task RunAsync(Stream input, Stream output, CancellationToken cancellationToken = default)
     {
@@ -126,8 +129,9 @@ public sealed class WorkspaceMcpServer(string workspacePath)
                     GetOptionalString(arguments, "familyKey"),
                     GetNullableInt(arguments, "parentIssueId"),
                     GetNullableInt(arguments, "pipelineId"),
-                    GetNullableInt(arguments, "pipelineStageIndex"));
-                return new { issue.Id, issue.Title, issue.RoleSlug, issue.Area, issue.Priority };
+                    GetNullableInt(arguments, "pipelineStageIndex"),
+                    GetNullableInt(arguments, "complexityHint"));
+                return new { issue.Id, issue.Title, issue.RoleSlug, issue.Area, issue.Priority, issue.ComplexityHint };
             }, save: true)),
             "create_question" => BuildToolResult(WithWorkspace((runtime, state) =>
             {
@@ -149,6 +153,11 @@ public sealed class WorkspaceMcpServer(string workspacePath)
                     GetOptionalString(arguments, "sessionId"));
                 return new { decision.Id, decision.Title, decision.Source };
             }, save: true)),
+            "spawn_agent" when _subAgentRunner is not null => BuildToolResult(
+                _subAgentRunner(
+                    GetInt(arguments, "issueId", 0),
+                    GetOptionalString(arguments, "contextHint"),
+                    CancellationToken.None).GetAwaiter().GetResult()),
             "get_runtime_capabilities" => BuildToolResult(BuildRuntimeCapabilities()),
             "update_issue_status" => BuildToolResult(WithWorkspace((runtime, state) =>
             {
@@ -165,8 +174,8 @@ public sealed class WorkspaceMcpServer(string workspacePath)
 
     private JsonArray BuildToolDefinitions()
     {
-        return
-        [
+        var tools = new List<JsonNode?>
+        {
             BuildToolDefinition(
                 "get_workspace_summary",
                 "Read the current DevTeam workspace snapshot including issues, questions, decisions, and pipelines.",
@@ -229,6 +238,11 @@ public sealed class WorkspaceMcpServer(string workspacePath)
                         {
                             ["type"] = "array",
                             ["items"] = IntegerSchema()
+                        },
+                        ["complexityHint"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Optional 0–100 complexity score. 0=trivial, 100=very complex/cross-cutting. Orchestrator uses this to decide whether to inject a navigator preflight issue."
                         }
                     },
                     ["required"] = new JsonArray("title"),
@@ -294,7 +308,27 @@ public sealed class WorkspaceMcpServer(string workspacePath)
                     ["required"] = new JsonArray("issueId", "status"),
                     ["additionalProperties"] = false
                 })
-        ];
+        };
+
+        if (_subAgentRunner is not null)
+        {
+            tools.Add(BuildToolDefinition(
+                "spawn_agent",
+                "Execute a single ready issue as a child agent session and return the result synchronously. Use this to run a specific issue directly within the current session rather than waiting for the next loop iteration.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject
+                    {
+                        ["issueId"] = IntegerSchema(),
+                        ["contextHint"] = StringSchema()
+                    },
+                    ["required"] = new JsonArray("issueId"),
+                    ["additionalProperties"] = false
+                }));
+        }
+
+        return new JsonArray([.. tools]);
     }
 
     private static JsonObject BuildToolDefinition(string name, string description, JsonObject schema) =>

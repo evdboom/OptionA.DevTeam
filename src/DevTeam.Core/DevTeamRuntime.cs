@@ -182,8 +182,9 @@ public sealed class DevTeamRuntime
         string? familyKey = null,
         int? parentIssueId = null,
         int? pipelineId = null,
-        int? pipelineStageIndex = null)
-        => CreateIssue(state, title, detail, roleSlug, priority, roadmapItemId, dependsOn, area, familyKey, parentIssueId, pipelineId, pipelineStageIndex);
+        int? pipelineStageIndex = null,
+        int? complexityHint = null)
+        => CreateIssue(state, title, detail, roleSlug, priority, roadmapItemId, dependsOn, area, familyKey, parentIssueId, pipelineId, pipelineStageIndex, complexityHint);
 
     public IssueItem UpdateIssueStatus(WorkspaceState state, int issueId, string status, string? notes = null)
     {
@@ -464,6 +465,19 @@ public sealed class DevTeamRuntime
             State = "queued",
             QueuedRuns = queued
         };
+    }
+
+    /// <summary>Queues a single issue for execution and returns its QueuedRunInfo.
+    /// Used by spawn_agent to hand off a specific issue to a child agent session.</summary>
+    public QueuedRunInfo QueueSingleIssue(WorkspaceState state, int issueId)
+    {
+        var issue = state.Issues.FirstOrDefault(i => i.Id == issueId)
+            ?? throw new InvalidOperationException($"Issue #{issueId} not found.");
+        if (issue.Status != ItemStatus.Open)
+            throw new InvalidOperationException($"Issue #{issueId} is not open (current status: {issue.Status}).");
+
+        var queued = QueueIssues(state, [issue]);
+        return queued[0];
     }
 
     public IReadOnlyList<string> GetKnownRoleSlugs(WorkspaceState state)
@@ -1397,7 +1411,8 @@ public sealed class DevTeamRuntime
         string? familyKey,
         int? parentIssueId,
         int? pipelineId,
-        int? pipelineStageIndex)
+        int? pipelineStageIndex,
+        int? complexityHint = null)
     {
         var issue = new IssueItem
         {
@@ -1412,7 +1427,8 @@ public sealed class DevTeamRuntime
             DependsOnIssueIds = dependsOn.Distinct().ToList(),
             ParentIssueId = parentIssueId,
             PipelineId = pipelineId,
-            PipelineStageIndex = pipelineStageIndex
+            PipelineStageIndex = pipelineStageIndex,
+            ComplexityHint = complexityHint
         };
         state.Issues.Add(issue);
         return issue;

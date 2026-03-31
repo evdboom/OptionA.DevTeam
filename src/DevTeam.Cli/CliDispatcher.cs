@@ -30,7 +30,14 @@ internal sealed class CliDispatcher(
             case "workspace-mcp":
             {
                 var workspace = GetOption(options, "workspace") ?? ".devteam";
-                var server = new WorkspaceMcpServer(workspace);
+                var mcpBackend = GetOption(options, "backend") ?? "sdk";
+                var mcpTimeout = TimeSpan.FromSeconds(GetIntOption(options, "timeout-seconds", 600));
+                var mcpRuntime = new DevTeamRuntime();
+                var mcpStore = new WorkspaceStore(workspace);
+                var mcpExecutor = new LoopExecutor(mcpRuntime, mcpStore);
+                Func<int, string?, CancellationToken, Task<string>> spawnAgent =
+                    (issueId, contextHint, ct) => mcpExecutor.SpawnIssueAsync(issueId, contextHint, mcpBackend, mcpTimeout, ct);
+                var server = new WorkspaceMcpServer(workspace, spawnAgent);
                 await server.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
                 return 0;
             }

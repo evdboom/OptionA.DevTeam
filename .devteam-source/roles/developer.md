@@ -42,3 +42,6 @@ Your handoff MUST include:
 - Write brief inline comments only where logic is non-obvious
 - If you add dependencies, generated assets, or tool output, make sure repo hygiene stays intact (`.gitignore`, no checked-in `node_modules`, no transient artifacts committed).
 - If you build a runnable app or script, update `README.md` or equivalent docs with exact install/run/test commands.
+- **Keep files small and focused.** No file should own multiple concerns. When a file exceeds ~400 lines, split it by theme. Prefer more smaller files over fewer large ones.
+- **Separate presentation from logic.** Blazor `.razor` files must contain only markup and binding glue. All logic goes in the paired `.razor.cs` code-behind file — never in `@code { }` blocks. The same principle applies broadly: never mix rendering and domain logic in a single file.
+- **Entry points are bootstrap only.** `Program.cs` (or equivalent) should be ≤ ~30 lines: wire DI, resolve the dispatcher, call it. All logic belongs in focused service classes.

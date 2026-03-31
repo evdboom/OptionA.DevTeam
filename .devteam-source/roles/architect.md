@@ -71,3 +71,5 @@ If you discover additional work, blockers, or prerequisites while working, add t
 - If unsure between approaches, choose the simpler one and document why
 - Keep each issue narrow; prefer raising a new issue over quietly absorbing adjacent work
 - Write detailed issue descriptions so developers don't need to guess your intent
+- **Issue sizing:** Each issue you create should touch ≤ ~5 files and produce ≤ ~400 lines of new/changed code. If an issue would produce more, split it into sub-issues. Smaller issues mean cleaner diffs and less merge risk.
+- **Enforce hygiene in your designs:** Spec Blazor components with separate `.razor` (markup) and `.razor.cs` (logic) files. Spec `Program.cs` as a ≤ 30-line bootstrap. When designing a new class, keep it focused on one concern — flag any file that would naturally own multiple concerns as a split opportunity.

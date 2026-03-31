@@ -25,12 +25,22 @@ Your response must follow the runtime parser:
 - `ISSUES:`
 - `QUESTIONS:`
 
+### Standard output (default)
 Use `SUMMARY` to provide:
 1. **File manifest** — list of relevant files with a one-line description of each file's role
 2. **Dependency map** — how the files connect (imports, calls, data flow)
 3. **Module boundaries** — which clusters of files form logical units
 4. **Area tags** — suggested `area=` values for issues touching these files
 5. **Risk notes** — files that are heavily coupled, frequently changed, or fragile
+
+### Lightweight / preflight output
+When called as a preflight pass for a specific issue (the issue title or detail says "preflight" or "scout"),
+produce a compact manifest only:
+- **File manifest** — ≤ 15 files with one-line descriptions
+- **Blast radius** — `low`, `medium`, or `high`
+- **Merge risk areas** — list of `area=` values that conflict, or "none"
+- **Recommended area tag** for the dependent issue
+Skip the full dependency map and module boundary analysis to keep the output brief.
 
 Use `ISSUES` only if you discover work that needs doing (e.g., missing files, broken imports, circular dependencies). Format:
 - `- role=developer; area=core; priority=60; title=Fix circular import between X and Y; detail=...`
