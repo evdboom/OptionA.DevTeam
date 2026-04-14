@@ -12,28 +12,28 @@ internal sealed partial class ShellService
     {
         var sb = new StringBuilder();
         sb.AppendLine("[bold]Interactive commands:[/]");
-        sb.AppendLine("  [cyan]/init[/] \"goal text\" [--goal-file PATH] [--force] [--mode SLUG] [--keep-awake true|false]");
-        sb.AppendLine("  [cyan]/customize[/] [--force]    Copy default assets to .devteam-source/ for editing");
-        sb.AppendLine("  [cyan]/bug[/] [--save PATH] [--redact-paths true|false]");
+        sb.AppendLine("  [cyan]/init[/] \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]");
+        sb.AppendLine("  [cyan]/customize[/] [[--force]]    Copy default assets to .devteam-source/ for editing");
+        sb.AppendLine("  [cyan]/bug[/] [[--save PATH]] [[--redact-paths true|false]]");
         sb.AppendLine("  [cyan]/status[/]");
         sb.AppendLine("  [cyan]/history[/]              Show session command history (last 50)");
         sb.AppendLine("  [cyan]/mode[/] <slug>");
         sb.AppendLine("  [cyan]/keep-awake[/] <on|off>");
-        sb.AppendLine("  [cyan]/add-issue[/] \"title\" --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--depends-on N ...]");
+        sb.AppendLine("  [cyan]/add-issue[/] \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--depends-on N ...]]");
         sb.AppendLine("  [cyan]/plan[/]");
         sb.AppendLine("  [cyan]/questions[/]");
-        sb.AppendLine("  [cyan]/budget[/] [--total N] [--premium N]");
+        sb.AppendLine("  [cyan]/budget[/] [[--total N]] [[--premium N]]");
         sb.AppendLine("  [cyan]/check-update[/]");
         sb.AppendLine("  [cyan]/update[/]");
         sb.AppendLine("  [cyan]/max-iterations[/] <N>    Set workspace default max iterations");
         sb.AppendLine("  [cyan]/max-subagents[/] <N>     Set workspace default max subagents (1=sequential, 2–4=parallel)");
-        sb.AppendLine("  [cyan]/run[/] [--max-iterations N] [--max-subagents N] [--timeout-seconds N]  [dim]starts in background[/]");
+        sb.AppendLine("  [cyan]/run[/] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]]  [dim]starts in background[/]");
         sb.AppendLine("  [cyan]/stop[/]              Cancel the running loop");
         sb.AppendLine("  [cyan]/wait[/]              Re-attach to the running loop and wait for it to finish");
         sb.AppendLine("  [cyan]/feedback[/] <text>");
-        sb.AppendLine("  [cyan]/approve[/] [note]");
+        sb.AppendLine("  [cyan]/approve[/] [[note]]");
         sb.AppendLine("  [cyan]/answer[/] <id> <text>  [dim]works while the loop is running[/]");
-        sb.AppendLine("  [cyan]/goal[/] <text> [--goal-file PATH]");
+        sb.AppendLine("  [cyan]/goal[/] <text> [[--goal-file PATH]]");
         sb.AppendLine("  [cyan]/exit[/]");
         sb.AppendLine();
         sb.AppendLine("If exactly one question is open, you can type a plain answer without /answer.");
@@ -48,7 +48,6 @@ internal sealed partial class ShellService
 
     private void AddBanner(string workspacePath)
     {
-        AddLine($"[bold cyan]─── DevTeam ───[/]");
         AddLine($"Workspace: [cyan]{Markup.Escape(workspacePath)}[/]  [dim]· /help for commands · /exit to quit[/]");
     }
 
@@ -69,13 +68,49 @@ internal sealed partial class ShellService
     private void AddLine(string markup) =>
         AddMessage(new ShellMessage(ShellMessageKind.Line, markup));
 
-    private void AddSystem(string markup, string? header = null) =>
-        AddMessage(new ShellMessage(ShellMessageKind.Panel, markup,
-            Title: header ?? "devteam",
-            BorderColor: Color.Grey));
+    private void AddUserInput(string command)
+    {
+        var display = command.Length > 300 ? command[..297] + "..." : command;
+        AddMessage(new ShellMessage(ShellMessageKind.Panel, Markup.Escape(display),
+            Title: "you",
+            BorderColor: Color.Cyan1,
+            TitleColor: Color.Cyan1,
+            TitleJustify: Justify.Right));
+    }
 
+    /// <summary>
+    /// Adds a system panel, automatically splitting content that exceeds
+    /// <see cref="MaxPanelChunkLines"/> lines into consecutive numbered chunks.
+    /// </summary>
+    private void AddSystem(string markup, string? header = null)
+    {
+        const int MaxPanelChunkLines = 15;
+        var lines = markup.Split('\n');
+        if (lines.Length <= MaxPanelChunkLines)
+        {
+            AddMessage(new ShellMessage(ShellMessageKind.Panel, markup,
+                Title: header ?? "devteam",
+                BorderColor: Color.Grey));
+            return;
+        }
+        var totalChunks = (lines.Length + MaxPanelChunkLines - 1) / MaxPanelChunkLines;
+        for (var c = 0; c < totalChunks; c++)
+        {
+            var chunk = string.Join("\n", lines.Skip(c * MaxPanelChunkLines).Take(MaxPanelChunkLines));
+            var title = $"{header ?? "devteam"} ({c + 1}/{totalChunks})";
+            AddMessage(new ShellMessage(ShellMessageKind.Panel, chunk,
+                Title: title,
+                BorderColor: Color.Grey));
+        }
+    }
+
+    /// <summary>
+    /// Adds an agent panel, splitting large summaries into chunks the same way as
+    /// <see cref="AddSystem"/>.
+    /// </summary>
     private void AddAgent(string roleSlug, string text, string? outcome = null)
     {
+        const int MaxPanelChunkLines = 20;
         var borderColor = outcome switch
         {
             "completed" => Color.Green,
@@ -84,11 +119,28 @@ internal sealed partial class ShellService
             _ => Color.Cyan,
         };
         var titleColor = borderColor;
-        var headerText = outcome is not null ? $"{roleSlug} — {outcome}" : roleSlug;
-        AddMessage(new ShellMessage(ShellMessageKind.Panel, Markup.Escape(text),
-            Title: headerText,
-            BorderColor: borderColor,
-            TitleColor: titleColor));
+        var escaped = Markup.Escape(text);
+        var lines = escaped.Split('\n');
+        if (lines.Length <= MaxPanelChunkLines)
+        {
+            var headerText = outcome is not null ? $"{roleSlug} — {outcome}" : roleSlug;
+            AddMessage(new ShellMessage(ShellMessageKind.Panel, escaped,
+                Title: headerText,
+                BorderColor: borderColor,
+                TitleColor: titleColor));
+            return;
+        }
+        var totalChunks = (lines.Length + MaxPanelChunkLines - 1) / MaxPanelChunkLines;
+        for (var c = 0; c < totalChunks; c++)
+        {
+            var chunk = string.Join("\n", lines.Skip(c * MaxPanelChunkLines).Take(MaxPanelChunkLines));
+            var suffix = outcome is not null ? $" — {outcome}" : "";
+            var chunkTitle = $"{roleSlug}{suffix} ({c + 1}/{totalChunks})";
+            AddMessage(new ShellMessage(ShellMessageKind.Panel, chunk,
+                Title: chunkTitle,
+                BorderColor: borderColor,
+                TitleColor: titleColor));
+        }
     }
 
     private void AddQuestion(string questionText, int? questionId = null, bool isBlocking = true, int index = 1, int total = 1)
@@ -124,13 +176,15 @@ internal sealed partial class ShellService
         var pad = new string(' ', message.Length - trimmed.Length);
         var escaped = Markup.Escape(trimmed);
 
+        bool isHeartbeat = trimmed.StartsWith("Still running", StringComparison.OrdinalIgnoreCase);
+
         string markup;
         if (trimmed.StartsWith("Iteration ", StringComparison.OrdinalIgnoreCase))
             markup = $"\n[grey]{pad}── {escaped} ──[/]";
         else if (trimmed.StartsWith("Running issue #", StringComparison.OrdinalIgnoreCase)
               || trimmed.StartsWith("Bootstrapped:", StringComparison.OrdinalIgnoreCase))
             markup = $"[dim]{pad}→ {escaped}[/]";
-        else if (trimmed.StartsWith("Still running", StringComparison.OrdinalIgnoreCase))
+        else if (isHeartbeat)
             markup = $"[dim]{pad}⏳ {escaped}[/]";
         else if (trimmed.StartsWith("Outcome:", StringComparison.OrdinalIgnoreCase))
         {
@@ -143,7 +197,32 @@ internal sealed partial class ShellService
         else
             markup = $"[dim]{pad}{escaped}[/]";
 
-        AddMessage(new ShellMessage(ShellMessageKind.Line, markup));
+        var msg = new ShellMessage(ShellMessageKind.Line, markup, IsHeartbeat: isHeartbeat);
+
+        if (isHeartbeat)
+            ReplaceLastHeartbeat(msg);
+        else
+            AddMessage(msg);
+    }
+
+    /// <summary>Replace the most recent heartbeat message instead of appending,
+    /// so "Still running …" lines don't pile up and push real content off-screen.</summary>
+    private void ReplaceLastHeartbeat(ShellMessage msg)
+    {
+        lock (_gate)
+        {
+            for (var i = _messages.Count - 1; i >= 0; i--)
+            {
+                if (_messages[i].IsHeartbeat)
+                {
+                    _messages[i] = msg;
+                    NotifyStateChanged();
+                    return;
+                }
+            }
+            _messages.Add(msg);
+        }
+        NotifyStateChanged();
     }
 
     private void AddHistory(string entry)

@@ -157,7 +157,8 @@ internal static class CommandOptionValidator
             ["questions"] = CreateOptionSet(sharedOptions: globalOptions),
             ["plan"] = CreateOptionSet(sharedOptions: globalOptions, "backend", "max-iterations", "max-subagents", "timeout-seconds", "verbosity", "keep-awake"),
             ["budget"] = CreateOptionSet(sharedOptions: globalOptions, "total", "premium"),
-            ["agent-invoke"] = CreateOptionSet(sharedOptions: globalOptions, "backend", "prompt", "model", "timeout-seconds", "working-directory", "extra-arg", "workspace-mcp")
+            ["agent-invoke"] = CreateOptionSet(sharedOptions: globalOptions, "backend", "prompt", "model", "timeout-seconds", "working-directory", "extra-arg", "workspace-mcp"),
+            ["ui-harness"] = CreateOptionSet(sharedOptions: globalOptions, "scenario")
         };
     }
 

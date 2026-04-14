@@ -270,28 +270,28 @@ internal static class WorkspaceStatusPrinter
     internal static void PrintInteractiveHelp()
     {
         Console.WriteLine(ConsoleTheme.Label("Interactive commands:"));
-        Console.WriteLine($"  {ConsoleTheme.Command("/init")} \"goal text\" [--goal-file PATH] [--force] [--mode SLUG] [--keep-awake true|false]");
-        Console.WriteLine($"  {ConsoleTheme.Command("/customize")} [--force]    Copy default assets to .devteam-source/ for editing");
-        Console.WriteLine($"  {ConsoleTheme.Command("/bug")} [--save PATH] [--redact-paths true|false]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/init")} \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/customize")} [[--force]]    Copy default assets to .devteam-source/ for editing");
+        Console.WriteLine($"  {ConsoleTheme.Command("/bug")} [[--save PATH]] [[--redact-paths true|false]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/status")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/history")}              Show session command history (last 50)");
         Console.WriteLine($"  {ConsoleTheme.Command("/mode")} <slug>");
         Console.WriteLine($"  {ConsoleTheme.Command("/keep-awake")} <on|off>");
-        Console.WriteLine($"  {ConsoleTheme.Command("/add-issue")} \"title\" --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/add-issue")} \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--roadmap-item-id N]] [[--depends-on N [[N...]]]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/plan")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/questions")}");
-        Console.WriteLine($"  {ConsoleTheme.Command("/budget")} [--total N] [--premium N]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/budget")} [[--total N]] [[--premium N]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/check-update")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/update")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/max-iterations")} <N>    Set workspace default max iterations (used by all future /run calls)");
         Console.WriteLine($"  {ConsoleTheme.Command("/max-subagents")} <N>     Set workspace default max subagents (1=sequential, 2–4=parallel)");
-        Console.WriteLine($"  {ConsoleTheme.Command("/run")} [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--keep-awake true|false]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
+        Console.WriteLine($"  {ConsoleTheme.Command("/run")} [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--keep-awake true|false]]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/stop")}              Cancel the running loop (waits for current agent call to finish)");
         Console.WriteLine($"  {ConsoleTheme.Command("/wait")}              Re-attach to the running loop and wait for it to finish");
         Console.WriteLine($"  {ConsoleTheme.Command("/feedback")} <text>");
-        Console.WriteLine($"  {ConsoleTheme.Command("/approve")} [note]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/approve")} [[note]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/answer")} <id> <text>  {ConsoleTheme.Muted("works while the loop is running")}");
-        Console.WriteLine($"  {ConsoleTheme.Command("/goal")} <text> [--goal-file PATH]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/goal")} <text> [[--goal-file PATH]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/exit")}");
         Console.WriteLine("If exactly one question is open, you can type a plain answer without `/answer`.");
         Console.WriteLine("While a plan is awaiting approval, plain text is treated as planning feedback and re-runs planning.");

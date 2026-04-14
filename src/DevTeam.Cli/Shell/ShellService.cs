@@ -1,13 +1,12 @@
 using System.Collections.Concurrent;
 using System.Text;
 using DevTeam.Core;
-using Microsoft.Extensions.Hosting;
 using Spectre.Console;
 
 namespace DevTeam.Cli.Shell;
 
 /// <summary>
-/// Core service driving the RazorConsole interactive shell.
+/// Core service driving the interactive shell.
 /// Replaces the old RunInteractiveShellAsync function from Program.cs.
 /// Thread-safe: background loop threads may call Add* methods from any thread.
 /// </summary>
@@ -20,7 +19,7 @@ internal sealed partial class ShellService : IDisposable
     private readonly LoopExecutor _loopExecutor;
     private readonly ToolUpdateService _toolUpdateService;
     private readonly ShellStartOptions _startOptions;
-    private readonly IHostApplicationLifetime _lifetime;
+    private readonly Action _requestExit;
     private readonly ShellSessionDiagnostics _diagnostics = new();
     private readonly KeepAwakeController _keepAwake = new();
 
@@ -44,8 +43,21 @@ internal sealed partial class ShellService : IDisposable
         get { lock (_gate) return [.. _messages]; }
     }
 
+    public IReadOnlyList<string> CommandHistory
+    {
+        get { lock (_gate) return _history.Select(h => h.Entry).ToList(); }
+    }
+
     public bool IsLoopRunning => _loopTask is { IsCompleted: false };
     public string PromptText => IsLoopRunning ? "devteam (running)> " : "devteam> ";
+
+    /// <summary>Snapshot of data needed by the layout panels. Updated on every state change.</summary>
+    public ShellLayoutSnapshot LayoutSnapshot
+    {
+        get { lock (_gate) return _layoutSnapshot; }
+    }
+
+    private ShellLayoutSnapshot _layoutSnapshot = ShellLayoutSnapshot.Empty;
 
     // ── Constructor ────────────────────────────────────────────────────────────
 
@@ -55,14 +67,14 @@ internal sealed partial class ShellService : IDisposable
         LoopExecutor loopExecutor,
         ToolUpdateService toolUpdateService,
         ShellStartOptions startOptions,
-        IHostApplicationLifetime lifetime)
+        Action requestExit)
     {
         _store = store;
         _runtime = runtime;
         _loopExecutor = loopExecutor;
         _toolUpdateService = toolUpdateService;
         _startOptions = startOptions;
-        _lifetime = lifetime;
+        _requestExit = requestExit;
     }
 
     // ── Initialization ─────────────────────────────────────────────────────────
@@ -101,6 +113,7 @@ internal sealed partial class ShellService : IDisposable
         if (initialState is not null)
         {
             CheckAndUpdateContext(initialState);
+            RefreshLayoutSnapshot(initialState);
         }
 
         await Task.CompletedTask; // keeps method async for future awaits
@@ -204,7 +217,7 @@ internal sealed partial class ShellService : IDisposable
                 AddEvent("✎", state.Phase == WorkflowPhase.ArchitectPlanning
                     ? "Captured architect plan feedback. Revising..."
                     : "Captured planning feedback. Revising...", "cyan");
-                var bgLogger = MakeBackgroundLogger();
+                var bgLogger = MakeBackgroundLogger(state);
                 var report = await RunLoopCoreAsync(state, ParseOptions(["--max-iterations", "2"]), CancellationToken.None, bgLogger);
                 AddEvent("✓", $"Revision complete ({report.IterationsExecuted} iteration(s)). Final state: {Markup.Escape(report.FinalState)}", "green");
                 AddHint(state.Phase == WorkflowPhase.ArchitectPlanning
@@ -236,7 +249,7 @@ internal sealed partial class ShellService : IDisposable
                 case "exit":
                 case "quit":
                     if (IsLoopRunning) _loopCts?.Cancel();
-                    _lifetime.StopApplication();
+                    _requestExit();
                     return;
 
                 case "help":
@@ -537,7 +550,7 @@ internal sealed partial class ShellService : IDisposable
                     AddEvent("✎", current.Phase == WorkflowPhase.ArchitectPlanning
                         ? "Captured architect plan feedback. Revising..."
                         : "Captured planning feedback. Revising...", "cyan");
-                    var bgLogger2 = MakeBackgroundLogger();
+                    var bgLogger2 = MakeBackgroundLogger(current);
                     var feedbackReport = await RunLoopCoreAsync(current, ParseOptions(["--max-iterations", "2"]), CancellationToken.None, bgLogger2);
                     AddEvent("✓", $"Revision complete ({feedbackReport.IterationsExecuted} iteration(s)). Final state: {Markup.Escape(feedbackReport.FinalState)}", "green");
                     AddHint(current.Phase == WorkflowPhase.ArchitectPlanning
@@ -688,7 +701,7 @@ internal sealed partial class ShellService : IDisposable
     {
         var cts = new CancellationTokenSource();
         _loopCts = cts;
-        var bgLogger = MakeBackgroundLogger();
+        var bgLogger = MakeBackgroundLogger(state);
         _loopTask = RunLoopCoreAsync(state, options, cts.Token, bgLogger);
         _loopTask.ContinueWith(t =>
         {
@@ -754,8 +767,12 @@ internal sealed partial class ShellService : IDisposable
         return report;
     }
 
-    private Action<string> MakeBackgroundLogger() =>
-        msg => { AddLoopLog(msg); };
+    private Action<string> MakeBackgroundLogger(WorkspaceState? stateForLayout = null) =>
+        msg =>
+        {
+            AddLoopLog(msg);
+            if (stateForLayout is not null) RefreshLayoutSnapshot(stateForLayout);
+        };
 
     // ── Plan workflow ──────────────────────────────────────────────────────────
 
@@ -765,14 +782,14 @@ internal sealed partial class ShellService : IDisposable
         if (!planningOptions.ContainsKey("max-iterations")) planningOptions["max-iterations"] = ["1"];
         if (!planningOptions.ContainsKey("max-subagents")) planningOptions["max-subagents"] = ["1"];
 
-        var bgLogger = MakeBackgroundLogger();
         var result = await PlanWorkflow.EnsurePlanAsync(
             _store,
             state,
             planningState =>
             {
                 AddLine("No plan has been written yet. Running the planner...");
-                return RunLoopCoreAsync(_store.Load(), planningOptions, CancellationToken.None, bgLogger);
+                var freshState = _store.Load();
+                return RunLoopCoreAsync(freshState, planningOptions, CancellationToken.None, MakeBackgroundLogger(freshState));
             });
 
         switch (result.Status)
@@ -816,7 +833,7 @@ internal sealed partial class ShellService : IDisposable
             foreach (var oq in openQs)
             {
                 var tag = oq.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
-                sb.AppendLine($"  [dim]#{oq.Id}[/] [{tag}] {Markup.Escape(oq.Text)}");
+                sb.AppendLine($"  [dim]#{oq.Id}[/] {tag} {Markup.Escape(oq.Text)}");
             }
             sb.Append($"Answer with: [cyan]/answer[/] <id> <text>");
             AddSystem(sb.ToString(), "questions");
@@ -852,8 +869,19 @@ internal sealed partial class ShellService : IDisposable
             }
             else
             {
-                AddWarning("Budget exhausted. Use /budget to increase.");
-                return;
+                var freeModel = state.Models.FirstOrDefault(m => m.Cost == 0 && m.IsDefault)
+                    ?? state.Models.FirstOrDefault(m => m.Cost == 0);
+                if (freeModel is not null)
+                {
+                    AddWarning($"Budget exhausted — falling back to free model {Markup.Escape(freeModel.Name)}");
+                    model = freeModel.Name;
+                    cost = 0;
+                }
+                else
+                {
+                    AddWarning("Budget exhausted and no free model available. Use /budget to increase.");
+                    return;
+                }
             }
         }
 
@@ -950,6 +978,39 @@ internal sealed partial class ShellService : IDisposable
     private void RefreshContext(WorkspaceState state)
     {
         CheckAndUpdateContext(state);
+        RefreshLayoutSnapshot(state);
+    }
+
+    private void RefreshLayoutSnapshot(WorkspaceState state)
+    {
+        // Only show Running agent slots when the loop is actually alive.
+        // Runs left in Running state from a previously killed session are stale and should
+        // not appear in the Agents panel or trigger showMiddle.
+        var loopAlive = IsLoopRunning;
+        var agents = state.AgentRuns
+            .Where(r => r.Status == AgentRunStatus.Queued
+                     || (r.Status == AgentRunStatus.Running && loopAlive))
+            .Select(r =>
+            {
+                var issue = state.Issues.FirstOrDefault(i => i.Id == r.IssueId);
+                return new AgentSlot(r.Id, r.IssueId, r.RoleSlug, issue?.Title ?? $"Issue #{r.IssueId}", r.Status);
+            })
+            .ToList();
+
+        var roadmap = state.Issues
+            .Where(i => !i.IsPlanningIssue)
+            .OrderByDescending(i => i.Priority).ThenBy(i => i.Id)
+            .Select(i => new RoadmapSlot(i.Id, i.Title, i.RoleSlug, i.Status))
+            .ToList();
+
+        var phase = state.Phase;
+        var showMiddle = agents.Count > 0 || (phase == WorkflowPhase.Execution && roadmap.Count > 0);
+
+        lock (_gate)
+        {
+            _layoutSnapshot = new ShellLayoutSnapshot(phase, showMiddle, agents, roadmap);
+        }
+        NotifyStateChanged();
     }
 
     // ── Status / budget display ────────────────────────────────────────────────
@@ -1000,7 +1061,7 @@ internal sealed partial class ShellService : IDisposable
             foreach (var q in report.OpenQuestions)
             {
                 var tag = q.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
-                sb.AppendLine($"  [dim]#{q.Id}[/] [{tag}] {Markup.Escape(q.Text)}");
+                sb.AppendLine($"  [dim]#{q.Id}[/] {tag} {Markup.Escape(q.Text)}");
             }
         }
 
@@ -1035,7 +1096,7 @@ internal sealed partial class ShellService : IDisposable
         foreach (var q in openQs)
         {
             var tag = q.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
-            sb.AppendLine($"[dim]#{q.Id}[/] [{tag}] {Markup.Escape(q.Text)}");
+            sb.AppendLine($"[dim]#{q.Id}[/] {tag} {Markup.Escape(q.Text)}");
         }
         AddSystem(sb.ToString().TrimEnd(), $"questions ({openQs.Count})");
     }
@@ -1130,7 +1191,7 @@ internal sealed partial class ShellService : IDisposable
             AddLine($"Scheduling update to [bold]{Markup.Escape(status.LatestVersion)}[/] (current {Markup.Escape(status.CurrentVersion)}).");
             AddLine($"If the updater does not complete, run: [dim]{Markup.Escape(launch.ManualCommand)}[/]");
             AddLine("Closing the shell so the updater can replace the installed tool.");
-            _lifetime.StopApplication();
+            _requestExit();
         }
         catch (ToolUpdateUnavailableException ex) { AddLine(Markup.Escape(ex.Message)); }
         catch (HttpRequestException) { AddLine("Update check is unavailable right now."); }

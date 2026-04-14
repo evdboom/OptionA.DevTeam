@@ -108,6 +108,12 @@ public static class AgentPromptBuilder
         - Run lifecycle (queuing, starting, completing runs): managed entirely by the runtime.
         - Pipeline stage chaining: the runtime chains architect → developer → tester automatically.
         - Workspace state file conflicts: trust the runtime's authoritative state; use update_issue_status to record your final status.
+        - Closing, superseding, or deduplicating issues: make the call yourself and use update_issue_status to close superseded issues directly.
+        - Retry or timeout decisions for other issues: the runtime schedules retries; just complete your own issue.
+        - Whether another question can or should be closed: never ask the user to confirm closure of open questions.
+        - Any "should I do X or Y?" where both options are within your role's authority: decide and act.
+
+        QUESTIONS are only for information that cannot be inferred, that is genuinely required to proceed, and that only the end user can supply (e.g. target platform, business logic, secret credentials). If you can make a reasonable decision autonomously, do so.
 
         Pipeline handoff context:
         {BuildPipelineContextBlock(state, issue)}
@@ -180,7 +186,7 @@ public static class AgentPromptBuilder
         Workspace MCP:
         {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Use it to inspect current workspace state and to persist newly discovered issues, questions, and decisions. Use update_issue_status to set issue status. Call get_runtime_capabilities to see what the runtime manages automatically." : "No workspace MCP server is available in this session.")}
 
-        Runtime-managed — do NOT ask the user about: budget/model selection, phase transitions, issue status (use update_issue_status MCP), run lifecycle, pipeline chaining, or workspace state file conflicts.
+        Runtime-managed — do NOT ask the user about: budget/model selection, phase transitions, issue status (use update_issue_status MCP), run lifecycle, pipeline chaining, workspace state file conflicts, closing or superseding issues (decide and act), or retry/timeout decisions for other issues. QUESTIONS are only for information only the end user can supply.
 
         Open questions:
         {BuildQuestionBlock(state)}

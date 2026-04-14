@@ -1,8 +1,4 @@
 using DevTeam.Core;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using RazorConsole.Core;
-using RazorConsole.Core.Abstractions.Rendering;
 using DevTeam.Cli.Shell;
 
 namespace DevTeam.Cli;
@@ -16,29 +12,18 @@ internal static class CliLoopHandler
         ToolUpdateService toolUpdateService,
         Dictionary<string, List<string>> startOptions)
     {
-        var startOpts = new ShellStartOptions(startOptions);
-        var host = Host.CreateDefaultBuilder()
-            .UseRazorConsole<DevTeamShell>(configure =>
-            {
-                configure.ConfigureServices(services =>
-                {
-                    services.Configure<ConsoleAppOptions>(opts =>
-                    {
-                        opts.AutoClearConsole = false;
-                        opts.EnableTerminalResizing = true;
-                    });
-                    services.AddSingleton(store);
-                    services.AddSingleton(runtime);
-                    services.AddSingleton(loopExecutor);
-                    services.AddSingleton(toolUpdateService);
-                    services.AddSingleton(startOpts);
-                    services.AddSingleton<ShellService>();
-                    // Insert at position 0 so our translator runs BEFORE the built-in FallbackTranslator
-                    services.Insert(0, ServiceDescriptor.Transient<ITranslationMiddleware, RawSpectreMarkupTranslator>());
-                });
-            })
-            .Build();
-        await host.RunAsync();
+        using var exitCts = new CancellationTokenSource();
+        using var shell = new ShellService(
+            store, runtime, loopExecutor, toolUpdateService,
+            new ShellStartOptions(startOptions), () => exitCts.Cancel());
+
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            exitCts.Cancel();
+        };
+
+        await SpectreShellHost.RunAsync(shell, exitCts.Token);
         return 0;
     }
 
@@ -65,8 +50,19 @@ internal static class CliLoopHandler
             }
             else
             {
-                Console.WriteLine(ConsoleTheme.Warning("Budget exhausted. Use /budget to increase."));
-                return;
+                var freeModel = state.Models.FirstOrDefault(m => m.Cost == 0 && m.IsDefault)
+                    ?? state.Models.FirstOrDefault(m => m.Cost == 0);
+                if (freeModel is not null)
+                {
+                    Console.WriteLine(ConsoleTheme.Warning($"Budget exhausted — falling back to free model {freeModel.Name}"));
+                    model = freeModel.Name;
+                    cost = 0;
+                }
+                else
+                {
+                    Console.WriteLine(ConsoleTheme.Warning("Budget exhausted and no free model available. Use /budget to increase."));
+                    return;
+                }
             }
         }
 

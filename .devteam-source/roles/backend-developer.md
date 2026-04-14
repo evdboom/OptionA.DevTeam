@@ -21,7 +21,7 @@ You implement **server-side logic, APIs, data access, and infrastructure code**.
 - Write and run database migrations
 
 ## Suggested Model
-`gpt-5.3-codex` (1 credit) — excels at API/server code generation and tool use.
+`gpt-5.4` (1 credit) — strong reasoning for API/server code, with Sonnet as pool alternative.
 
 ## Backend-Specific Constraints
 - Don't modify frontend/UI code — create issues for UI changes needed

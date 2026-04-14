@@ -16,11 +16,11 @@ internal static partial class SeedData
         ["orchestrator"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["planner"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["architect"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
-        ["developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
-        ["backend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
-        ["frontend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
-        ["fullstack-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
-        ["tester"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
+        ["developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gpt-5.4", "claude-sonnet-4.6"] },
+        ["backend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gpt-5.4", "claude-sonnet-4.6"] },
+        ["frontend-developer"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["claude-sonnet-4.6", "gpt-5.4"] },
+        ["fullstack-developer"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["claude-sonnet-4.6", "gpt-5.4"] },
+        ["tester"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gemini-3.1-pro-preview", "gpt-5.4", "claude-sonnet-4.6"] },
         ["reviewer"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
         ["ux"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["user"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
@@ -29,8 +29,8 @@ internal static partial class SeedData
         ["analyst"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["security"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["docs"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["devops"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
-        ["refactorer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gemini-3-flash-preview", AllowPremium = false }
+        ["devops"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gpt-5.4", "claude-sonnet-4.6"] },
+        ["refactorer"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["claude-sonnet-4.6", "gpt-5.4"] }
     };
 
     public static WorkspaceState BuildInitialState(string repoRoot, double totalCreditCap, double premiumCreditCap)
@@ -141,19 +141,22 @@ internal static partial class SeedData
     {
         var defaultModel = state.Models.FirstOrDefault(model => model.IsDefault)?.Name ?? "gpt-5-mini";
         var suggested = state.Roles.FirstOrDefault(role => role.Slug == roleSlug)?.SuggestedModel;
+        var hasSuggested = !string.IsNullOrWhiteSpace(suggested);
         if (DefaultPolicies.TryGetValue(roleSlug, out var policy))
         {
             return new RoleModelPolicy
             {
-                PrimaryModel = string.IsNullOrWhiteSpace(suggested) ? policy.PrimaryModel : suggested,
+                PrimaryModel = hasSuggested ? suggested! : policy.PrimaryModel,
                 FallbackModel = policy.FallbackModel,
-                AllowPremium = policy.AllowPremium
+                AllowPremium = policy.AllowPremium,
+                // Role-level SuggestedModel is an explicit override — skip the pool when set.
+                ModelPool = hasSuggested ? [] : policy.ModelPool
             };
         }
 
         return new RoleModelPolicy
         {
-            PrimaryModel = string.IsNullOrWhiteSpace(suggested) ? defaultModel : suggested,
+            PrimaryModel = hasSuggested ? suggested! : defaultModel,
             FallbackModel = defaultModel,
             AllowPremium = false
         };
@@ -169,6 +172,7 @@ internal static partial class SeedData
                 new ModelDefinition { Name = "claude-opus-4.6", Cost = 3, IsPremium = true },
                 new ModelDefinition { Name = "claude-sonnet-4.6", Cost = 1 },
                 new ModelDefinition { Name = "gpt-5.4", Cost = 1 },
+                new ModelDefinition { Name = "gpt-5.4-mini", Cost = 0.33 },
                 new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }
             ];
         }

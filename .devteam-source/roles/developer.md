@@ -32,7 +32,7 @@ Your handoff MUST include:
 - **Never directly edit `.devteam/` state files** — the runtime owns all workspace state. Use the MCP tools to read and write state.
 
 ## Suggested Model
-`gpt-5.4` (1 credit) — strong all-around coder with excellent reasoning at standard cost.
+`gpt-5.4` (1 credit) — strong all-around coder, randomly pooled with `claude-sonnet-4.6` for model diversity.
 
 ## Constraints
 - Don't refactor code that isn't part of your assigned issue

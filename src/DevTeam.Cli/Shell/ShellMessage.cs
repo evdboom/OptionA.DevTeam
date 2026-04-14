@@ -19,4 +19,6 @@ internal sealed record ShellMessage(
     string Markup,
     string? Title = null,
     Color? BorderColor = null,
-    Color? TitleColor = null);
+    Color? TitleColor = null,
+    bool IsHeartbeat = false,
+    Justify? TitleJustify = null);

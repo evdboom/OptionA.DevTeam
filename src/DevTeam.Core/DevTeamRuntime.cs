@@ -1212,6 +1212,8 @@ public sealed class DevTeamRuntime
         pipeline.UpdatedAtUtc = DateTimeOffset.UtcNow;
     }
 
+    private static readonly Random PoolRng = new();
+
     private static ModelDefinition SelectModelForRole(WorkspaceState state, string roleSlug)
     {
         var policy = SeedData.GetPolicy(state, roleSlug);
@@ -1221,15 +1223,31 @@ public sealed class DevTeamRuntime
             Cost = 0
         };
 
-        var primary = state.Models.FirstOrDefault(model => string.Equals(model.Name, policy.PrimaryModel, StringComparison.OrdinalIgnoreCase))
-            ?? defaultModel;
-        var fallback = state.Models.FirstOrDefault(model => string.Equals(model.Name, policy.FallbackModel, StringComparison.OrdinalIgnoreCase))
-            ?? defaultModel;
-
         var remaining = state.Budget.TotalCreditCap - state.Budget.CreditsCommitted;
         var budgetRatio = state.Budget.TotalCreditCap > 0
             ? remaining / state.Budget.TotalCreditCap
             : 0;
+
+        // Try model pool: pick a random affordable model from the pool
+        if (policy.ModelPool.Count > 0)
+        {
+            var affordable = policy.ModelPool
+                .Select(name => state.Models.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)))
+                .Where(m => m is not null
+                    && CanAffordModel(state, m)
+                    && (!m.IsPremium || policy.AllowPremium)
+                    && IsBudgetComfortable(m, budgetRatio))
+                .ToList();
+            if (affordable.Count > 0)
+            {
+                return affordable[PoolRng.Next(affordable.Count)]!;
+            }
+        }
+
+        var primary = state.Models.FirstOrDefault(model => string.Equals(model.Name, policy.PrimaryModel, StringComparison.OrdinalIgnoreCase))
+            ?? defaultModel;
+        var fallback = state.Models.FirstOrDefault(model => string.Equals(model.Name, policy.FallbackModel, StringComparison.OrdinalIgnoreCase))
+            ?? defaultModel;
 
         // Try primary: affordable, premium-allowed, and budget comfortable for its tier
         if (CanAffordModel(state, primary)

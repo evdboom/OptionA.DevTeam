@@ -27,6 +27,9 @@ internal sealed class CliDispatcher(
             case "update":
                 return await ScheduleToolUpdateAsync(toolUpdateService, interactiveShell: false);
 
+            case "ui-harness":
+                return await UiHarness.RunAsync(options);
+
             case "workspace-mcp":
             {
                 var workspace = GetOption(options, "workspace") ?? ".devteam";
