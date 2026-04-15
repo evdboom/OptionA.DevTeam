@@ -126,7 +126,7 @@ internal static class CommandOptionValidator
 
         return new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
         {
-            ["start"] = CreateOptionSet(sharedOptions: globalOptions, "keep-awake"),
+            ["start"] = CreateOptionSet(sharedOptions: globalOptions, "keep-awake", "no-tty", "output-format"),
             ["check-update"] = CreateOptionSet(sharedOptions: globalOptions),
             ["update"] = CreateOptionSet(sharedOptions: globalOptions),
             ["workspace-mcp"] = CreateOptionSet(sharedOptions: globalOptions),

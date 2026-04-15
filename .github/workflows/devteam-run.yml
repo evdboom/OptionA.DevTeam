@@ -1,0 +1,92 @@
+# DevTeam autonomous loop — GitHub Actions template
+# Copy this file to your target repository at .github/workflows/devteam-run.yml
+# and configure the variables below.
+#
+# Prerequisites:
+#   - A GitHub Copilot-enabled token set as the GITHUB_TOKEN secret (or a PAT with copilot:chat scope)
+#   - devteam initialized in the repository (workspace.json committed)
+#
+# Usage:
+#   Trigger manually via workflow_dispatch or on a schedule.
+
+name: DevTeam autonomous loop
+
+on:
+  workflow_dispatch:
+    inputs:
+      goal:
+        description: "One-shot goal override (leave empty to use workspace goal)"
+        required: false
+        type: string
+      max_iterations:
+        description: "Maximum loop iterations"
+        required: false
+        default: "10"
+        type: string
+  schedule:
+    # Run at 03:00 UTC every day — adjust or remove as needed
+    - cron: "0 3 * * *"
+
+# Limit to one concurrent run per branch to avoid workspace conflicts
+concurrency:
+  group: devteam-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run-loop:
+    name: DevTeam loop
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    permissions:
+      contents: write      # push commits
+      pull-requests: write # open / update PRs
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for git operations
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install DevTeam CLI
+        run: dotnet tool install --global devteam
+        env:
+          DOTNET_NOLOGO: "1"
+
+      - name: Install ripgrep
+        run: sudo apt-get install -y --no-install-recommends ripgrep
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "devteam[bot]@github.com"
+          git config --global user.name "DevTeam"
+
+      # Optional: set a one-shot goal from the workflow input
+      - name: Override goal
+        if: "${{ inputs.goal != '' }}"
+        run: devteam set-goal "${{ inputs.goal }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run DevTeam loop
+        run: |
+          devteam run-loop \
+            --max-iterations "${{ inputs.max_iterations || '10' }}" \
+            --verbosity quiet \
+            --output-format jsonl \
+            2>&1 | tee devteam-run.jsonl
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devteam-run-log-${{ github.run_id }}
+          path: devteam-run.jsonl
+          retention-days: 30

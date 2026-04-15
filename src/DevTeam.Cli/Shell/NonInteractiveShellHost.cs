@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using DevTeam.Core;
 
 namespace DevTeam.Cli.Shell;
@@ -9,12 +10,13 @@ namespace DevTeam.Cli.Shell;
 /// </summary>
 internal static class NonInteractiveShellHost
 {
-    internal static async Task RunAsync(ShellService shell, CancellationToken cancellationToken)
+    internal static async Task RunAsync(ShellService shell, CancellationToken cancellationToken, string outputFormat = "plain")
     {
+        var useJsonl = string.Equals(outputFormat, "jsonl", StringComparison.OrdinalIgnoreCase);
         await shell.InitializeAsync();
 
         var messageIndex = 0;
-        DrainMessages(shell, ref messageIndex);
+        DrainMessages(shell, ref messageIndex, useJsonl);
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -39,26 +41,51 @@ internal static class NonInteractiveShellHost
             }
 
             await shell.ProcessInputAsync(line);
-            DrainMessages(shell, ref messageIndex);
+            DrainMessages(shell, ref messageIndex, useJsonl);
         }
     }
 
-    private static void DrainMessages(ShellService shell, ref int index)
+    private static void DrainMessages(ShellService shell, ref int index, bool useJsonl)
     {
         var messages = shell.Messages;
         for (; index < messages.Count; index++)
         {
             var msg = messages[index];
-            var text = StripMarkup(msg.Markup);
-            if (msg.Title is not null)
+            if (useJsonl)
             {
-                Console.WriteLine($"[{StripMarkup(msg.Title)}] {text}");
+                var text = StripMarkup(msg.Markup);
+                var level = DetectLevel(msg.Markup);
+                var entry = new
+                {
+                    timestamp = DateTimeOffset.UtcNow.ToString("O"),
+                    level,
+                    panel = msg.Title is not null ? StripMarkup(msg.Title) : null,
+                    message = text
+                };
+                Console.WriteLine(JsonSerializer.Serialize(entry));
             }
             else
             {
-                Console.WriteLine(text);
+                var text = StripMarkup(msg.Markup);
+                if (msg.Title is not null)
+                {
+                    Console.WriteLine($"[{StripMarkup(msg.Title)}] {text}");
+                }
+                else
+                {
+                    Console.WriteLine(text);
+                }
             }
         }
+    }
+
+    internal static string DetectLevel(string markup)
+    {
+        if (markup.Contains("[bold red]") || markup.Contains("[red]")) return "error";
+        if (markup.Contains("[bold yellow]") || markup.Contains("[yellow]")) return "warn";
+        if (markup.Contains("[bold green]") || markup.Contains("[green]")) return "success";
+        if (markup.Contains("[dim]")) return "debug";
+        return "info";
     }
 
     /// <summary>

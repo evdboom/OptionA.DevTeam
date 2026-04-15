@@ -27,9 +27,11 @@ internal static class CliLoopHandler
             || Console.IsInputRedirected
             || Console.IsOutputRedirected;
 
+        var outputFormat = CliOptionParser.GetOption(startOptions, "output-format") ?? "plain";
+
         if (noTty)
         {
-            await NonInteractiveShellHost.RunAsync(shell, exitCts.Token);
+            await NonInteractiveShellHost.RunAsync(shell, exitCts.Token, outputFormat);
         }
         else
         {
