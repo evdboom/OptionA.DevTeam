@@ -459,7 +459,7 @@ dotnet run --project .\tests\DevTeam.SmokeTests\DevTeam.SmokeTests.csproj
 Pack the tool locally (the project file keeps `Version` at `0.0.0`, so pass a real version explicitly):
 
 ```powershell
-dotnet pack .\src\DevTeam.Cli\DevTeam.Cli.csproj -c Release -o .\nupkg /p:Version=0.5.40
+dotnet pack .\src\DevTeam.Cli\DevTeam.Cli.csproj -c Release -o .\nupkg /p:Version=X.Y.Z
 ```
 
 Install a local build:

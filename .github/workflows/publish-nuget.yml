@@ -56,11 +56,11 @@ jobs:
             $output = dotnet nuget push $_.FullName --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate 2>&1
             $exitCode = $LASTEXITCODE
             Write-Host $output
-            if ($exitCode -ne 0) {
-              throw "dotnet nuget push failed for $($_.Name) with exit code $exitCode."
-            }
             if ($output -match 'already exists') {
               Write-Host "::warning::Package $($_.Name) already exists on NuGet — skipped."
+            }
+            elseif ($exitCode -ne 0) {
+              throw "dotnet nuget push failed for $($_.Name) with exit code $exitCode."
             }
           }
 
@@ -75,26 +75,30 @@ jobs:
             throw "No .nupkg files found in $env:PACKAGE_OUTPUT."
           }
 
-          $null = gh release view $tag 2>$null
-          if ($LASTEXITCODE -eq 0) {
+          $releaseViewOutput = gh release view $tag 2>&1
+          $releaseViewExitCode = $LASTEXITCODE
+          if ($releaseViewExitCode -eq 0) {
             Write-Host "GitHub release $tag already exists. Uploading assets with replacement enabled."
           }
           else {
+            Write-Host "gh release view for $tag returned exit code $releaseViewExitCode. Attempting to create release."
             Write-Host "Creating GitHub release $tag."
-            gh release create $tag `
+            $releaseCreateOutput = gh release create $tag `
               --title "DevTeam $tag" `
-              --generate-notes
+              --generate-notes 2>&1
+            $releaseCreateExitCode = $LASTEXITCODE
 
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to create GitHub release $tag."
+            if ($releaseCreateExitCode -ne 0) {
+              throw "Failed to create GitHub release $tag. gh output: $releaseCreateOutput"
             }
           }
 
           foreach ($package in $packages) {
             Write-Host "Uploading release asset $(Split-Path $package -Leaf)"
-            gh release upload $tag $package --clobber
+            $uploadOutput = gh release upload $tag $package --clobber 2>&1
+            $uploadExitCode = $LASTEXITCODE
 
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to upload release asset $(Split-Path $package -Leaf) to $tag."
+            if ($uploadExitCode -ne 0) {
+              throw "Failed to upload release asset $(Split-Path $package -Leaf) to $tag. gh output: $uploadOutput"
             }
           }
