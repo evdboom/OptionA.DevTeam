@@ -1,4 +1,5 @@
 import { test, expect } from "@microsoft/tui-test";
+import { cliArgs } from "./helpers.js";
 
 // Generous timeout for first run: dotnet needs to restore + compile the CLI project.
 const BUILD_TIMEOUT = 120_000;
@@ -6,16 +7,7 @@ const BUILD_TIMEOUT = 120_000;
 test.use({
   program: {
     file: "dotnet",
-    args: [
-      "run",
-      "--no-build",
-      "--project",
-      "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-      "--",
-      "start",
-      "--workspace",
-      ".devteam-e2e-startup",
-    ],
+    args: cliArgs("start", "--workspace", ".devteam-e2e-startup"),
   },
   rows: 40,
   columns: 120,

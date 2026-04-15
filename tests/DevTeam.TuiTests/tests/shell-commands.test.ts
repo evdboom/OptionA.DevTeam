@@ -1,20 +1,12 @@
 import { test, expect, Key } from "@microsoft/tui-test";
+import { cliArgs } from "./helpers.js";
 
 const BUILD_TIMEOUT = 120_000;
 
 test.use({
   program: {
     file: "dotnet",
-    args: [
-      "run",
-      "--no-build",
-      "--project",
-      "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-      "--",
-      "start",
-      "--workspace",
-      ".devteam-e2e-commands",
-    ],
+    args: cliArgs("start", "--workspace", ".devteam-e2e-commands"),
   },
   rows: 40,
   columns: 120,
@@ -140,16 +132,7 @@ test.describe("worktrees command (ui-harness)", () => {
   test.use({
     program: {
       file: "dotnet",
-      args: [
-        "run",
-        "--no-build",
-        "--project",
-        "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-        "--",
-        "ui-harness",
-        "--scenario",
-        "execution",
-      ],
+      args: cliArgs("ui-harness", "--scenario", "execution"),
     },
     rows: 40,
     columns: 120,

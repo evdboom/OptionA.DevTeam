@@ -1,4 +1,4 @@
-//# hash=707ee51f3451c18d715550519eff41c4
+//# hash=1753cce1cb8546bef82c75d9a4786e6d
 //# sourceMappingURL=help-scroll.test.js.map
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
@@ -130,6 +130,7 @@ function _ts_generator(thisArg, body) {
     }
 }
 import { test, expect, Key } from "@microsoft/tui-test";
+import { cliArgs } from "./helpers.js";
 // All /help commands that must be reachable via scrolling.
 var HELP_COMMANDS = [
     "/init",
@@ -157,16 +158,7 @@ var HELP_COMMANDS = [
     "/exit",
     "@role"
 ];
-var BASE_ARGS = [
-    "run",
-    "--no-build",
-    "--project",
-    "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-    "--",
-    "start",
-    "--workspace",
-    ".devteam-tui-test"
-];
+var BASE_ARGS = cliArgs("start", "--workspace", ".devteam-tui-test");
 // ── Test 1: Home key reaches oldest content (40×120) ────────────────────────
 // Uses a realistic terminal size where long help lines wrap to 2-3 rows each.
 // This is the scenario that exposed the MaxScrollOffset bug — without the fix,

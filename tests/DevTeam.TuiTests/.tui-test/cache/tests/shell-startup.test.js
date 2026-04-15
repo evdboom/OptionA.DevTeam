@@ -1,4 +1,4 @@
-//# hash=f5c9cde54c730812d582d2851099c70d
+//# hash=86308571527f6b70c4c899f4b0974ac9
 //# sourceMappingURL=shell-startup.test.js.map
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
@@ -130,21 +130,13 @@ function _ts_generator(thisArg, body) {
     }
 }
 import { test, expect } from "@microsoft/tui-test";
+import { cliArgs } from "./helpers.js";
 // Generous timeout for first run: dotnet needs to restore + compile the CLI project.
 var BUILD_TIMEOUT = 120000;
 test.use({
     program: {
         file: "dotnet",
-        args: [
-            "run",
-            "--no-build",
-            "--project",
-            "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-            "--",
-            "start",
-            "--workspace",
-            ".devteam-e2e-startup"
-        ]
+        args: cliArgs("start", "--workspace", ".devteam-e2e-startup")
     },
     rows: 40,
     columns: 120

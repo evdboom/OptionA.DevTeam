@@ -1,4 +1,5 @@
 import { test, expect } from "@microsoft/tui-test";
+import { cliArgs } from "./helpers.js";
 
 // The ui-harness command starts the full interactive shell with synthetic workspace
 // state so the UI can be verified without real agent backends.
@@ -7,14 +8,7 @@ import { test, expect } from "@microsoft/tui-test";
 const BUILD_TIMEOUT = 120_000;
 
 // Shared base args — only the --scenario value differs per describe block.
-const BASE_ARGS = [
-  "run",
-  "--no-build",
-  "--project",
-  "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-  "--",
-  "ui-harness",
-];
+const BASE_ARGS = cliArgs("ui-harness");
 
 // Wait for the shell to finish starting up — "Phase:" appears exactly once in the header.
 async function waitForReady(terminal: Parameters<Parameters<typeof test>[1]>[0]["terminal"]) {

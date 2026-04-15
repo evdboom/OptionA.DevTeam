@@ -1,4 +1,4 @@
-//# hash=f3b364ca73a951d41d46c5e934f461c2
+//# hash=e845c5d1a305b10d79bff16ddbb17b1b
 //# sourceMappingURL=ui-harness-scenarios.test.js.map
 
 function _array_like_to_array(arr, len) {
@@ -155,19 +155,13 @@ function _ts_generator(thisArg, body) {
     }
 }
 import { test, expect } from "@microsoft/tui-test";
+import { cliArgs } from "./helpers.js";
 // The ui-harness command starts the full interactive shell with synthetic workspace
 // state so the UI can be verified without real agent backends.
 // Each describe block overrides the program args to use a specific scenario.
 var BUILD_TIMEOUT = 120000;
 // Shared base args — only the --scenario value differs per describe block.
-var BASE_ARGS = [
-    "run",
-    "--no-build",
-    "--project",
-    "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-    "--",
-    "ui-harness"
-];
+var BASE_ARGS = cliArgs("ui-harness");
 // Wait for the shell to finish starting up — "Phase:" appears exactly once in the header.
 function waitForReady(terminal) {
     return _async_to_generator(function() {

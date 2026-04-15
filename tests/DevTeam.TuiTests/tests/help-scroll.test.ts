@@ -1,4 +1,5 @@
 import { test, expect, Key } from "@microsoft/tui-test";
+import { cliArgs } from "./helpers.js";
 
 // All /help commands that must be reachable via scrolling.
 const HELP_COMMANDS = [
@@ -28,16 +29,7 @@ const HELP_COMMANDS = [
   "@role",
 ];
 
-const BASE_ARGS = [
-  "run",
-  "--no-build",
-  "--project",
-  "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-  "--",
-  "start",
-  "--workspace",
-  ".devteam-tui-test",
-];
+const BASE_ARGS = cliArgs("start", "--workspace", ".devteam-tui-test");
 
 // ── Test 1: Home key reaches oldest content (40×120) ────────────────────────
 // Uses a realistic terminal size where long help lines wrap to 2-3 rows each.

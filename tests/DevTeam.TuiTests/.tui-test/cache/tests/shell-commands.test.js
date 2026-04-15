@@ -1,4 +1,4 @@
-//# hash=9e9ec479aab4f0d59a6a42a5796940de
+//# hash=51b6b0368447fd281e4353e0d32ebd1a
 //# sourceMappingURL=shell-commands.test.js.map
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
@@ -130,20 +130,12 @@ function _ts_generator(thisArg, body) {
     }
 }
 import { test, expect, Key } from "@microsoft/tui-test";
+import { cliArgs } from "./helpers.js";
 var BUILD_TIMEOUT = 120000;
 test.use({
     program: {
         file: "dotnet",
-        args: [
-            "run",
-            "--no-build",
-            "--project",
-            "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-            "--",
-            "start",
-            "--workspace",
-            ".devteam-e2e-commands"
-        ]
+        args: cliArgs("start", "--workspace", ".devteam-e2e-commands")
     },
     rows: 40,
     columns: 120
@@ -397,16 +389,7 @@ test.describe("worktrees command (ui-harness)", function() {
     test.use({
         program: {
             file: "dotnet",
-            args: [
-                "run",
-                "--no-build",
-                "--project",
-                "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-                "--",
-                "ui-harness",
-                "--scenario",
-                "execution"
-            ]
+            args: cliArgs("ui-harness", "--scenario", "execution")
         },
         rows: 40,
         columns: 120
