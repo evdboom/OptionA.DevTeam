@@ -679,6 +679,55 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "worktrees":
+                {
+                    var current = _store.Load();
+                    if (tokens.Count > 1)
+                    {
+                        var flag = tokens[1].Trim().ToLowerInvariant();
+                        if (flag is "on" or "true" or "1")
+                        {
+                            current.Runtime.WorktreeMode = true;
+                            _store.Save(current);
+                            AddSuccess("Worktree mode [bold]enabled[/]. Each parallel agent run will execute in its own git worktree branch.");
+                        }
+                        else if (flag is "off" or "false" or "0")
+                        {
+                            current.Runtime.WorktreeMode = false;
+                            _store.Save(current);
+                            AddSuccess("Worktree mode [bold]disabled[/].");
+                        }
+                        else
+                        {
+                            AddWarning($"Unknown value '{Markup.Escape(tokens[1])}'. Use /worktrees on or /worktrees off.");
+                        }
+                        break;
+                    }
+
+                    // Display current state and active worktrees
+                    var modeLabel = current.Runtime.WorktreeMode ? "[green]enabled[/]" : "[dim]disabled[/]";
+                    AddLine($"Worktree mode: {modeLabel}");
+                    if (current.Worktrees.Count == 0)
+                    {
+                        AddLine("[dim]No active worktrees.[/]");
+                    }
+                    else
+                    {
+                        foreach (var wt in current.Worktrees)
+                        {
+                            var statusColor = wt.Status switch
+                            {
+                                WorktreeStatus.Active => "cyan",
+                                WorktreeStatus.Merged => "green",
+                                WorktreeStatus.Conflicted => "red",
+                                _ => "white"
+                            };
+                            AddLine($"  [bold]#{wt.IssueId}[/] run #{wt.RunId} [{statusColor}]{wt.Status}[/]  {Markup.Escape(wt.BranchName)}  [dim]{Markup.Escape(wt.WorktreePath)}[/]");
+                        }
+                    }
+                    break;
+                }
+
                 default:
                 {
                     _diagnostics.RecordError($"Unknown command: {tokens[0]}");

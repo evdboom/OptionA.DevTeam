@@ -15,7 +15,7 @@ Items below are ordered by execution priority. Each item builds on what came bef
 | 7 | **#13 — Container/CI mode** | Medium | Deployment and automation path. Lower priority until core loop is solid. |
 | 8 | **#6 — GitHub mode** | Major | Issues/PRs as the work queue. Major feature; build after orchestrator loop stabilizes. |
 
-> Items 9 (hygiene conventions) and ATM fixes are **complete** as of April 2026.
+> Items 9 (hygiene conventions), ATM fixes, #8 (navigator scout), #10 (orchestrator loop), #16 (cursor navigation), and #15 (cross-family review) are **complete** as of April/May 2026.
 > Item 7b (Adventure mode) is deliberately deprioritized until core loop is solid.
 
 ---

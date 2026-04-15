@@ -107,6 +107,10 @@ public class LoopExecutor(
                 var session = _runtime.GetOrCreateAgentSession(state, queuedRun.RunId);
                 var sessionId = session.SessionId;
                 _runtime.StartRun(state, queuedRun.RunId, sessionId);
+
+                // Allocate a git worktree for this run if worktree mode is enabled
+                var worktreePath = AllocateWorktree(state, queuedRun);
+
                 Log(log, options.Verbosity, $"  Running issue #{queuedRun.IssueId} as {queuedRun.RoleSlug} via {queuedRun.ModelName}");
                 var runIssue = state.Issues.FirstOrDefault(i => i.Id == queuedRun.IssueId);
                 if (runIssue?.PipelineId is int pid)
@@ -119,11 +123,15 @@ public class LoopExecutor(
                         Log(log, options.Verbosity, $"    pipeline #{pid} · {chain}");
                     }
                 }
+                if (worktreePath is not null)
+                {
+                    LogDetailed(log, options.Verbosity, $"    Worktree: {worktreePath}");
+                }
                 LogDetailed(log, options.Verbosity, $"    Session {sessionId}, scope {session.ScopeKind}, area {(string.IsNullOrWhiteSpace(queuedRun.Area) ? "none" : queuedRun.Area)}, timeout {options.AgentTimeout.TotalSeconds:0}s");
                 pendingRuns.Add(new PendingAgentRun(
                     queuedRun,
                     sessionId,
-                    ExecuteRunAsync(state, options, queuedRun, sessionId, cancellationToken),
+                    ExecuteRunAsync(state, options, queuedRun, sessionId, worktreePath, cancellationToken),
                     _clock.UtcNow));
             }
 
@@ -148,6 +156,9 @@ public class LoopExecutor(
                 WriteRunArtifact(_store.WorkspacePath, completed.Run, persistedRun, completed.Response, completed.Outcome, completed.Summary);
                 WriteDecisionArtifact(_store.WorkspacePath, decision);
                 var completedIssue = state.Issues.First(issue => issue.Id == completed.Run.IssueId);
+
+                // Merge worktree branch back into the main repo (if worktree mode active for this run)
+                FinalizeWorktree(state, completed, log, options.Verbosity);
                 var isArchitectRun = !completedIssue.IsPlanningIssue
                     && string.Equals(completedIssue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase)
                     && completed.Outcome == "completed";
@@ -258,7 +269,7 @@ public class LoopExecutor(
         _runtime.StartRun(state, queuedRun.RunId, session.SessionId);
         _store.Save(state);
 
-        var result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, cancellationToken);
+        var result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, cancellationToken: cancellationToken);
 
         _runtime.MergeWorkspaceAdditions(state, _store.Load());
         if (result.Questions.Count > 0) _runtime.AddQuestions(state, result.Questions);
@@ -498,11 +509,13 @@ public class LoopExecutor(
         LoopExecutionOptions options,
         QueuedRunInfo queuedRun,
         string sessionId,
-        CancellationToken cancellationToken)
+        string? overrideWorkingDirectory = null,
+        CancellationToken cancellationToken = default)
     {
         var client = _agentClientFactory.Create(options.Backend);
         var issue = state.Issues.First(item => item.Id == queuedRun.IssueId);
         var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+        var workingDirectory = overrideWorkingDirectory ?? state.RepoRoot;
         try
         {
             var response = await client.InvokeAsync(new AgentInvocationRequest
@@ -510,7 +523,7 @@ public class LoopExecutor(
                 Prompt = prompt,
                 Model = queuedRun.ModelName,
                 SessionId = sessionId,
-                WorkingDirectory = state.RepoRoot,
+                WorkingDirectory = workingDirectory,
                 WorkspacePath = _store.WorkspacePath,
                 Timeout = options.AgentTimeout,
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
@@ -768,5 +781,85 @@ public class LoopExecutor(
             }
         }
     }
-}
 
+    // ── Worktree helpers ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// When <c>WorktreeMode</c> is enabled, creates a git worktree for the run and registers it in
+    /// <see cref="WorkspaceState.Worktrees"/>. Returns the worktree path, or <c>null</c> when
+    /// worktrees are disabled or the repo is not a git repository.
+    /// </summary>
+    private string? AllocateWorktree(WorkspaceState state, QueuedRunInfo run)
+    {
+        if (!state.Runtime.WorktreeMode) return null;
+        if (!_git.IsGitRepository(state.RepoRoot)) return null;
+
+        var branchName = $"devteam/issue-{run.IssueId}";
+        var worktreePath = Path.Combine(state.RepoRoot, ".devteam", "worktrees", $"issue-{run.IssueId}");
+
+        if (!_git.TryCreateWorktree(state.RepoRoot, worktreePath, branchName))
+        {
+            return null;
+        }
+
+        state.Worktrees.Add(new WorktreeEntry
+        {
+            IssueId = run.IssueId,
+            RunId = run.RunId,
+            BranchName = branchName,
+            WorktreePath = worktreePath,
+            Status = WorktreeStatus.Active
+        });
+        return worktreePath;
+    }
+
+    /// <summary>
+    /// After a run completes, merges its worktree branch back into the main repo branch.
+    /// On conflict, a conflict-resolution issue is created; on success, the worktree is removed.
+    /// No-op when worktree mode is disabled or no worktree exists for the run.
+    /// </summary>
+    private void FinalizeWorktree(
+        WorkspaceState state,
+        AgentExecutionResult completed,
+        Action<string>? log,
+        LoopVerbosity verbosity)
+    {
+        var worktree = state.Worktrees.FirstOrDefault(w => w.RunId == completed.Run.RunId);
+        if (worktree is null) return;
+
+        try
+        {
+            var commitMsg = $"run #{completed.Run.RunId}: #{completed.Run.IssueId} {completed.Run.Title}";
+            var mergeResult = _git.CommitAndMergeWorktree(
+                state.RepoRoot, worktree.WorktreePath, worktree.BranchName, commitMsg);
+
+            if (mergeResult.HasConflicts)
+            {
+                worktree.Status = WorktreeStatus.Conflicted;
+                Log(log, verbosity, $"    ⚠ Worktree merge conflict for issue #{worktree.IssueId} — creating conflict resolution issue");
+                _runtime.AddGeneratedIssues(state, completed.Run.IssueId,
+                [
+                    new GeneratedIssueProposal
+                    {
+                        Title = $"Resolve worktree merge conflicts from issue #{worktree.IssueId}",
+                        Detail = $"Issue #{worktree.IssueId} completed but its worktree branch `{worktree.BranchName}` had merge conflicts.\n\nWorktree path: {worktree.WorktreePath}\n\nConflicting files:\n{mergeResult.ConflictSummary}",
+                        Area = state.Issues.FirstOrDefault(i => i.Id == worktree.IssueId)?.Area ?? "",
+                        RoleSlug = "developer",
+                        Priority = 80
+                    }
+                ]);
+            }
+            else
+            {
+                worktree.Status = WorktreeStatus.Merged;
+                _git.RemoveWorktree(state.RepoRoot, worktree.WorktreePath, worktree.BranchName);
+                state.Worktrees.Remove(worktree);
+                Log(log, verbosity, $"    Worktree for issue #{worktree.IssueId} merged and removed.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log(log, verbosity, $"    Warning: worktree finalization failed for issue #{worktree.IssueId}: {ex.Message}");
+        }
+    }
+}

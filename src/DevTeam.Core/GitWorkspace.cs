@@ -84,6 +84,80 @@ public static class GitWorkspace
         return pathsToStage;
     }
 
+    // ── Worktree operations ──────────────────────────────────────────────────────
+
+    public static bool TryCreateWorktree(string repoRoot, string worktreePath, string branchName)
+    {
+        try
+        {
+            // Ensure parent directory exists
+            var parent = Path.GetDirectoryName(worktreePath);
+            if (!string.IsNullOrEmpty(parent))
+            {
+                Directory.CreateDirectory(parent);
+            }
+            RunGit(repoRoot, "worktree", "add", worktreePath, "-b", branchName);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Stages all changes in the worktree, commits them to the worktree branch, then
+    /// merges that branch into the current branch using <c>--no-ff</c>.
+    /// </summary>
+    public static WorktreeMergeResult CommitAndMergeWorktree(
+        string repoRoot, string worktreePath, string branchName, string commitMessage)
+    {
+        // Stage + commit in the worktree (best-effort — nothing to commit is fine)
+        try
+        {
+            RunGit(worktreePath, "add", "-A");
+            var statusResult = RunGit(worktreePath, "status", "--porcelain");
+            if (!string.IsNullOrWhiteSpace(statusResult.StdOut))
+            {
+                RunGit(worktreePath, "commit", "-m", commitMessage);
+            }
+        }
+        catch
+        {
+            // If commit fails (e.g. nothing to commit), continue to merge attempt
+        }
+
+        // Merge into main repo
+        try
+        {
+            RunGit(repoRoot, "merge", "--no-ff", branchName, "-m", $"Merge worktree: {commitMessage}");
+            return new WorktreeMergeResult(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Conflict — capture conflict summary and abort
+            var conflictSummary = ex.Message;
+            try
+            {
+                var conflictFiles = RunGit(repoRoot, "diff", "--name-only", "--diff-filter=U");
+                if (!string.IsNullOrWhiteSpace(conflictFiles.StdOut))
+                {
+                    conflictSummary = conflictFiles.StdOut.Trim();
+                }
+            }
+            catch { }
+
+            try { RunGit(repoRoot, "merge", "--abort"); } catch { }
+            return new WorktreeMergeResult(true, conflictSummary);
+        }
+    }
+
+    public static void RemoveWorktree(string repoRoot, string worktreePath, string branchName)
+    {
+        try { RunGit(repoRoot, "worktree", "remove", "--force", worktreePath); } catch { }
+        try { RunGit(repoRoot, "branch", "-D", branchName); } catch { }
+    }
+
     private static Dictionary<string, string> ParsePorcelain(string stdout)
     {
         var entries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -183,4 +257,10 @@ public sealed class ProcessGitRepository : IGitRepository
     public GitStatusSnapshot? TryCaptureStatus(string workingDirectory) => GitWorkspace.TryCaptureStatus(workingDirectory);
     public IReadOnlyList<string> StagePathsChangedSince(string workingDirectory, GitStatusSnapshot? beforeSnapshot) =>
         GitWorkspace.StagePathsChangedSince(workingDirectory, beforeSnapshot);
+    public bool TryCreateWorktree(string repoRoot, string worktreePath, string branchName) =>
+        GitWorkspace.TryCreateWorktree(repoRoot, worktreePath, branchName);
+    public WorktreeMergeResult CommitAndMergeWorktree(string repoRoot, string worktreePath, string branchName, string commitMessage) =>
+        GitWorkspace.CommitAndMergeWorktree(repoRoot, worktreePath, branchName, commitMessage);
+    public void RemoveWorktree(string repoRoot, string worktreePath, string branchName) =>
+        GitWorkspace.RemoveWorktree(repoRoot, worktreePath, branchName);
 }

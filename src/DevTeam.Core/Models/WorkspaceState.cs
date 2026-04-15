@@ -23,6 +23,7 @@ public sealed class WorkspaceState
     public List<RoleDefinition> Roles { get; set; } = [];
     public List<SuperpowerDefinition> Superpowers { get; set; } = [];
     public List<McpServerDefinition> McpServers { get; set; } = [];
+    public List<WorktreeEntry> Worktrees { get; set; } = [];
     public int NextRoadmapId { get; set; } = 1;
     public int NextIssueId { get; set; } = 1;
     public int NextQuestionId { get; set; } = 1;
