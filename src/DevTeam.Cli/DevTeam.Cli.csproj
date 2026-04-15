@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DevTeam.ShellTests" />
+    <InternalsVisibleTo Include="DevTeam.UnitTests" />
   </ItemGroup>
 
   <ItemGroup>

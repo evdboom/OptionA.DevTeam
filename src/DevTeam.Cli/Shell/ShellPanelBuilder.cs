@@ -40,10 +40,24 @@ internal static class ShellPanelBuilder
             .Expand();
     }
 
-    internal static Panel BuildInput(string promptText, string activeInput)
+    internal static Panel BuildInput(string promptText, string activeInput, int cursorPosition = -1)
     {
         var label = promptText.TrimEnd().TrimEnd('>').TrimEnd();
-        var lines = activeInput.Split('\n');
+
+        // Insert the cursor marker (▌) at cursorPosition within the raw text.
+        // cursorPosition == -1 means "no cursor" (e.g. non-interactive rendering).
+        string displayText;
+        if (cursorPosition >= 0)
+        {
+            var clamped = Math.Clamp(cursorPosition, 0, activeInput.Length);
+            displayText = activeInput[..clamped] + "▌" + activeInput[clamped..];
+        }
+        else
+        {
+            displayText = activeInput;
+        }
+
+        var lines = displayText.Split('\n');
         const int MaxVisible = 4;
 
         string displayMarkup;

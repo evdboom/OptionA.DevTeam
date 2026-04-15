@@ -27,6 +27,7 @@ internal static class SpectreShellHost
         });
 
         var inputBuffer = new StringBuilder();
+        var cursorPosition = 0;       // offset within inputBuffer (0 = before first char)
         var historyCursor = -1; // -1 = not navigating history
         var savedDraft = string.Empty; // preserves unsent input while browsing history
         var scrollOffset = 0;  // 0 = auto-follow latest; N = scrolled N lines up
@@ -50,7 +51,7 @@ internal static class SpectreShellHost
             // the tree shape and rendered height never change between frames,
             // which is the prerequisite for Live display to overwrite correctly.
             var layout = BuildLayoutTree();
-            UpdateLayout(layout, shell, string.Empty, scrollOffset);
+            UpdateLayout(layout, shell, string.Empty, 0, scrollOffset);
 
             await console.Live(layout)
                 .Overflow(VerticalOverflow.Crop)
@@ -59,8 +60,8 @@ internal static class SpectreShellHost
                 {
                     while (!cancellationToken.IsCancellationRequested)
                     {
-                        ReadInput(inputBuffer, shell, commandChannel.Writer, ref historyCursor, ref savedDraft, ref scrollOffset);
-                        UpdateLayout(layout, shell, inputBuffer.ToString(), scrollOffset);
+                        ReadInput(inputBuffer, shell, commandChannel.Writer, ref cursorPosition, ref historyCursor, ref savedDraft, ref scrollOffset);
+                        UpdateLayout(layout, shell, inputBuffer.ToString(), cursorPosition, scrollOffset);
                         context.UpdateTarget(layout);
 
                         try { await Task.Delay(RefreshMs, cancellationToken); }
@@ -120,13 +121,13 @@ internal static class SpectreShellHost
     }
 
     /// <summary>Updates every leaf panel in the pre-built layout tree.</summary>
-    private static void UpdateLayout(Layout root, ShellService shell, string activeInput, int scrollOffset)
+    private static void UpdateLayout(Layout root, ShellService shell, string activeInput, int cursorPosition, int scrollOffset)
     {
         var snapshot = shell.LayoutSnapshot;
         var messages = shell.Messages;
 
         root["Header"].Update(ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning));
-        root["Input"].Update(ShellPanelBuilder.BuildInput(shell.PromptText, activeInput));
+        root["Input"].Update(ShellPanelBuilder.BuildInput(shell.PromptText, activeInput, cursorPosition));
 
         if (snapshot.ShowMiddleRow)
         {
@@ -149,13 +150,14 @@ internal static class SpectreShellHost
 
     // ── Input handling ─────────────────────────────────────────────────────────
 
-    private static void ReadInput(StringBuilder inputBuffer, ShellService shell, ChannelWriter<string> commandWriter, ref int historyCursor, ref string savedDraft, ref int scrollOffset)
+    private static void ReadInput(StringBuilder inputBuffer, ShellService shell, ChannelWriter<string> commandWriter, ref int cursorPosition, ref int historyCursor, ref string savedDraft, ref int scrollOffset)
     {
         if (Console.IsInputRedirected) return;
 
         while (Console.KeyAvailable)
         {
             var key = Console.ReadKey(intercept: true);
+            var text = inputBuffer.ToString();
 
             // PageUp → scroll progress pane up (older lines)
             if (key.Key == ConsoleKey.PageUp)
@@ -173,26 +175,40 @@ internal static class SpectreShellHost
                 continue;
             }
 
-            // End → jump back to auto-follow latest
-            if (key.Key == ConsoleKey.End)
-            {
-                scrollOffset = 0;
-                continue;
-            }
-
-            // Home → jump to oldest visible content (exactly fills panel, no blank space)
+            // Home → cursor to start of current line (or scroll to top when buffer empty)
             if (key.Key == ConsoleKey.Home)
             {
-                scrollOffset = ShellPanelBuilder.MaxScrollOffset(shell.Messages, Math.Max(20, Console.WindowHeight), ProgressWidth());
+                if (text.Length > 0)
+                {
+                    cursorPosition = InputCursorNavigation.GetLineStart(text, cursorPosition);
+                }
+                else
+                {
+                    scrollOffset = ShellPanelBuilder.MaxScrollOffset(shell.Messages, Math.Max(20, Console.WindowHeight), ProgressWidth());
+                }
                 continue;
             }
 
-            // Shift+Enter or Ctrl+J → insert newline into the buffer
-            // (Ctrl+J is more reliable across terminal emulators than Shift+Enter)
+            // End → cursor to end of current line (or scroll to bottom when buffer empty)
+            if (key.Key == ConsoleKey.End)
+            {
+                if (text.Length > 0)
+                {
+                    cursorPosition = InputCursorNavigation.GetLineEnd(text, cursorPosition);
+                }
+                else
+                {
+                    scrollOffset = 0;
+                }
+                continue;
+            }
+
+            // Shift+Enter or Ctrl+J → insert newline at cursor
             if ((key.Key == ConsoleKey.Enter && key.Modifiers.HasFlag(ConsoleModifiers.Shift))
                 || (key.Key == ConsoleKey.J && key.Modifiers.HasFlag(ConsoleModifiers.Control)))
             {
-                inputBuffer.Append('\n');
+                inputBuffer.Insert(cursorPosition, '\n');
+                cursorPosition++;
                 historyCursor = -1;
                 continue;
             }
@@ -202,6 +218,7 @@ internal static class SpectreShellHost
             {
                 var command = inputBuffer.ToString().Trim();
                 inputBuffer.Clear();
+                cursorPosition = 0;
                 historyCursor = -1;
                 savedDraft = string.Empty;
                 if (!string.IsNullOrWhiteSpace(command))
@@ -209,9 +226,17 @@ internal static class SpectreShellHost
                 continue;
             }
 
-            // Up arrow → older history entry
+            // Up arrow — context-aware: line 0 = history, deeper rows = move cursor up
             if (key.Key == ConsoleKey.UpArrow)
             {
+                var (cursorRow, cursorCol) = InputCursorNavigation.GetCursorRowCol(text, cursorPosition);
+                if (cursorRow > 0)
+                {
+                    cursorPosition = InputCursorNavigation.GetPositionAtRowCol(text, cursorRow - 1, cursorCol);
+                    continue;
+                }
+
+                // On line 0: navigate history (option A)
                 var history = shell.CommandHistory;
                 if (history.Count == 0) continue;
                 if (historyCursor == -1)
@@ -225,12 +250,22 @@ internal static class SpectreShellHost
                 }
                 inputBuffer.Clear();
                 inputBuffer.Append(history[historyCursor]);
+                cursorPosition = inputBuffer.Length;
                 continue;
             }
 
-            // Down arrow → newer history entry, or restore draft
+            // Down arrow — context-aware: below last line = history, otherwise move cursor down
             if (key.Key == ConsoleKey.DownArrow)
             {
+                var (cursorRow, cursorCol) = InputCursorNavigation.GetCursorRowCol(text, cursorPosition);
+                var totalRows = InputCursorNavigation.CountRows(text);
+                if (cursorRow < totalRows - 1)
+                {
+                    cursorPosition = InputCursorNavigation.GetPositionAtRowCol(text, cursorRow + 1, cursorCol);
+                    continue;
+                }
+
+                // On last line: navigate history forward
                 if (historyCursor == -1) continue;
                 var history = shell.CommandHistory;
                 if (historyCursor < history.Count - 1)
@@ -238,20 +273,55 @@ internal static class SpectreShellHost
                     historyCursor++;
                     inputBuffer.Clear();
                     inputBuffer.Append(history[historyCursor]);
+                    cursorPosition = inputBuffer.Length;
                 }
                 else
                 {
                     historyCursor = -1;
                     inputBuffer.Clear();
                     inputBuffer.Append(savedDraft);
+                    cursorPosition = inputBuffer.Length;
                     savedDraft = string.Empty;
                 }
                 continue;
             }
 
+            // Left arrow → move cursor left (no wrapping across lines)
+            if (key.Key == ConsoleKey.LeftArrow)
+            {
+                if (key.Modifiers.HasFlag(ConsoleModifiers.Control))
+                    cursorPosition = InputCursorNavigation.WordJumpLeft(text, cursorPosition);
+                else
+                    cursorPosition = Math.Max(0, cursorPosition - 1);
+                continue;
+            }
+
+            // Right arrow → move cursor right (no wrapping across lines)
+            if (key.Key == ConsoleKey.RightArrow)
+            {
+                if (key.Modifiers.HasFlag(ConsoleModifiers.Control))
+                    cursorPosition = InputCursorNavigation.WordJumpRight(text, cursorPosition);
+                else
+                    cursorPosition = Math.Min(inputBuffer.Length, cursorPosition + 1);
+                continue;
+            }
+
+            // Delete → remove char at cursor (no cursor movement)
+            if (key.Key == ConsoleKey.Delete)
+            {
+                if (cursorPosition < inputBuffer.Length)
+                    inputBuffer.Remove(cursorPosition, 1);
+                continue;
+            }
+
+            // Backspace → remove char before cursor
             if (key.Key == ConsoleKey.Backspace)
             {
-                if (inputBuffer.Length > 0) inputBuffer.Length--;
+                if (cursorPosition > 0)
+                {
+                    inputBuffer.Remove(cursorPosition - 1, 1);
+                    cursorPosition--;
+                }
                 historyCursor = -1;
                 continue;
             }
@@ -259,6 +329,7 @@ internal static class SpectreShellHost
             if (key.Key == ConsoleKey.Escape)
             {
                 inputBuffer.Clear();
+                cursorPosition = 0;
                 historyCursor = -1;
                 savedDraft = string.Empty;
                 continue;
@@ -266,7 +337,8 @@ internal static class SpectreShellHost
 
             if (!char.IsControl(key.KeyChar))
             {
-                inputBuffer.Append(key.KeyChar);
+                inputBuffer.Insert(cursorPosition, key.KeyChar);
+                cursorPosition++;
                 historyCursor = -1;
             }
         }
