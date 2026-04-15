@@ -38,7 +38,7 @@ internal static class SessionManagerTests
 
         Assert.That(session is not null, "Expected a session to be created");
         Assert.That(state.AgentSessions.Count == 1, $"Expected 1 session but got {state.AgentSessions.Count}");
-        Assert.That(!string.IsNullOrEmpty(session.SessionId), "Expected a non-empty SessionId");
+        Assert.That(!string.IsNullOrEmpty(session!.SessionId), "Expected a non-empty SessionId");
         return Task.CompletedTask;
     }
 
