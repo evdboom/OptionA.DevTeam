@@ -14,14 +14,18 @@ Items below are ordered by execution priority. Each item builds on what came bef
 | 6 | **R1 — Dry-run preview before /run** | Small | High UX value, one-liner based on existing orchestrator state. No dependencies. |
 | 7 | **R5 — Question TTL / stall indicator** | Small | Timestamps already in questions.json. Visible stall warnings directly improve the blocking-question failure mode. |
 | 8 | **R2 — /edit-issue command** | Small-Medium | Markdown mirrors exist; syncing edits back is the main work. Needed before GitHub mode. |
-| 9 | **#12 — Brownfield init** | Medium | Reconnaissance for real existing codebases. Independent of items above. |
-| 10 | **R6 — Per-role token telemetry** | Small-Medium | Actionable for MODELS.json tuning. Builds on existing budget system. |
-| 11 | **R4 — Run diff (/diff-run)** | Small | Purely additive shell command over existing runs.json data. |
-| 12 | **R3 — Planner/architect --dry-run** | Small | Additive flag, no state corruption risk. Useful for prompt iteration. |
-| 13 | **R7 — Workspace export/import** | Medium | Enables team handoff and cross-machine resume. Stepping stone to GitHub mode. |
-| 14 | **R8 — Role chaining config** | Medium | pipelines.json successor rules. Gain value after orchestrator loop stabilizes. |
-| 15 | **#13 — Container/CI mode** | Medium | Deployment and automation path. Lower priority until core loop is solid. |
-| 16 | **#6 — GitHub mode** | Major | Issues/PRs as the work queue. Major feature; build after orchestrator loop stabilizes. |
+| 9 | **R9 — Shared CopilotClient per batch** | Small | Single CLI process per batch instead of one per agent. Required for session resumption (#10). |
+| 10 | **R10 — Traceability links (ATM: Audit)** | Small-Medium | Link issue → run → decision → changed files. Makes "why did this happen?" answerable. |
+| 11 | **R11 — Testability-first architect** | Small | Architect issues must include testability constraints. Prompt change + validation. |
+| 12 | **#12 — Brownfield init** | Medium | Reconnaissance + constraint capture + fragility mapping. Core brownfield entry condition. |
+| 13 | **R12 — Brownfield change delta** | Medium | "What we found vs. what we changed and why" — decision-level before/after record. Depends on #12 + R10. |
+| 14 | **R6 — Per-role token telemetry** | Small-Medium | Actionable for MODELS.json tuning. Builds on existing budget system. |
+| 15 | **R4 — Run diff (/diff-run)** | Small | Purely additive shell command over existing runs.json data. |
+| 16 | **R3 — Planner/architect --dry-run** | Small | Additive flag, no state corruption risk. Useful for prompt iteration. |
+| 17 | **R7 — Workspace export/import** | Medium | Enables team handoff and cross-machine resume. Stepping stone to GitHub mode. |
+| 18 | **R8 — Role chaining config** | Medium | pipelines.json successor rules. Gain value after orchestrator loop stabilizes. |
+| 19 | **#13 — Container/CI mode** | Medium | Deployment and automation path. Lower priority until core loop is solid. |
+| 20 | **#6 — GitHub mode** | Major | Issues/PRs as the work queue. Major feature; build after orchestrator loop stabilizes. |
 
 > Items 9 (hygiene conventions), ATM fixes, #8 (navigator scout), #10 (orchestrator loop), #16 (cursor navigation), #15 (cross-family review), #14 (git worktrees), #12 (brownfield init), and #13 (container/CI mode) are **complete** as of May 2026.
 
@@ -176,22 +180,31 @@ Use the existing `UiHarness.BuildScenarioState` scenarios (empty, planning, arch
 
 ---
 
-## 12 — Brownfield init: automatic codebase reconnaissance
+## 12 — Brownfield init: reconnaissance, constraints, and fragility mapping
 
-**Goal:** When targeting a large existing codebase, `devteam init` should automatically run a one-shot Navigator pass and produce a `CODEBASE_CONTEXT.md` that gets injected into every subsequent planner and architect prompt. This makes DevTeam dramatically less likely to break existing conventions or duplicate existing patterns.
+**Goal:** When targeting an existing codebase, `devteam init` does three things a single-agent recon pass misses: (1) detects conventions automatically, (2) captures explicit user constraints as first-class workspace rules, and (3) maps fragile areas so every subsequent issue is aware of what not to break.
 
-**What the recon covers:** tech stack, folder structure, existing test framework and coverage patterns, key entry points, coding conventions (detected from existing files), known fragile areas (large files, circular deps, no tests).
+**Why recon alone isn't enough:** A Navigator can read files and infer patterns, but it works from evidence. Implicit conventions (what the team *never* does), undocumented hot zones (files that break everything when touched), and deliberate exceptions to detected patterns can't be reliably inferred — they need to be declared.
+
+**Three outputs of a brownfield init:**
+1. `CODEBASE_CONTEXT.md` — detected tech stack, folder structure, test framework, naming conventions, key entry points. Injected into every planner and architect prompt.
+2. `WORKSPACE_CONSTRAINTS.md` — explicit user-declared rules: areas to never touch, canonical patterns for new work, team preferences. Captured via a short structured Q&A on init.
+3. `FRAGILE_AREAS.md` — hot zones identified by the recon agent: circular dependencies, large files with no tests, undocumented side effects, files that are imported by many modules. Injected as warnings into any issue whose area overlaps.
+
+**Living recon — not one-shot:** Codebases drift. A lightweight delta recon before each `/run` checks whether significant structural changes have occurred (new files in key areas, changed package versions, deleted test files) since the last full recon. Shows a warning if drift is detected; never blocks.
 
 | Step | Detail |
 |---|---|
-| 12.1 | Architect spike: define the recon prompt and the `CODEBASE_CONTEXT.md` schema. What's the minimum context a planner needs to not repeat existing work? |
-| 12.2 | Add `--recon` flag to `init` command (default: on for non-empty repos). When set, run a single Navigator-style agent call before writing `workspace.json`. |
-| 12.3 | Store the recon output as `state.CodebaseContext` in `WorkspaceState`. Persist to `.devteam/codebase-context.md`. |
-| 12.4 | Inject `CodebaseContext` into the planner and architect prompt builders in `AgentPromptBuilder` (or equivalent). |
-| 12.5 | Add `/recon` shell command to re-run the recon on demand (e.g., after major refactors). |
-| 12.6 | Smoke tests: verify that a workspace initialized with `--recon` has a non-empty `CodebaseContext` and that it appears in the generated planner prompt. |
+| 12.1 | **Architect spike** — define the three output schemas (`CODEBASE_CONTEXT.md`, `WORKSPACE_CONSTRAINTS.md`, `FRAGILE_AREAS.md`). What's the minimum the planner needs? What makes a fragile-area warning actionable vs. noisy? |
+| 12.2 | Add `--recon` flag to `init` command (default: on for non-empty repos). Run a Navigator-style agent call to produce `CODEBASE_CONTEXT.md` and `FRAGILE_AREAS.md`. |
+| 12.3 | **Constraint Q&A** — after recon, prompt the user with 3–5 structured questions: "What should agents never modify?", "What's the canonical pattern for a new service/endpoint/component?", "Are there any known fragile areas the recon may have missed?". Store answers in `WORKSPACE_CONSTRAINTS.md`. |
+| 12.4 | Store all three outputs in `WorkspaceState` (`CodebaseContext`, `WorkspaceConstraints`, `FragileAreas`). Persist to `.devteam/` subdirectory. |
+| 12.5 | Inject `CodebaseContext` + `WorkspaceConstraints` into the planner and architect prompt builders. Inject `FragileAreas` warnings into any issue whose area tag overlaps a known fragile zone. |
+| 12.6 | Add `/recon` shell command to re-run a full recon on demand (e.g., after major refactors). |
+| 12.7 | **Delta recon** — add a lightweight pre-run check (`DeltaReconService`) that compares current file structure against the last full recon snapshot. If significant drift is detected (new directories, changed major deps), show a `⚠ Codebase has changed since last recon — consider /recon` warning in the shell before the run proceeds. |
+| 12.8 | Smoke tests: workspace initialized with `--recon` has non-empty context and constraints; fragile-area injection appears in issue prompt for overlapping areas; delta recon correctly detects a new directory added since last snapshot. |
 
-**Estimated scope:** Medium — new init flow, new state field, prompt injection. 1 architect issue, 3–4 developer issues.
+**Estimated scope:** Medium-large — richer than original estimate. 1 architect issue, 5–7 developer issues across two phases (recon + constraint capture first, delta recon second).
 
 ---
 
@@ -572,3 +585,101 @@ When an issue with role `trigger` completes successfully, `LoopExecutor` auto-qu
 | R8.6 | Unit tests: verify successor is queued, not duplicated, and respects `OnlyIfOutcome` filter. |
 
 **Estimated scope:** Medium — new config file, loader, evaluator, and `LoopExecutor` hook. No UI changes required.
+
+---
+
+## R9 — Shared CopilotClient per batch (SDK efficiency)
+
+**Goal:** Use a single `CopilotClient` instance (= one CLI process) for all agent sessions within a loop iteration, rather than spawning a new CLI process per agent invocation. Required prerequisite for session resumption in item #10.
+
+**Current state:** `CopilotSdkAgentClient.InvokeAsync` creates a `new CopilotClient`, starts it, runs one session, then disposes the client — for every single issue. When 4 agents run in parallel, 4 separate CLI processes are started and torn down. The `SessionId` stored on `AgentRun` refers to a session whose backing process no longer exists, making `ResumeSessionAsync` impossible.
+
+**Proposed model:** `IAgentClient` gains a `StartAsync`/`StopAsync` lifecycle separate from per-invocation calls. `LoopExecutor` acquires one shared client at the start of a batch run and passes it through to each concurrent agent invocation via `AgentInvocationRequest` or a new `IAgentSession` abstraction. Each invocation creates a *session* on the shared client, not a new client.
+
+| Step | Detail |
+|---|---|
+| R9.1 | Add `IAgentClientSession` abstraction — `CopilotClient` + lifecycle management extracted from `CopilotSdkAgentClient`. Separate client lifetime from session lifetime. |
+| R9.2 | `IAgentClientFactory` gains `CreateClientAsync(options)` returning a long-lived `IAgentClientSession`. `InvokeAsync` accepts it (or reads it from an ambient context). |
+| R9.3 | `LoopExecutor` creates one `IAgentClientSession` per batch, passes to all parallel `InvokeAsync` calls, disposes after the batch completes. |
+| R9.4 | Verify `ResumeSessionAsync` works against a live shared client — confirming the session ID stored in `AgentRun` is now actually resumable. |
+| R9.5 | Unit tests: verify `InvokeAsync` with a shared client creates new sessions without starting/stopping the client, and that session IDs are correctly propagated. |
+
+**Estimated scope:** Small-medium — refactor to lifetime separation. Core change is contained in `CopilotSdkAgentClient` and `LoopExecutor`. `CopilotCliAgentClient` fallback is unaffected.
+
+---
+
+## R10 — Traceability links (ATM: Auditable)
+
+**Goal:** Make "why did the code end up like this?" answerable by linking every decision record to the issue that triggered it, the run that produced it, and the files changed as a result. Currently `decisions.json`, `runs.json`, and the issue board are three disconnected stores.
+
+**The gap:** A decision in `decisions.json` knows its `RunId` but not the files touched by that run. A run knows its `IssueId` but not the decisions it generated. There's no single query path from "I see this function was changed" → "which issue required it" → "what was decided and why".
+
+**Proposed model:**
+- `DecisionRecord` gains `IssueId` (already available at decision-write time) and `ChangedFiles` (populated from `git diff --name-only` after the run completes).
+- `AgentRun` gains `DecisionIds` (list of decisions produced by this run).
+- A new `/trace <file>` shell command shows: which runs touched a file, which issues those runs belonged to, and what decisions they recorded.
+- The existing `decisions/` artifact files are updated to include these links.
+
+| Step | Detail |
+|---|---|
+| R10.1 | Add `IssueId` and `ChangedFiles` to `DecisionRecord`. Populate `ChangedFiles` in `LoopExecutor` from `git diff --name-only HEAD~1` after a successful run. |
+| R10.2 | Add `DecisionIds` list to `AgentRun`. Populate when `LoopExecutor` writes decisions produced by a run. |
+| R10.3 | `WorkspaceStore.GetTraceForFile(filePath)` — returns matching runs + issues + decisions for a given file path. Uses `ChangedFiles` on `DecisionRecord` for the lookup. |
+| R10.4 | Add `/trace <file>` shell command — calls `GetTraceForFile` and renders a timeline in the progress panel. |
+| R10.5 | Update decision artifact file writer to include `issue_id` and `changed_files` in the YAML/markdown output. |
+| R10.6 | Unit tests: `GetTraceForFile` returns correct records for a file that appears in multiple runs; returns empty for a file never touched. |
+
+**Estimated scope:** Small-medium — additive fields + one new shell command. The git diff capture is the main new runtime step.
+
+---
+
+## R11 — Testability-first architect prompting (ATM: Testable)
+
+**Goal:** Shift testability left — make it a design constraint the architect bakes into every issue, not a post-hoc check by the tester role. Currently the tester validates what was built; by then, untestable designs are already committed.
+
+**Current gap:** `architect.md` produces issues with functional requirements but no testability constraints. A developer can deliver a working feature as a static class with no interfaces, and the tester role has no basis to flag it as structurally untestable.
+
+**Proposed change:** Add explicit testability requirements to the architect role prompt and to the issue schema:
+- Each issue must include a `testability:` section specifying: required interfaces/abstractions, injectable dependencies, what the tester role should be able to verify without hitting external systems.
+- The architect is explicitly prompted: "If this component cannot be unit tested without a live database/network/filesystem, you must specify the abstraction that makes it testable."
+
+| Step | Detail |
+|---|---|
+| R11.1 | Update `architect.md` role prompt — add a `Testability Requirements` section to the expected issue output format. Describe what "testable" means in the DevTeam ATM framing: injectable dependencies, no static I/O, no sealed service classes. |
+| R11.2 | Add optional `TestabilityRequirements` field to `IssueItem`. Populate from architect-produced issue proposals when present. |
+| R11.3 | `AgentPromptBuilder` — inject `TestabilityRequirements` into the developer role prompt when the field is non-empty. Developer role sees: "This component must be testable as specified." |
+| R11.4 | Inject `TestabilityRequirements` into the tester role prompt as the acceptance criteria: "Verify that the implementation satisfies these testability constraints." |
+| R11.5 | Update `developer.md` role prompt to add the testability hygiene rules as first-class constraints (already in `.github/copilot-instructions.md`; sync to the role prompt). |
+| R11.6 | Unit tests: verify that `AgentPromptBuilder` includes `TestabilityRequirements` in developer and tester prompts when the field is set. |
+
+**Estimated scope:** Small — primarily role prompt changes + a new optional field. No runtime changes required.
+
+---
+
+## R12 — Brownfield change delta (ATM intersection)
+
+**Goal:** When DevTeam modifies an existing codebase, produce a decision-level "before/after" record: what patterns existed, what the agents chose to do (extend vs. replace vs. work around), and why. This is the ATM audit trail applied specifically to brownfield work — something no current agent produces.
+
+**Why this matters:** A git diff shows *what* changed. DevTeam's decision log shows *what was decided*. The brownfield delta combines them: "we found pattern X (from recon), we chose to extend it rather than replace it, because the architect determined Y." Future agents — and humans doing code review or onboarding — can answer "why does this codebase look like this?" at a semantic level, not just a diff level.
+
+**Depends on:** #12 (brownfield init produces the baseline), R10 (traceability links connect runs to changed files).
+
+**Proposed model:** When an agent run completes in a workspace that has brownfield context, `LoopExecutor` writes a `BrownfieldDelta` record:
+- `FoundPatterns`: relevant patterns from `CODEBASE_CONTEXT.md` for the issue's area.
+- `ApproachTaken`: `extend` | `replace` | `workaround` — extracted from the agent's `SUMMARY:` or explicit output field.
+- `Rationale`: the agent's stated reason for the chosen approach.
+- `ChangedFiles`: from R10.
+- Appended to a `.devteam/brownfield-delta.md` log that's human-readable and version-controlled.
+
+| Step | Detail |
+|---|---|
+| R12.1 | **Architect spike** — define the `BrownfieldDelta` schema. What's the minimum record that's useful for a future developer reading the log? Define the `approach_taken` vocabulary. |
+| R12.2 | Add `BrownfieldDelta` to agent response structured output — alongside `OUTCOME`/`SUMMARY`/`ISSUES`/`QUESTIONS`, agents in brownfield workspaces emit `APPROACH: extend\|replace\|workaround` and `RATIONALE:`. |
+| R12.3 | `ParsedAgentResponse` — parse `APPROACH` and `RATIONALE` fields. |
+| R12.4 | `LoopExecutor` — when `state.CodebaseContext` is non-empty, write a `BrownfieldDelta` record after each successful run using the parsed fields + R10 changed files. |
+| R12.5 | Persist the delta log to `.devteam/brownfield-delta.md` (append-only, human-readable, one entry per completed run). |
+| R12.6 | Add `/brownfield-log` shell command — renders a summarised view of the delta log in the progress panel. |
+| R12.7 | Update role prompts for `developer.md` and `architect.md` — when brownfield context is present, explicitly prompt for `APPROACH` and `RATIONALE` in their structured output. |
+| R12.8 | Unit tests: `ParsedAgentResponse` extracts `APPROACH`/`RATIONALE`; delta record is written only when `CodebaseContext` is non-empty; `/brownfield-log` renders correctly on a synthetic log. |
+
+**Estimated scope:** Medium — new output fields, parser changes, new log file, one shell command. Most complexity is in the role prompt updates and ensuring agents reliably emit the structured fields.
