@@ -4,7 +4,7 @@ public sealed class BudgetService : IBudgetService
 {
     private static readonly Random PoolRng = new();
 
-    public ModelDefinition SelectModelForRole(WorkspaceState state, string roleSlug)
+    public ModelDefinition SelectModelForRole(WorkspaceState state, string roleSlug, string? excludeFamily = null)
     {
         var policy = SeedData.GetPolicy(state, roleSlug);
         var defaultModel = state.Models.FirstOrDefault(model => model.IsDefault) ?? new ModelDefinition
@@ -29,7 +29,12 @@ public sealed class BudgetService : IBudgetService
                 .ToList();
             if (affordable.Count > 0)
             {
-                return affordable[PoolRng.Next(affordable.Count)]!;
+                // Prefer cross-family when excludeFamily is set
+                var crossFamily = excludeFamily is not null
+                    ? affordable.Where(m => !string.Equals(m!.EffectiveFamily, excludeFamily, StringComparison.OrdinalIgnoreCase)).ToList()
+                    : null;
+                var pool = crossFamily?.Count > 0 ? crossFamily : affordable;
+                return pool[PoolRng.Next(pool.Count)]!;
             }
         }
 
@@ -37,6 +42,22 @@ public sealed class BudgetService : IBudgetService
             ?? defaultModel;
         var fallback = state.Models.FirstOrDefault(model => string.Equals(model.Name, policy.FallbackModel, StringComparison.OrdinalIgnoreCase))
             ?? defaultModel;
+
+        // Prefer cross-family candidates when excludeFamily is set
+        if (excludeFamily is not null)
+        {
+            var crossCandidates = new[] { primary, fallback }
+                .Where(m => m.Cost > 0
+                    && !string.Equals(m.EffectiveFamily, excludeFamily, StringComparison.OrdinalIgnoreCase)
+                    && CanAffordModel(state, m)
+                    && (!m.IsPremium || policy.AllowPremium)
+                    && IsBudgetComfortable(m, budgetRatio))
+                .ToList();
+            if (crossCandidates.Count > 0)
+            {
+                return crossCandidates[0];
+            }
+        }
 
         if (CanAffordModel(state, primary)
             && (!primary.IsPremium || policy.AllowPremium)

@@ -458,7 +458,8 @@ public class DevTeamRuntime
         var queued = new List<QueuedRunInfo>();
         foreach (var issue in readyIssues)
         {
-            var model = _budgetService.SelectModelForRole(state, issue.RoleSlug);
+            var excludeFamily = GetExcludeFamilyForReview(state, issue);
+            var model = _budgetService.SelectModelForRole(state, issue.RoleSlug, excludeFamily);
             var run = new AgentRun
             {
                 Id = state.NextRunId++,
@@ -588,7 +589,8 @@ public class DevTeamRuntime
                 continue;
             }
 
-            var model = _budgetService.SelectModelForRole(state, issue.RoleSlug);
+            var excludeFamily = GetExcludeFamilyForReview(state, issue);
+            var model = _budgetService.SelectModelForRole(state, issue.RoleSlug, excludeFamily);
             var run = new AgentRun
             {
                 Id = state.NextRunId++,
@@ -613,6 +615,34 @@ public class DevTeamRuntime
         }
 
         return queued;
+    }
+
+    /// <summary>
+    /// For review-role issues, returns the AI provider family used by the most recent completed
+    /// run of any direct dependency issue. Returns null for non-review roles or when no completed
+    /// dependency run exists.
+    /// </summary>
+    private static string? GetExcludeFamilyForReview(WorkspaceState state, IssueItem issue)
+    {
+        if (!IsReviewRole(issue.RoleSlug)) return null;
+        if (issue.DependsOnIssueIds.Count == 0) return null;
+
+        var dependencyModelName = state.AgentRuns
+            .Where(run =>
+                issue.DependsOnIssueIds.Contains(run.IssueId) &&
+                run.Status == AgentRunStatus.Completed &&
+                !string.IsNullOrWhiteSpace(run.ModelName))
+            .OrderByDescending(run => run.UpdatedAtUtc)
+            .Select(run => run.ModelName)
+            .FirstOrDefault();
+
+        return dependencyModelName is null ? null : ModelDefinition.InferFamily(dependencyModelName);
+    }
+
+    private static bool IsReviewRole(string roleSlug)
+    {
+        var normalized = roleSlug.Trim().ToLowerInvariant();
+        return normalized is "reviewer" or "review" or "security" or "tester";
     }
 
     private DecisionRecord RememberDecision(
