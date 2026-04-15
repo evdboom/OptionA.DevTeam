@@ -9,6 +9,7 @@ const BUILD_TIMEOUT = 120_000;
 // Shared base args — only the --scenario value differs per describe block.
 const BASE_ARGS = [
   "run",
+  "--no-build",
   "--project",
   "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
   "--",

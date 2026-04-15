@@ -1,4 +1,4 @@
-//# hash=d203d801c2326992ff9f0f2935050f9f
+//# hash=707ee51f3451c18d715550519eff41c4
 //# sourceMappingURL=help-scroll.test.js.map
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
@@ -159,6 +159,7 @@ var HELP_COMMANDS = [
 ];
 var BASE_ARGS = [
     "run",
+    "--no-build",
     "--project",
     "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
     "--",

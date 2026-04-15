@@ -7,6 +7,7 @@ test.use({
     file: "dotnet",
     args: [
       "run",
+      "--no-build",
       "--project",
       "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
       "--",
@@ -141,6 +142,7 @@ test.describe("worktrees command (ui-harness)", () => {
       file: "dotnet",
       args: [
         "run",
+        "--no-build",
         "--project",
         "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
         "--",

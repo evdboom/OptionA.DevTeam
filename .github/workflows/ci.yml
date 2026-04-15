@@ -98,17 +98,13 @@ jobs:
           cache: npm
           cache-dependency-path: tests/DevTeam.TuiTests/package-lock.json
 
-      - name: Restore .NET
-        run: dotnet restore ./DevTeam.slnx
-
-      - name: Build .NET
-        run: dotnet build ./DevTeam.slnx --configuration Release --no-restore
-
       - name: Install tui-test dependencies
         run: npm ci
         working-directory: tests/DevTeam.TuiTests
 
       - name: Run TUI e2e tests
+        # npm pretest runs 'dotnet build' (restore + compile) before tui-test starts,
+        # so all --no-build test invocations share one build and run immediately.
         run: npm test
         working-directory: tests/DevTeam.TuiTests
         env:

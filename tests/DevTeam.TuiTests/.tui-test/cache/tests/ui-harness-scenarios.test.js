@@ -1,4 +1,4 @@
-//# hash=6a2dd25bf8d3e855457e1a4580cc5236
+//# hash=f3b364ca73a951d41d46c5e934f461c2
 //# sourceMappingURL=ui-harness-scenarios.test.js.map
 
 function _array_like_to_array(arr, len) {
@@ -162,6 +162,7 @@ var BUILD_TIMEOUT = 120000;
 // Shared base args — only the --scenario value differs per describe block.
 var BASE_ARGS = [
     "run",
+    "--no-build",
     "--project",
     "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
     "--",

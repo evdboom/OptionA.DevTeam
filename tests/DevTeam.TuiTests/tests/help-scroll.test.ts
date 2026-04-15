@@ -30,6 +30,7 @@ const HELP_COMMANDS = [
 
 const BASE_ARGS = [
   "run",
+  "--no-build",
   "--project",
   "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
   "--",

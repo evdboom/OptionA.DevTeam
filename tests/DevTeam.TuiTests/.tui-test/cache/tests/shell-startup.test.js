@@ -1,4 +1,4 @@
-//# hash=1025a6b9586fc61cadbe4fce522372c0
+//# hash=f5c9cde54c730812d582d2851099c70d
 //# sourceMappingURL=shell-startup.test.js.map
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
@@ -137,6 +137,7 @@ test.use({
         file: "dotnet",
         args: [
             "run",
+            "--no-build",
             "--project",
             "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
             "--",

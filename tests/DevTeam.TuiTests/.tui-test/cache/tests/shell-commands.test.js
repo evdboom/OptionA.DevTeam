@@ -1,4 +1,4 @@
-//# hash=e7f52e6cd96b0731f43568a61b910355
+//# hash=9e9ec479aab4f0d59a6a42a5796940de
 //# sourceMappingURL=shell-commands.test.js.map
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
@@ -136,6 +136,7 @@ test.use({
         file: "dotnet",
         args: [
             "run",
+            "--no-build",
             "--project",
             "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
             "--",
@@ -398,6 +399,7 @@ test.describe("worktrees command (ui-harness)", function() {
             file: "dotnet",
             args: [
                 "run",
+                "--no-build",
                 "--project",
                 "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
                 "--",

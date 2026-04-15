@@ -1,4 +1,4 @@
-//# hash=6f7456c235432655df4377b356ee47de
+//# hash=a3bc8ce982515329fd1523a9f29b95d4
 //# sourceMappingURL=tui-test.config.js.map
 
 import { defineConfig } from "@microsoft/tui-test";
@@ -8,6 +8,10 @@ export default defineConfig({
     // Capture traces so failures can be replayed with: npx @microsoft/tui-test show-trace
     trace: true,
     // Increase timeout for the help-scroll coverage test which scrolls through all commands.
-    // Most tests finish in ~6 s; the scroll test needs up to ~30 s.
-    timeout: 90000
+    // Most tests finish in ~6 s; the scroll test needs up to ~40 s.
+    // Tests use --no-build so the project must be pre-built (npm pretest runs dotnet build).
+    timeout: 90000,
+    // Cap workers so parallel dotnet processes don't overwhelm CI runners.
+    // dotnet run --no-build starts fast; 4 concurrent processes is a safe limit.
+    workers: 4
 });

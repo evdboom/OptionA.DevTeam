@@ -8,6 +8,7 @@ test.use({
     file: "dotnet",
     args: [
       "run",
+      "--no-build",
       "--project",
       "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
       "--",
