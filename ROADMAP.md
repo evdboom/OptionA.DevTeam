@@ -1,5 +1,25 @@
 # DevTeam Roadmap
 
+## Priority order
+
+Items below are ordered by execution priority. Each item builds on what came before.
+
+| Priority | Item | Scope | Rationale |
+|---|---|---|---|
+| 1 | **#8 — Navigator scout** | Medium | Proof-of-concept for the `spawn_agent` sub-session pattern. Required before item 10. |
+| 2 | **#10 — Orchestrator-driven loop** | Large | Foundational architectural change: the orchestrator owns what runs and in what order. Affects #14, #15, and all future loop behavior. Do this before adding more loop features. |
+| 3 | **#16 — Console cursor + multiline** | Small | Self-contained UX fix, no architectural coupling. Good to have before adding more interactive features. |
+| 4 | **#15 — Cross-family AI review** | Small-Medium | Small model-selection change. Gains more value once the orchestrator drives role assignment (item 10). |
+| 5 | **#14 — Git worktrees** | Large | Parallel conflict-safety. Orchestrator-driven parallelism (#10) should land first so the worktree lifecycle aligns with how batches are actually formed. |
+| 6 | **#12 — Brownfield init** | Medium | Reconnaissance for real existing codebases. Independent of items above. |
+| 7 | **#13 — Container/CI mode** | Medium | Deployment and automation path. Lower priority until core loop is solid. |
+| 8 | **#6 — GitHub mode** | Major | Issues/PRs as the work queue. Major feature; build after orchestrator loop stabilizes. |
+
+> Items 9 (hygiene conventions) and ATM fixes are **complete** as of April 2026.
+> Item 7b (Adventure mode) is deliberately deprioritized until core loop is solid.
+
+---
+
 ## 14 — Git worktree support for parallel agents
 
 **Goal:** When multiple agents run in parallel, each agent currently works in the same working directory. This causes silent file-level conflicts: two agents editing the same file produce only one agent's changes. Git worktrees give each parallel agent its own isolated branch + working directory, making parallel execution truly conflict-safe.

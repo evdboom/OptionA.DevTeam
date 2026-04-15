@@ -17,9 +17,11 @@ internal static class TestRunner
         var r6 = await RunSuiteAsync("SessionManagerTests", SessionManagerTests.GetTests());
         var r7 = await RunSuiteAsync("WorkspaceStoreTests", WorkspaceStoreTests.GetTests());
         var r8 = await RunSuiteAsync("FileSystemConfigurationLoaderTests", FileSystemConfigurationLoaderTests.GetTests());
+        var r9 = await RunSuiteAsync("LoopExecutorTests", LoopExecutorTests.GetTests());
+        var r10 = await RunSuiteAsync("WorkspaceMcpServerTests", WorkspaceMcpServerTests.GetTests());
 
-        var passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed + r7.Passed + r8.Passed;
-        var failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed + r7.Failed + r8.Failed;
+        var passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed + r7.Passed + r8.Passed + r9.Passed + r10.Passed;
+        var failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed + r7.Failed + r8.Failed + r9.Failed + r10.Failed;
 
         Console.WriteLine();
         Console.WriteLine($"Results: {passed} passed, {failed} failed");

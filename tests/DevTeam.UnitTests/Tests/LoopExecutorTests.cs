@@ -1,0 +1,116 @@
+namespace DevTeam.UnitTests.Tests;
+
+internal static class LoopExecutorTests
+{
+    public static IEnumerable<TestCase> GetTests() =>
+    [
+        new("SpawnIssueAsync_CompletesIssue_AndPersistsToStore", SpawnIssueAsync_CompletesIssue_AndPersistsToStore),
+        new("SpawnIssueAsync_ThrowsForUnknownIssue", SpawnIssueAsync_ThrowsForUnknownIssue),
+        new("SpawnIssueAsync_ReturnsOutcomeSummary", SpawnIssueAsync_ReturnsOutcomeSummary),
+        new("QueueIssues_SkipsAlreadyDoneIssue", QueueIssues_SkipsAlreadyDoneIssue),
+    ];
+
+    private static WorkspaceState BuildStateWithIssue(WorkspaceStore store, string title, string role = "developer")
+    {
+        var state = store.Initialize("C:\\test-repo", 100, 20);
+        var issue = new IssueItem
+        {
+            Id = state.NextIssueId++,
+            Title = title,
+            RoleSlug = role,
+            Status = ItemStatus.Open,
+            Priority = 50
+        };
+        state.Issues.Add(issue);
+        store.Save(state);
+        return state;
+    }
+
+    private static async Task SpawnIssueAsync_CompletesIssue_AndPersistsToStore()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Write unit tests");
+        var issueId = state.Issues[^1].Id;
+
+        var agentOutput = "OUTCOME: completed\nSUMMARY:\nTests written and passing.";
+        var factory = new FuncAgentClientFactory(_ => new FakeAgentClient(agentOutput));
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        await executor.SpawnIssueAsync(issueId, null, "fake", TimeSpan.FromSeconds(30), CancellationToken.None);
+
+        var reloaded = store.Load();
+        var issue = reloaded.Issues.First(i => i.Id == issueId);
+        Assert.That(issue.Status == ItemStatus.Done, $"Expected issue to be Done but was {issue.Status}");
+    }
+
+    private static async Task SpawnIssueAsync_ThrowsForUnknownIssue()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        store.Initialize("C:\\test-repo", 100, 20);
+
+        var factory = new FuncAgentClientFactory(_ => new FakeAgentClient("OUTCOME: completed\nSUMMARY:\nDone."));
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var threw = false;
+        try
+        {
+            await executor.SpawnIssueAsync(9999, null, "fake", TimeSpan.FromSeconds(30), CancellationToken.None);
+        }
+        catch (InvalidOperationException)
+        {
+            threw = true;
+        }
+
+        Assert.That(threw, "Expected InvalidOperationException for unknown issue ID");
+    }
+
+    private static async Task SpawnIssueAsync_ReturnsOutcomeSummary()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Implement feature X");
+        var issueId = state.Issues[^1].Id;
+
+        var agentOutput = "OUTCOME: completed\nSUMMARY:\nFeature X is done.";
+        var factory = new FuncAgentClientFactory(_ => new FakeAgentClient(agentOutput));
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var result = await executor.SpawnIssueAsync(issueId, null, "fake", TimeSpan.FromSeconds(30), CancellationToken.None);
+
+        Assert.That(result.Contains("completed", StringComparison.OrdinalIgnoreCase), $"Expected 'completed' in result but got: {result}");
+        Assert.That(result.Contains(issueId.ToString(), StringComparison.Ordinal), $"Expected issue ID in result but got: {result}");
+    }
+
+    private static Task QueueIssues_SkipsAlreadyDoneIssue()
+    {
+        // Simulate: orchestrator used spawn_agent to complete an issue before QueueExecutionSelection is called.
+        var runtime = new DevTeamRuntime();
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = store.Initialize("C:\\test-repo", 100, 20);
+
+        var issue = new IssueItem
+        {
+            Id = state.NextIssueId++,
+            Title = "Already handled by spawn_agent",
+            RoleSlug = "developer",
+            Status = ItemStatus.Done,   // already completed via spawn_agent
+            Priority = 50
+        };
+        state.Issues.Add(issue);
+        state.ExecutionSelection = new ExecutionSelectionState
+        {
+            SelectedIssueIds = [issue.Id],
+            Rationale = "test"
+        };
+        store.Save(state);
+
+        var result = runtime.QueueExecutionSelection(state);
+
+        Assert.That(result.QueuedRuns.Count == 0, $"Expected 0 queued runs (issue already Done) but got {result.QueuedRuns.Count}");
+        Assert.That(issue.Status == ItemStatus.Done, $"Expected issue to remain Done but was {issue.Status}");
+        return Task.CompletedTask;
+    }
+}

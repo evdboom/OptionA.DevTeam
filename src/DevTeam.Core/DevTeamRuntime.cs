@@ -582,6 +582,12 @@ public class DevTeamRuntime
         var queued = new List<QueuedRunInfo>();
         foreach (var issue in issues)
         {
+            // Skip issues already handled (e.g. completed inline via spawn_agent during orchestrator session).
+            if (issue.Status != ItemStatus.Open)
+            {
+                continue;
+            }
+
             var model = _budgetService.SelectModelForRole(state, issue.RoleSlug);
             var run = new AgentRun
             {

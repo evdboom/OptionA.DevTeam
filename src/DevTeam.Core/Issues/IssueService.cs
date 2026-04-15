@@ -351,7 +351,8 @@ public sealed class IssueService : IIssueService
             }
         }
 
-        resolvedRoleSlug = "developer";
+        // When no roles are loaded, trust the slug as-is rather than silently falling back to "developer".
+        resolvedRoleSlug = state.Roles.Count == 0 ? normalized : "developer";
         return false;
     }
 
