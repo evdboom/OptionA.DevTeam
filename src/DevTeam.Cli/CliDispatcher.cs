@@ -104,6 +104,22 @@ internal sealed class CliDispatcher
                 {
                     _output.WriteLine($"Active goal saved: {goal}");
                 }
+
+                var isNonEmptyRepo = Directory.EnumerateFileSystemEntries(Environment.CurrentDirectory)
+                    .Any(f => !Path.GetFileName(f).StartsWith('.'));
+                var runRecon = GetBoolOption(options, "recon", isNonEmptyRepo);
+                if (runRecon)
+                {
+                    var backend = GetOption(options, "backend") ?? "sdk";
+                    var timeout = TimeSpan.FromSeconds(GetIntOption(options, "timeout-seconds", 120));
+                    _output.WriteLine("Running codebase reconnaissance...");
+                    var recon = new ReconService(new DefaultAgentClientFactory());
+                    var context = await recon.RunAsync(state, _store, backend, timeout, CancellationToken.None);
+                    if (!string.IsNullOrWhiteSpace(context))
+                    {
+                        _output.WriteLine("Codebase context written to .devteam/codebase-context.md");
+                    }
+                }
                 return 0;
             }
 

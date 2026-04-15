@@ -239,7 +239,7 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("DevTeam CLI");
         Console.WriteLine("Commands (plain or slash-prefixed, for example `/init`):");
         Console.WriteLine("  start [--keep-awake true|false] [--workspace PATH]");
-        Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false]");
+        Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false] [--recon true|false] [--backend sdk|cli] [--timeout-seconds N]");
         Console.WriteLine("  customize [--force]                Copy default roles, modes, and superpowers to .devteam-source/ for editing");
         Console.WriteLine("  bug-report [--save PATH] [--redact-paths true|false] [--history-count N] [--error-count N] [--workspace PATH]");
         Console.WriteLine("  set-goal <TEXT> [--goal-file PATH] [--workspace PATH]");

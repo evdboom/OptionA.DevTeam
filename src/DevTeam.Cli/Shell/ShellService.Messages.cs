@@ -37,6 +37,7 @@ internal sealed partial class ShellService
         sb.AppendLine("  [cyan]/max-iterations[/] <N>   [dim]Set workspace default max iterations per loop[/]");
         sb.AppendLine("  [cyan]/max-subagents[/] <N>    [dim]Set workspace default max subagents (1=sequential, 2–4=parallel)[/]");
         sb.AppendLine("  [cyan]/worktrees[/] <on|off>   [dim]Enable/disable git worktree isolation for parallel runs[/]");
+        sb.AppendLine("  [cyan]/recon[/] [[--backend B]] [[--timeout-seconds N]]  [dim]Re-run codebase reconnaissance and update context[/]");
         sb.AppendLine("  [cyan]/run[/] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]]  [dim]Start the loop in the background[/]");
         sb.AppendLine("  [cyan]/stop[/]                 [dim]Cancel the running loop[/]");
         sb.AppendLine("  [cyan]/wait[/]                 [dim]Re-attach to the running loop and wait for it to finish[/]");

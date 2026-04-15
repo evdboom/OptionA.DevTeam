@@ -78,7 +78,7 @@ public static class AgentPromptBuilder
 
         Mode guardrails:
         {(activeMode?.Body.Trim() ?? "(none)")}
-
+        {BuildCodebaseContextBlock(state, issue.RoleSlug)}
         Current issue:
         - Id: {issue.Id}
         - Title: {issue.Title}
@@ -459,6 +459,25 @@ public static class AgentPromptBuilder
         return string.Join("\n", lines);
     }
 
+    private static readonly HashSet<string> ContextAwareRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "planner", "architect", "orchestrator", "navigator", "developer",
+        "backend-developer", "frontend-developer", "fullstack-developer"
+    };
+
+    private static string BuildCodebaseContextBlock(WorkspaceState state, string roleSlug)
+    {
+        if (string.IsNullOrWhiteSpace(state.CodebaseContext)) return "";
+        if (!ContextAwareRoles.Contains(roleSlug)) return "";
+
+        return $"""
+
+
+        Codebase context (produced by automatic reconnaissance — treat as factual):
+        {state.CodebaseContext.Trim()}
+
+        """;
+    }
     private static IReadOnlyList<ProposedQuestion> ParseQuestions(string[] lines, int questionsIndex)
     {
         if (questionsIndex < 0)

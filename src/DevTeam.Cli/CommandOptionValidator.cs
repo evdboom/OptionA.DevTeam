@@ -130,7 +130,7 @@ internal static class CommandOptionValidator
             ["check-update"] = CreateOptionSet(sharedOptions: globalOptions),
             ["update"] = CreateOptionSet(sharedOptions: globalOptions),
             ["workspace-mcp"] = CreateOptionSet(sharedOptions: globalOptions),
-            ["init"] = CreateOptionSet(sharedOptions: globalOptions, "force", "goal", "goal-file", "mode", "keep-awake", "total-credit-cap", "premium-credit-cap", "workspace-mcp", "pipeline-scheduling", "auto-approve"),
+            ["init"] = CreateOptionSet(sharedOptions: globalOptions, "force", "goal", "goal-file", "mode", "keep-awake", "total-credit-cap", "premium-credit-cap", "workspace-mcp", "pipeline-scheduling", "auto-approve", "recon", "backend", "timeout-seconds"),
             ["customize"] = CreateOptionSet(sharedOptions: globalOptions, "force"),
             ["bug"] = CreateOptionSet(sharedOptions: globalOptions, "save", "redact-paths", "history-count", "error-count"),
             ["bug-report"] = CreateOptionSet(sharedOptions: globalOptions, "save", "redact-paths", "history-count", "error-count"),
@@ -173,7 +173,7 @@ internal static class CommandOptionValidator
             ["customize"] = CreateOptionSet("force"),
             ["bug"] = CreateOptionSet("save", "redact-paths", "history-count", "error-count"),
             ["bug-report"] = CreateOptionSet("save", "redact-paths", "history-count", "error-count"),
-            ["init"] = CreateOptionSet("force", "goal", "goal-file", "mode", "keep-awake", "total-credit-cap", "premium-credit-cap", "workspace-mcp", "pipeline-scheduling"),
+            ["init"] = CreateOptionSet("force", "goal", "goal-file", "mode", "keep-awake", "total-credit-cap", "premium-credit-cap", "workspace-mcp", "pipeline-scheduling", "recon", "backend", "timeout-seconds"),
             ["status"] = CreateOptionSet(),
             ["add-issue"] = CreateOptionSet("role", "area", "detail", "priority", "roadmap-item-id", "depends-on"),
             ["questions"] = CreateOptionSet(),
@@ -196,7 +196,9 @@ internal static class CommandOptionValidator
             ["run-once"] = CreateOptionSet("max-subagents"),
             ["stop"] = CreateOptionSet(),
             ["wait"] = CreateOptionSet(),
-            ["budget"] = CreateOptionSet("total", "premium")
+            ["budget"] = CreateOptionSet("total", "premium"),
+            ["recon"] = CreateOptionSet("backend", "timeout-seconds"),
+            ["worktrees"] = CreateOptionSet()
         };
 
     private static HashSet<string> CreateOptionSet(params string[] commandOptions) =>

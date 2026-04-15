@@ -106,6 +106,7 @@ public class WorkspaceStore
             AtomicWriteAllText(StatePath, JsonSerializer.Serialize(CreateManifest(state), JsonOptions));
             WriteIssueBoard(state);
             WriteQuestionsFile(state);
+            WriteCodebaseContextFile(state);
             return 0;
         });
     }
@@ -268,6 +269,13 @@ public class WorkspaceStore
         }
 
         AtomicWriteAllText(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
+    }
+
+    private void WriteCodebaseContextFile(WorkspaceState state)
+    {
+        if (string.IsNullOrWhiteSpace(state.CodebaseContext)) return;
+        var path = Path.Combine(WorkspacePath, "codebase-context.md");
+        AtomicWriteAllText(path, state.CodebaseContext.Trim() + Environment.NewLine);
     }
 
     private void WriteIssueBoard(WorkspaceState state)

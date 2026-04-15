@@ -728,6 +728,47 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "recon":
+                {
+                    TryLoadState(out var current);
+                    if (current is null)
+                    {
+                        AddWarning("No workspace loaded — run /init first.");
+                        break;
+                    }
+                    if (IsLoopRunning)
+                    {
+                        AddWarning("A loop is running. Use /stop first before running recon.");
+                        break;
+                    }
+                    var backend = GetOption(options, "backend") ?? "sdk";
+                    var timeout = TimeSpan.FromSeconds(GetIntOption(options, "timeout-seconds", 120));
+                    AddLine("Running codebase reconnaissance... (this may take a moment)");
+                    var reconTask = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var recon = new ReconService(new DefaultAgentClientFactory());
+                            var context = await recon.RunAsync(current, _store, backend, timeout, CancellationToken.None);
+                            if (!string.IsNullOrWhiteSpace(context))
+                            {
+                                AddSuccess("Codebase context updated and saved to .devteam/codebase-context.md");
+                            }
+                            else
+                            {
+                                AddWarning("Recon completed but returned empty context.");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            AddError($"Recon failed: {ex.Message}");
+                        }
+                        NotifyStateChanged();
+                    });
+                    _ = reconTask;
+                    break;
+                }
+
                 default:
                 {
                     _diagnostics.RecordError($"Unknown command: {tokens[0]}");
