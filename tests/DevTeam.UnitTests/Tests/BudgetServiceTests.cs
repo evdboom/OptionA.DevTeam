@@ -8,7 +8,10 @@ internal static class BudgetServiceTests
         new("SelectModel_ReturnsFromPool_WhenAffordable", SelectModel_ReturnsFromPool_WhenAffordable),
         new("SelectModel_ReturnsFallback_WhenPrimaryUnaffordable", SelectModel_ReturnsFallback_WhenPrimaryUnaffordable),
         new("CanAffordModel_ReturnsFalse_WhenOverBudget", CanAffordModel_ReturnsFalse_WhenOverBudget),
+        new("CanAffordModel_ReturnsFalse_WhenBudgetExhausted", CanAffordModel_ReturnsFalse_WhenBudgetExhausted),
+        new("CanAffordModel_ReturnsTrue_WhenExactlyEnoughBudget", CanAffordModel_ReturnsTrue_WhenExactlyEnoughBudget),
         new("CommitCredits_IncreasesBudgetUsed", CommitCredits_IncreasesBudgetUsed),
+        new("CommitCredits_AccumulatesAcrossMultipleCalls", CommitCredits_AccumulatesAcrossMultipleCalls),
     ];
 
     // "user" role policy has no model pool, primary="gpt-5-mini", fallback="gpt-5-mini"
@@ -99,6 +102,56 @@ internal static class BudgetServiceTests
 
         Assert.That(state.Budget.CreditsCommitted == 2,
             $"Expected CreditsCommitted=2 but got {state.Budget.CreditsCommitted}");
+        return Task.CompletedTask;
+    }
+
+    private static Task CanAffordModel_ReturnsFalse_WhenBudgetExhausted()
+    {
+        var svc = new BudgetService();
+        var state = new WorkspaceState
+        {
+            Budget = new BudgetState { TotalCreditCap = 5, CreditsCommitted = 5 }
+        };
+        // Budget exactly at cap; any positive-cost model must be rejected
+        var model = new ModelDefinition { Name = "any-model", Cost = 1 };
+
+        var result = svc.CanAffordModel(state, model);
+
+        Assert.That(!result, "Expected CanAffordModel to return false when budget is exactly at cap and model has positive cost");
+        return Task.CompletedTask;
+    }
+
+    private static Task CanAffordModel_ReturnsTrue_WhenExactlyEnoughBudget()
+    {
+        var svc = new BudgetService();
+        var state = new WorkspaceState
+        {
+            Budget = new BudgetState { TotalCreditCap = 10, CreditsCommitted = 8 }
+        };
+        // remaining = 2, cost = 2 → totalAfter = 10 == cap → should be affordable (not strictly over)
+        var model = new ModelDefinition { Name = "exact-model", Cost = 2 };
+
+        var result = svc.CanAffordModel(state, model);
+
+        Assert.That(result, "Expected CanAffordModel to return true when committed + cost == cap exactly");
+        return Task.CompletedTask;
+    }
+
+    private static Task CommitCredits_AccumulatesAcrossMultipleCalls()
+    {
+        var svc = new BudgetService();
+        var state = new WorkspaceState
+        {
+            Budget = new BudgetState { TotalCreditCap = 25, CreditsCommitted = 0 }
+        };
+        var model = new ModelDefinition { Name = "gpt-5.4", Cost = 1 };
+
+        svc.CommitCredits(state, model);
+        svc.CommitCredits(state, model);
+        svc.CommitCredits(state, model);
+
+        Assert.That(state.Budget.CreditsCommitted == 3,
+            $"Expected CreditsCommitted=3 after 3 commits but got {state.Budget.CreditsCommitted}");
         return Task.CompletedTask;
     }
 }

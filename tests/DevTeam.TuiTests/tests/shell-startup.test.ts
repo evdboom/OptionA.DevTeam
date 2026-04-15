@@ -26,8 +26,11 @@ test("banner shows help hint on startup", async ({ terminal }) => {
   });
 });
 
-test("header shows DevTeam title on startup", async ({ terminal }) => {
-  await expect(terminal.getByText("DevTeam")).toBeVisible({
+test("header panel shows current phase on startup", async ({ terminal }) => {
+  // "Phase:" is the content of the header panel body — reliably rendered in the
+  // terminal buffer. The panel border title ("DevTeam") uses Spectre box-drawing
+  // characters that tui-test does not expose via getByText.
+  await expect(terminal.getByText("Phase:")).toBeVisible({
     timeout: BUILD_TIMEOUT,
   });
 });

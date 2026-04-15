@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading.Channels;
 using DevTeam.Core;
 using Spectre.Console;
 
@@ -39,6 +40,9 @@ internal static class SpectreShellHost
         if (useAltScreen)
             Console.Write("\x1b[?1049h"); // enter alternate screen
 
+        var commandChannel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+        var consumerTask = ConsumeCommandsAsync(commandChannel.Reader, shell, cancellationToken);
+
         try
         {
             // Build the Layout tree ONCE. Reuse the same instance and only
@@ -55,7 +59,7 @@ internal static class SpectreShellHost
                 {
                     while (!cancellationToken.IsCancellationRequested)
                     {
-                        ReadInput(inputBuffer, shell, ref historyCursor, ref savedDraft, ref scrollOffset);
+                        ReadInput(inputBuffer, shell, commandChannel.Writer, ref historyCursor, ref savedDraft, ref scrollOffset);
                         UpdateLayout(layout, shell, inputBuffer.ToString(), scrollOffset);
                         context.UpdateTarget(layout);
 
@@ -66,8 +70,29 @@ internal static class SpectreShellHost
         }
         finally
         {
+            commandChannel.Writer.Complete();
+            await consumerTask;
             if (useAltScreen)
                 Console.Write("\x1b[?1049l"); // restore original screen
+        }
+    }
+
+    private static async Task ConsumeCommandsAsync(ChannelReader<string> reader, ShellService shell, CancellationToken cancellationToken)
+    {
+        await foreach (var command in reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        {
+            try
+            {
+                await shell.ProcessInputAsync(command).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                shell.AddError($"Command failed: {ex.Message}");
+            }
         }
     }
 
@@ -124,7 +149,7 @@ internal static class SpectreShellHost
 
     // ── Input handling ─────────────────────────────────────────────────────────
 
-    private static void ReadInput(StringBuilder inputBuffer, ShellService shell, ref int historyCursor, ref string savedDraft, ref int scrollOffset)
+    private static void ReadInput(StringBuilder inputBuffer, ShellService shell, ChannelWriter<string> commandWriter, ref int historyCursor, ref string savedDraft, ref int scrollOffset)
     {
         if (Console.IsInputRedirected) return;
 
@@ -180,7 +205,7 @@ internal static class SpectreShellHost
                 historyCursor = -1;
                 savedDraft = string.Empty;
                 if (!string.IsNullOrWhiteSpace(command))
-                    _ = Task.Run(() => shell.ProcessInputAsync(command));
+                    commandWriter.TryWrite(command);
                 continue;
             }
 
@@ -248,13 +273,16 @@ internal static class SpectreShellHost
     }
 
     /// <summary>
-    /// One page = the visible content rows in the progress panel (budget minus 2 hint rows).
-    /// Computed dynamically so it matches the actual rendered viewport height.
+    /// One page = half the visible content rows in the progress panel.
+    /// Using half (rather than full ContentRowCount) guarantees consecutive page positions
+    /// overlap in flat-line space even when many lines wrap to 2–3 terminal rows each —
+    /// without overlap, wrapped-line content at panel-chunk boundaries would be unreachable.
+    /// Minimum of 3 prevents degenerate step size at very small terminals.
     /// </summary>
     private static int PageStep()
     {
         var th = Console.IsOutputRedirected ? ShellPanelBuilder.FallbackTerminalHeight : Math.Max(20, Console.WindowHeight);
-        return ShellPanelBuilder.ContentRowCount(th);
+        return Math.Max(3, ShellPanelBuilder.ContentRowCount(th) / 2);
     }
 
     /// <summary>

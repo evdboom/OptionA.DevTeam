@@ -28,96 +28,124 @@ const HELP_COMMANDS = [
   "@role",
 ];
 
-// Use a realistic terminal size: 120 cols × 40 rows.
-// The Progress panel is 120 - 60 - 4 = 56 chars wide, which causes long help lines to
-// wrap to 2-3 rows each — exactly the scenario that exposed the MaxScrollOffset bug.
-test.use({
-  program: {
-    file: "dotnet",
-    args: [
-      "run",
-      "--project",
-      "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
-      "--",
-      "start",
-      "--workspace",
-      ".devteam-tui-test",
-    ],
-  },
-  rows: 40,
-  columns: 120,
-});
+const BASE_ARGS = [
+  "run",
+  "--project",
+  "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
+  "--",
+  "start",
+  "--workspace",
+  ".devteam-tui-test",
+];
 
-test("all /help commands are visible after scrolling", async ({ terminal }) => {
-  // The shell compiles and starts; wait for the banner hint that signals it is ready.
-  // Generous timeout — first run needs dotnet to restore and build.
-  await expect(terminal.getByText("help for commands")).toBeVisible({
-    timeout: 120_000,
+// ── Test 1: Home key reaches oldest content (40×120) ────────────────────────
+// Uses a realistic terminal size where long help lines wrap to 2-3 rows each.
+// This is the scenario that exposed the MaxScrollOffset bug — without the fix,
+// the Home key caps too early and /init is never reachable.
+test.describe("help scroll — MaxScrollOffset fix (40×120)", () => {
+  test.use({
+    program: { file: "dotnet", args: BASE_ARGS },
+    rows: 40,
+    columns: 120,
   });
 
-  // Submit /help.
-  terminal.submit("/help");
+  test("all /help commands are visible after scrolling", async ({
+    terminal,
+  }) => {
+    await expect(terminal.getByText("help for commands")).toBeVisible({
+      timeout: 120_000,
+    });
 
-  // The newest part of the help (bottom) should be immediately visible.
-  await expect(terminal.getByText("@role")).toBeVisible();
+    terminal.submit("/help");
+    await expect(terminal.getByText("@role")).toBeVisible();
 
-  // Jump to the oldest content — this is the key assertion that verifies the
-  // MaxScrollOffset fix: without it, the Home key caps too early and /init never appears.
-  terminal.keyPress(Key.Home);
+    // Jump to oldest content — the key assertion: without the MaxScrollOffset fix
+    // the Home key caps too early and /init never appears.
+    terminal.keyPress(Key.Home);
 
-  // Every command from the top of the help must now be on-screen.
-  for (const cmd of HELP_COMMANDS.slice(0, 6)) {
-    await expect(terminal.getByText(cmd)).toBeVisible();
-  }
-
-  // Return to follow-latest mode and verify bottom commands are visible again.
-  terminal.keyPress(Key.End);
-  await expect(terminal.getByText("@role")).toBeVisible();
-});
-
-test("scrolling through /help reveals all commands", async ({ terminal }) => {
-  await expect(terminal.getByText("help for commands")).toBeVisible({
-    timeout: 120_000,
-  });
-
-  terminal.submit("/help");
-  await expect(terminal.getByText("@role")).toBeVisible();
-
-  // Verify every command is visible somewhere in the scroll range.
-  // Strategy: jump to top, then page down collecting visible commands.
-  terminal.keyPress(Key.Home);
-
-  const visible = new Set<string>();
-
-  // Collect what is on screen at the top.
-  for (const cmd of HELP_COMMANDS) {
-    try {
-      await expect(terminal.getByText(cmd)).toBeVisible({ timeout: 500 });
-      visible.add(cmd);
-    } catch {
-      // not visible at this scroll position — will check after paging down
+    for (const cmd of HELP_COMMANDS.slice(0, 6)) {
+      // Use strict:false — some commands (e.g. /init) also appear in the
+      // "No workspace found. Use /init..." startup message, causing a strict-mode
+      // violation if we require exactly one match.
+      await expect(terminal.getByText(cmd, { strict: false })).toBeVisible();
     }
-  }
 
-  // Page down until we reach the bottom (End key), collecting as we go.
-  for (let pages = 0; pages < 5; pages++) {
-    terminal.keyPress(Key.PageDown);
-    for (const cmd of HELP_COMMANDS) {
-      if (visible.has(cmd)) continue;
-      try {
-        await expect(terminal.getByText(cmd)).toBeVisible({ timeout: 500 });
-        visible.add(cmd);
-      } catch {
-        // not visible yet
+    terminal.keyPress(Key.End);
+    await expect(terminal.getByText("@role")).toBeVisible();
+  });
+});
+
+// ── Test 2: Full coverage via PgUp (30×120) ──────────────────────────────────
+// At 40 rows: PageStep(25) > MaxScrollOffset(19) — one PgUp jumps directly to
+// the top, leaving lines at the chunk boundary (like /update, /max-iterations)
+// in an unreachable gap. At 30 rows: PageStep(15) < MaxScrollOffset(26), so
+// three positions (bottom → middle → top) cover the entire help content.
+test.describe("help scroll — full command coverage (30×120)", () => {
+  test.use({
+    program: { file: "dotnet", args: BASE_ARGS },
+    rows: 30,
+    columns: 120,
+  });
+
+  test("scrolling through /help reveals all commands", async ({ terminal }) => {
+    await expect(terminal.getByText("help for commands")).toBeVisible({
+      timeout: 120_000,
+    });
+
+    terminal.submit("/help");
+    await expect(terminal.getByText("@role")).toBeVisible();
+    // Allow an extra render cycle after the /help response before scrolling.
+    await new Promise((r) => setTimeout(r, 300));
+
+    const visible = new Set<string>();
+
+    // Check all commands at the current scroll position.
+    // Uses a 500 ms timeout so tui-test has time to poll the rendered rows.
+    // Already-found commands are skipped so later iterations are fast.
+    const collectVisible = async () => {
+      for (const cmd of HELP_COMMANDS) {
+        if (visible.has(cmd)) continue;
+        try {
+          // Use strict:false — /init also appears in the startup message
+          // "No workspace found. Use /init…" so it has 2 matches when visible.
+          await expect(terminal.getByText(cmd, { strict: false })).toBeVisible({
+            timeout: 500,
+          });
+          visible.add(cmd);
+        } catch {
+          // not visible at this scroll position — will try again after next PgUp
+        }
       }
-    }
-    if (visible.size === HELP_COMMANDS.length) break;
-  }
+    };
 
-  const missing = HELP_COMMANDS.filter((c) => !visible.has(c));
-  if (missing.length > 0) {
-    throw new Error(
-      `The following /help commands were never visible while scrolling: ${missing.join(", ")}`
-    );
-  }
+    // Position 1: bottom (scrollOffset=0) — shows latest content.
+    await collectVisible();
+
+    // Scroll up in steps. PageStep = ContentRowCount/2 ≈ 7-12 depending on terminal
+    // height. 6 presses are enough to reach MaxScrollOffset from any starting offset.
+    for (let i = 0; i < 6; i++) {
+      terminal.keyPress(Key.PageUp);
+      // Wait for the TUI to render the new scroll position (RefreshMs = 100 ms).
+      await new Promise((r) => setTimeout(r, 300));
+      await collectVisible();
+    }
+
+    // Use Home key as a safety net — guarantees we're at MaxScrollOffset
+    // and the very oldest content (/init and first commands) is in view.
+    terminal.keyPress(Key.Home);
+    await new Promise((r) => setTimeout(r, 300));
+    await collectVisible();
+
+    const missing = HELP_COMMANDS.filter((c) => !visible.has(c));
+    if (missing.length > 0) {
+      const buf = terminal
+        .getViewableBuffer()
+        .map((row) => row.join("").trimEnd())
+        .join("\n");
+      throw new Error(
+        `The following /help commands were never visible while scrolling: ${missing.join(", ")}\n\nLast terminal frame:\n---\n${buf}\n---`
+      );
+    }
+  });
 });
+

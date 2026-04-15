@@ -20,6 +20,7 @@ internal sealed partial class ShellService : IDisposable
     private readonly ToolUpdateService _toolUpdateService;
     private readonly ShellStartOptions _startOptions;
     private readonly Action _requestExit;
+    private readonly ISystemClock _clock;
     private readonly ShellSessionDiagnostics _diagnostics = new();
     private readonly KeepAwakeController _keepAwake = new();
 
@@ -67,7 +68,8 @@ internal sealed partial class ShellService : IDisposable
         LoopExecutor loopExecutor,
         ToolUpdateService toolUpdateService,
         ShellStartOptions startOptions,
-        Action requestExit)
+        Action requestExit,
+        ISystemClock? clock = null)
     {
         _store = store;
         _runtime = runtime;
@@ -75,6 +77,7 @@ internal sealed partial class ShellService : IDisposable
         _toolUpdateService = toolUpdateService;
         _startOptions = startOptions;
         _requestExit = requestExit;
+        _clock = clock ?? new SystemClock();
     }
 
     // ── Initialization ─────────────────────────────────────────────────────────

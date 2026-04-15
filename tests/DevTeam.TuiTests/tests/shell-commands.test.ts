@@ -26,9 +26,16 @@ test("unknown command shows error with /help hint", async ({ terminal }) => {
 
   terminal.submit("/xyzzy-not-a-real-command");
 
-  await expect(terminal.getByText("Unknown command")).toBeVisible();
-  // The error line should point users back to /help
-  await expect(terminal.getByText("/help")).toBeVisible();
+  // "Unknown command" appears in the error line. Allow time for the async
+  // command processor (Task.Run in SpectreShellHost) to complete and re-render.
+  await expect(terminal.getByText("Unknown command")).toBeVisible({
+    timeout: 10_000,
+  });
+  // "Type /help." is unique to the error message (unlike "/help" which also
+  // appears in the startup banner "· /help for commands ·").
+  await expect(terminal.getByText("Type /help.")).toBeVisible({
+    timeout: 5_000,
+  });
 });
 
 test("history shows previously submitted commands", async ({ terminal }) => {
@@ -55,8 +62,13 @@ test("bug command produces a report in the progress panel", async ({
 
   terminal.submit("/bug");
 
-  // Bug report always contains a "Version" section header
-  await expect(terminal.getByText("Version")).toBeVisible();
+  // The bug report is added as a panel titled "bug report".
+  // Its separator line "── bug report ──" is rendered in the progress panel.
+  // The report content is long and ## Environment is near the top (scrolled off at
+  // follow-latest); instead verify the last section header which stays in the viewport.
+  await expect(terminal.getByText("Recent agent runs")).toBeVisible({
+    timeout: 15_000,
+  });
 });
 
 test("exit command terminates the shell", async ({ terminal }) => {

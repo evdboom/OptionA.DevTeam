@@ -66,3 +66,24 @@ These apply to all production code in `src\` and to tests in `tests\`. Testabili
 - **Unit test file size.** Apply the same ~400-line limit to test files. One test class per file. When a test class grows large, extract nested test classes or split by scenario group into separate files.
 - **One assert per concept.** Each test method should verify one logical outcome. Prefer multiple focused tests over one test with many unrelated assertions.
 - **Smoke tests are the regression guard, not the only guard.** Smoke tests cover the happy-path end-to-end flow. Unit tests cover edge cases, error paths, boundary conditions, and concurrency scenarios. Do not rely solely on smoke tests as evidence of correctness.
+
+## ATM prime directive
+
+Every codebase DevTeam builds or modifies must be **Auditable, Testable, and Maintainable (ATM)**. This is the prime directive for all agent output — it applies to this repo *and* to any target repo an agent works on.
+
+**Auditable** — every significant action leaves a trace:
+- Commands that fail must surface errors visibly. Never swallow exceptions silently (`catch {}`, `_ = Task.Run(...)`, discarded `Task` results).
+- State mutations must be logged or written to an artifact so the cause of any workspace state can be reconstructed.
+- Use awaited tasks or queued consumers, not fire-and-forget, so failures are always observable.
+
+**Testable** — every class can be tested in isolation:
+- No `File.*`, `Directory.*`, `Process.Start`, or `Console.*` in core/domain logic. Inject `IFileSystem`, `IGitRepository`, or equivalent interfaces.
+- No `DateTime.Now` / `DateTimeOffset.UtcNow` in core logic. Inject `ISystemClock`; tests control time through a fake.
+- No hidden static dependencies. All collaborators via constructor injection.
+- Tests must assert on *state and values*, not just *existence*. Verify field values and state transitions, not merely that a count is non-zero.
+- Cover error paths and boundary conditions, not only the happy path.
+
+**Maintainable** — any developer can understand and extend the code:
+- Files ≤ ~400 lines, one concern per file.
+- Constructor injection throughout. No `new` for non-trivial collaborators in business logic.
+- Follow the style patterns already established in the target codebase. Don't introduce new patterns without justification.

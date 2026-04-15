@@ -7,13 +7,15 @@ public class LoopExecutor(
     WorkspaceStore store,
     IAgentClientFactory? agentClientFactory = null,
     IGitRepository? gitRepository = null,
-    ISystemClock? clock = null)
+    ISystemClock? clock = null,
+    IFileSystem? fileSystem = null)
 {
     private readonly DevTeamRuntime _runtime = runtime;
     private readonly WorkspaceStore _store = store;
     private readonly IAgentClientFactory _agentClientFactory = agentClientFactory ?? new DefaultAgentClientFactory();
     private readonly IGitRepository _git = gitRepository ?? new ProcessGitRepository();
     private readonly ISystemClock _clock = clock ?? new SystemClock();
+    private readonly IFileSystem _fileSystem = fileSystem ?? new PhysicalFileSystem();
 
     public async Task<LoopExecutionReport> RunAsync(
         WorkspaceState state,
@@ -349,7 +351,7 @@ public class LoopExecutor(
         }
     }
 
-    private static void WriteRunArtifact(
+    private void WriteRunArtifact(
         string workspacePath,
         QueuedRunInfo queuedRun,
         AgentRun persistedRun,
@@ -358,7 +360,7 @@ public class LoopExecutor(
         string summary)
     {
         var runsDir = Path.Combine(workspacePath, "runs");
-        Directory.CreateDirectory(runsDir);
+        _fileSystem.CreateDirectory(runsDir);
         var path = Path.Combine(runsDir, $"run-{queuedRun.RunId:000}.md");
         var content = $"""
         # Run {queuedRun.RunId}
@@ -391,13 +393,13 @@ public class LoopExecutor(
 
         {response.StdErr}
         """;
-        File.WriteAllText(path, content);
+        _fileSystem.WriteAllText(path, content);
     }
 
-    private static void WriteDecisionArtifact(string workspacePath, DecisionRecord decision)
+    private void WriteDecisionArtifact(string workspacePath, DecisionRecord decision)
     {
         var decisionsDir = Path.Combine(workspacePath, "decisions");
-        Directory.CreateDirectory(decisionsDir);
+        _fileSystem.CreateDirectory(decisionsDir);
         var path = Path.Combine(decisionsDir, $"decision-{decision.Id:000}.md");
         var content = $"""
         # Decision {decision.Id}
@@ -416,10 +418,10 @@ public class LoopExecutor(
 
         {decision.Detail}
         """;
-        File.WriteAllText(path, content);
+        _fileSystem.WriteAllText(path, content);
     }
 
-    private static void WritePlanArtifact(string workspacePath, WorkspaceState state, string summary, string header = "Current plan")
+    private void WritePlanArtifact(string workspacePath, WorkspaceState state, string summary, string header = "Current plan")
     {
         var path = Path.Combine(workspacePath, "plan.md");
         var pendingIssues = state.Issues
@@ -465,7 +467,7 @@ public class LoopExecutor(
         Approve this plan with:
         `devteam /approve --workspace {Path.GetFileName(workspacePath)} "Start building."`
         """;
-        File.WriteAllText(path, content);
+        _fileSystem.WriteAllText(path, content);
     }
 
     private static void LogPlanSummary(Action<string>? log, LoopVerbosity verbosity, string summary)
@@ -526,6 +528,25 @@ public class LoopExecutor(
                 SessionId = sessionId,
                 ExitCode = 1,
                 StdErr = $"Agent timed out after {options.AgentTimeout.TotalSeconds:0} seconds."
+            };
+            return new AgentExecutionResult(
+                queuedRun,
+                response,
+                "failed",
+                response.StdErr,
+                [],
+                [],
+                [],
+                []);
+        }
+        catch (Exception ex)
+        {
+            var response = new AgentInvocationResult
+            {
+                BackendName = "error",
+                SessionId = sessionId,
+                ExitCode = 1,
+                StdErr = $"Unexpected error: {ex.GetType().Name}: {ex.Message}"
             };
             return new AgentExecutionResult(
                 queuedRun,

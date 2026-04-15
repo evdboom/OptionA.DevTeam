@@ -171,7 +171,7 @@ internal sealed partial class ShellService
     private void AddWarning(string text) =>
         AddLine($"[bold yellow]⚠[/] [yellow]{Markup.Escape(text)}[/]");
 
-    private void AddError(string text) =>
+    internal void AddError(string text) =>
         AddLine($"[bold red]✗[/] [red]{Markup.Escape(text)}[/]");
 
     private void AddHint(string markup) =>
@@ -238,7 +238,7 @@ internal sealed partial class ShellService
     {
         lock (_gate)
         {
-            _history.Add((DateTimeOffset.Now, entry));
+            _history.Add((_clock.UtcNow, entry));
             if (_history.Count > 50) _history.RemoveAt(0);
         }
     }

@@ -53,3 +53,7 @@ What actually happens.
 - If no test framework exists, add a minimal smoke test (script that runs and checks exit code)
 - Prefer automated tests over manual verification where possible
 - Verify the documented run steps actually work, and flag missing or stale README/run instructions as issues when they block validation
+- **Assert state, not existence.** Tests must verify field values and state transitions, not just that something is present. Example: assert `issue.Status == ItemStatus.Done` and `issue.AssignedTo == "developer"`, not merely `issues.Count == 1`.
+- **Cover error paths and boundaries.** Every test suite must include: at least one test for the failure/error path, at least one boundary condition (e.g., budget exactly at cap, empty collection, zero-length input), and at least one unhappy path per significant method.
+- **One concept per test.** Each test method verifies one logical outcome. A test named `X_WhenY_DoesZ` should assert only on Z. Split tests that verify multiple unrelated things.
+- **Smoke tests are not enough.** End-to-end tests prove the happy path works. Unit tests prove edge cases, error handling, and boundary conditions. Both are required; don't substitute one for the other.

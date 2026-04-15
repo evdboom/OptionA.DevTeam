@@ -8,6 +8,8 @@ internal static class IssueServiceTests
         new("AddIssue_NormalizesRoleAlias", AddIssue_NormalizesRoleAlias),
         new("AddIssue_WithDependsOn_StoresDependencies", AddIssue_WithDependsOn_StoresDependencies),
         new("AdvancePipeline_SetsTimestamp_FromClock", AdvancePipeline_SetsTimestamp_FromClock),
+        new("AdvancePipeline_CreatesNextStageIssue_AndAdvancesActive", AdvancePipeline_CreatesNextStageIssue_AndAdvancesActive),
+        new("AdvancePipeline_CompletesLastStage_MarksPipelineDone", AdvancePipeline_CompletesLastStage_MarksPipelineDone),
         new("FindIssue_ReturnsNull_WhenNotFound", FindIssue_ReturnsNull_WhenNotFound),
         new("FindIssue_ReturnsIssue_WhenFound", FindIssue_ReturnsIssue_WhenFound),
         new("GetReadyIssues_ExcludesIssuesWithOpenDependencies", GetReadyIssues_ExcludesIssuesWithOpenDependencies),
@@ -81,6 +83,66 @@ internal static class IssueServiceTests
 
         Assert.That(pipeline.UpdatedAtUtc == advancedTime,
             $"Expected pipeline.UpdatedAtUtc == {advancedTime} but got {pipeline.UpdatedAtUtc}");
+        return Task.CompletedTask;
+    }
+
+    private static Task AdvancePipeline_CreatesNextStageIssue_AndAdvancesActive()
+    {
+        var clock = new FakeSystemClock();
+        var svc = new IssueService(clock);
+        var state = new WorkspaceState();
+        state.Runtime.PipelineSchedulingEnabled = false;
+
+        var issue = svc.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
+        var pipeline = new PipelineState
+        {
+            Id = state.NextPipelineId++,
+            RoleSequence = ["developer", "tester"],
+            IssueIds = [issue.Id],
+            ActiveIssueId = issue.Id
+        };
+        state.Pipelines.Add(pipeline);
+        issue.PipelineId = pipeline.Id;
+        issue.PipelineStageIndex = 0;
+
+        svc.AdvancePipelineAfterCompletion(state, issue);
+
+        var nextIssue = state.Issues.FirstOrDefault(i => i.PipelineStageIndex == 1 && i.PipelineId == pipeline.Id);
+        Assert.That(nextIssue is not null, "Expected a stage-1 issue to be created");
+        Assert.That(nextIssue!.RoleSlug == "tester", $"Expected role 'tester' but got '{nextIssue.RoleSlug}'");
+        Assert.That(pipeline.ActiveIssueId == nextIssue.Id,
+            $"Expected pipeline.ActiveIssueId == {nextIssue.Id} but got {pipeline.ActiveIssueId}");
+        Assert.That(pipeline.Status == PipelineStatus.Open,
+            $"Expected pipeline status Open but got {pipeline.Status}");
+        return Task.CompletedTask;
+    }
+
+    private static Task AdvancePipeline_CompletesLastStage_MarksPipelineDone()
+    {
+        var clock = new FakeSystemClock();
+        var svc = new IssueService(clock);
+        var state = new WorkspaceState();
+        state.Runtime.PipelineSchedulingEnabled = false;
+
+        // Single-role pipeline: completing the only stage finishes the pipeline
+        var issue = svc.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
+        var pipeline = new PipelineState
+        {
+            Id = state.NextPipelineId++,
+            RoleSequence = ["developer"],
+            IssueIds = [issue.Id],
+            ActiveIssueId = issue.Id
+        };
+        state.Pipelines.Add(pipeline);
+        issue.PipelineId = pipeline.Id;
+        issue.PipelineStageIndex = 0;
+
+        svc.AdvancePipelineAfterCompletion(state, issue);
+
+        Assert.That(pipeline.Status == PipelineStatus.Completed,
+            $"Expected pipeline status Completed but got {pipeline.Status}");
+        Assert.That(pipeline.ActiveIssueId is null,
+            $"Expected pipeline.ActiveIssueId to be null but got {pipeline.ActiveIssueId}");
         return Task.CompletedTask;
     }
 
