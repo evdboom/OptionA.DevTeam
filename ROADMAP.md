@@ -26,6 +26,7 @@ Items below are ordered by execution priority. Each item builds on what came bef
 | 18 | **R8 — Role chaining config** | Medium | pipelines.json successor rules. Gain value after orchestrator loop stabilizes. |
 | 19 | **#13 — Container/CI mode** | Medium | Deployment and automation path. Lower priority until core loop is solid. |
 | 20 | **#6 — GitHub mode** | Major | Issues/PRs as the work queue. Major feature; build after orchestrator loop stabilizes. |
+| 21 | **R13 — BYOK / provider-agnostic auth** | Small-Medium | Remove GitHub Copilot account requirement via SDK BYOK. Broadens adoption (free users, enterprises, local models). Low urgency while copilot-free tier covers most users. |
 
 > Items 9 (hygiene conventions), ATM fixes, #8 (navigator scout), #10 (orchestrator loop), #16 (cursor navigation), #15 (cross-family review), #14 (git worktrees), #12 (brownfield init), and #13 (container/CI mode) are **complete** as of May 2026.
 
@@ -683,3 +684,33 @@ When an issue with role `trigger` completes successfully, `LoopExecutor` auto-qu
 | R12.8 | Unit tests: `ParsedAgentResponse` extracts `APPROACH`/`RATIONALE`; delta record is written only when `CodebaseContext` is non-empty; `/brownfield-log` renders correctly on a synthetic log. |
 
 **Estimated scope:** Medium — new output fields, parser changes, new log file, one shell command. Most complexity is in the role prompt updates and ensuring agents reliably emit the structured fields.
+
+---
+
+## R13 — BYOK / provider-agnostic authentication
+
+**Goal:** Allow DevTeam to run without a GitHub Copilot subscription by passing `ProviderConfig` (API key + endpoint) directly to the Copilot SDK. Enables use with OpenAI, Azure AI Foundry, Anthropic, Ollama (local), or any OpenAI-compatible endpoint — removing the GitHub account requirement for new users and enterprise deployments.
+
+**Current state:** `CopilotSdkAgentClient` creates a `CopilotClient` with no provider config, which means it always uses GitHub Copilot authentication (OAuth device flow). The GitHub Copilot free tier is limited; paid users need a subscription. Users with existing Azure OpenAI or Anthropic keys have no way to use them.
+
+**SDK support:** The .NET SDK's `SessionConfig` accepts a `Provider` property (`ProviderConfig`) with `Type` (`"openai"` / `"azure"` / `"anthropic"`), `BaseUrl`, `WireApi`, and `ApiKey`. Passing this bypasses GitHub authentication entirely. See: https://github.com/github/copilot-sdk/blob/main/docs/auth/byok.md
+
+**Proposed model:**
+- New optional section in `MODELS.json` (or a new `PROVIDERS.json`) declares named providers: `{ "Name": "azure-foundry", "Type": "openai", "BaseUrl": "...", "ApiKeyEnvVar": "AZURE_API_KEY" }`.
+- `RuntimeConfiguration` gains an optional `DefaultProvider` name.
+- Individual model entries in `MODELS.json` can also specify `Provider` to override per-role.
+- `CopilotSdkAgentClient` reads the resolved provider and passes `ProviderConfig` to `CreateSessionAsync` when set.
+- When no provider is configured, behaviour is unchanged (GitHub Copilot auth as today).
+
+| Step | Detail |
+|---|---|
+| R13.1 | Define `ProviderDefinition` model (Name, Type, BaseUrl, WireApi, ApiKeyEnvVar). Add optional `Providers` array to `MODELS.json` schema (or new `PROVIDERS.json`). |
+| R13.2 | `ModelPolicyLoader` reads and validates provider definitions. `RuntimeConfiguration` exposes resolved `ProviderDefinitions` dictionary. |
+| R13.3 | `CopilotSdkAgentClient.InvokeAsync` — when the current model's resolved provider is set, construct `ProviderConfig` (resolving `ApiKey` from env var) and pass to `SessionConfig`. |
+| R13.4 | CLI: add `--provider <name>` option to `run-loop`, `run-once`, and `agent-invoke` commands. Overrides `DefaultProvider` from config. |
+| R13.5 | Documentation: update README with a BYOK section explaining how to set up `PROVIDERS.json` for Azure / Anthropic / Ollama. |
+| R13.6 | Unit tests: `CopilotSdkAgentClient` passes `ProviderConfig` when a provider is configured; uses `null` provider (GitHub auth) when none is set. |
+
+**Estimated scope:** Small-Medium — additive config layer + one `SessionConfig` property. No changes to loop logic, roles, or shell. API key must never be logged or committed (ApiKeyEnvVar indirection enforces this).
+
+**Note:** When a provider is configured, `MODELS.json` model names refer to deployment names on the provider (e.g., `gpt-5.2-codex` becomes the Azure deployment name). Document this clearly — it's the main user confusion point.
