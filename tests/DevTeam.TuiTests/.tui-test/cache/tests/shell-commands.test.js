@@ -1,4 +1,4 @@
-//# hash=51b6b0368447fd281e4353e0d32ebd1a
+//# hash=a4aecb4fee19c8537ebb529d0a6404d4
 //# sourceMappingURL=shell-commands.test.js.map
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
@@ -138,7 +138,9 @@ test.use({
         args: cliArgs("start", "--workspace", ".devteam-e2e-commands")
     },
     rows: 40,
-    columns: 120
+    // 90 cols: same wrapping behaviour as the CI runner with its longer absolute
+    // workspace path — reproduces the "help for commands" split-row failure.
+    columns: 90
 });
 test("unknown command shows error with /help hint", function(param) {
     var terminal = param.terminal;

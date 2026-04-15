@@ -10,7 +10,10 @@ test.use({
     args: cliArgs("start", "--workspace", ".devteam-e2e-startup"),
   },
   rows: 40,
-  columns: 120,
+  // 90 cols ensures the "· /help for commands …" hint starts near the end of
+  // line 1 (Windows path = 78 chars → hint starts at col 81), causing it to
+  // wrap mid-phrase at the same split the CI runner sees with its longer path.
+  columns: 90,
 });
 
 test("banner shows help hint on startup", async ({ terminal }) => {

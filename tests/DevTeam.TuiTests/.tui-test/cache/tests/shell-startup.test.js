@@ -1,4 +1,4 @@
-//# hash=86308571527f6b70c4c899f4b0974ac9
+//# hash=12dd38c72f76e669273d334ecf3ed79b
 //# sourceMappingURL=shell-startup.test.js.map
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
@@ -139,7 +139,10 @@ test.use({
         args: cliArgs("start", "--workspace", ".devteam-e2e-startup")
     },
     rows: 40,
-    columns: 120
+    // 90 cols ensures the "· /help for commands …" hint starts near the end of
+    // line 1 (Windows path = 78 chars → hint starts at col 81), causing it to
+    // wrap mid-phrase at the same split the CI runner sees with its longer path.
+    columns: 90
 });
 test("banner shows help hint on startup", function(param) {
     var terminal = param.terminal;

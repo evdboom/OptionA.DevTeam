@@ -9,7 +9,9 @@ test.use({
     args: cliArgs("start", "--workspace", ".devteam-e2e-commands"),
   },
   rows: 40,
-  columns: 120,
+  // 90 cols: same wrapping behaviour as the CI runner with its longer absolute
+  // workspace path — reproduces the "help for commands" split-row failure.
+  columns: 90,
 });
 
 test("unknown command shows error with /help hint", async ({ terminal }) => {

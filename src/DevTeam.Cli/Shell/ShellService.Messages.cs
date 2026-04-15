@@ -60,7 +60,10 @@ internal sealed partial class ShellService
 
     private void AddBanner(string workspacePath)
     {
-        AddLine($"Workspace: [cyan]{Markup.Escape(workspacePath)}[/]  [dim]· /help for commands · /exit to quit[/]");
+        // Workspace path can be long on CI / deep clones. Keep the hint on its
+        // own line so it is never truncated regardless of terminal width.
+        AddLine($"Workspace: [cyan]{Markup.Escape(workspacePath)}[/]");
+        AddLine("[dim]· /help for commands · /exit to quit[/]");
     }
 
     /// <summary>
