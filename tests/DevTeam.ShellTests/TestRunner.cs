@@ -17,9 +17,10 @@ internal static class TestRunner
         var r3 = await RunSuiteAsync("UiHarnessScenarioTests", UiHarnessScenarioTests.GetTests());
         var r4 = await RunSuiteAsync("ProgressPanelScrollTests", ProgressPanelScrollTests.GetTests());
         var r5 = await RunSuiteAsync("NonInteractiveHostTests", NonInteractiveHostTests.GetTests());
+        var r6 = await RunSuiteAsync("SprintResumeHintTests", SprintResumeHintTests.GetTests());
 
-        passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed;
-        failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed;
+        passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed;
+        failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed;
 
         Console.WriteLine();
         Console.WriteLine($"Results: {passed} passed, {failed} failed");

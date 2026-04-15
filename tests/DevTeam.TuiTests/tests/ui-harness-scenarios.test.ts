@@ -122,3 +122,52 @@ test.describe("questions scenario", () => {
     await expect(terminal.getByText("Execution")).toBeVisible();
   });
 });
+
+// ── Sprint-resume scenario ───────────────────────────────────────────────────
+// Phase: Execution. One in-progress issue (interrupted sprint) + two open issues.
+// On startup the shell should show a resume hint and an in-progress warning.
+
+test.describe("sprint-resume scenario", () => {
+  test.use({
+    program: {
+      file: "dotnet",
+      args: [...BASE_ARGS, "--scenario", "sprint-resume"],
+    },
+    rows: 40,
+    columns: 120,
+  });
+
+  test("header shows Execution phase", async ({ terminal }) => {
+    await waitForReady(terminal);
+    await expect(terminal.getByText("Execution")).toBeVisible();
+  });
+
+  test("shows sprint resume hint on startup", async ({ terminal }) => {
+    await waitForReady(terminal);
+    // The sprint-resume scenario has open items from a prior sprint.
+    // The hint text includes "sprint item" — verify it appears in the progress panel.
+    await expect(terminal.getByText("sprint item")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test("shows in-progress warning for interrupted issue", async ({
+    terminal,
+  }) => {
+    await waitForReady(terminal);
+    // The scenario has one InProgress issue (issue #3, SignalR hub).
+    // The warning text includes "in progress" — verify it appears.
+    await expect(terminal.getByText("in progress")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test("hint suggests /run to resume", async ({ terminal }) => {
+    await waitForReady(terminal);
+    // The hint text ends with "Use /run to resume or /status to review."
+    // "to resume" is unique to the sprint resume hint.
+    await expect(terminal.getByText("to resume")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+});

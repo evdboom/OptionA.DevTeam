@@ -130,3 +130,51 @@ test("End key returns to follow-latest mode after scrolling", async ({
   // The scrolled indicator must be gone
   await expect(terminal.getByText("scrolled")).not.toBeVisible();
 });
+
+// ── /worktrees command (requires a workspace — use ui-harness) ──────────────
+// The /worktrees command needs an existing workspace state to read/write.
+// Run these tests using the ui-harness execution scenario to provide state.
+
+test.describe("worktrees command (ui-harness)", () => {
+  test.use({
+    program: {
+      file: "dotnet",
+      args: [
+        "run",
+        "--project",
+        "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
+        "--",
+        "ui-harness",
+        "--scenario",
+        "execution",
+      ],
+    },
+    rows: 40,
+    columns: 120,
+  });
+
+  test("worktrees on shows enabled confirmation", async ({ terminal }) => {
+    // Wait for Phase: header which signals the harness is ready
+    await expect(terminal.getByText("Phase:")).toBeVisible({
+      timeout: BUILD_TIMEOUT,
+    });
+
+    terminal.submit("/worktrees on");
+
+    await expect(terminal.getByText("Worktree mode enabled")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test("worktrees off shows disabled confirmation", async ({ terminal }) => {
+    await expect(terminal.getByText("Phase:")).toBeVisible({
+      timeout: BUILD_TIMEOUT,
+    });
+
+    terminal.submit("/worktrees off");
+
+    await expect(terminal.getByText("Worktree mode disabled")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+});

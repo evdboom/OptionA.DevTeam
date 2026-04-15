@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 using DevTeam.Core;
 using Spectre.Console;
@@ -60,6 +61,39 @@ internal sealed partial class ShellService
     private void AddBanner(string workspacePath)
     {
         AddLine($"Workspace: [cyan]{Markup.Escape(workspacePath)}[/]  [dim]· /help for commands · /exit to quit[/]");
+    }
+
+    /// <summary>
+    /// If the workspace has open sprint work from a previous session, show a resume prompt.
+    /// </summary>
+    internal void ShowSprintResumeHint(WorkspaceState state)
+    {
+        if (state.Phase == WorkflowPhase.Planning && !state.Issues.Any(i => i.Status == ItemStatus.Open || i.Status == ItemStatus.InProgress))
+            return;
+
+        var activeIssues = state.Issues
+            .Where(i => !i.IsPlanningIssue && i.Status is ItemStatus.Open or ItemStatus.InProgress)
+            .ToList();
+
+        if (activeIssues.Count == 0)
+            return;
+
+        var inProgress = activeIssues.Where(i => i.Status == ItemStatus.InProgress).ToList();
+        var open = activeIssues.Where(i => i.Status == ItemStatus.Open).ToList();
+
+        var phaseName = state.Phase switch
+        {
+            WorkflowPhase.ArchitectPlanning => "architect planning",
+            WorkflowPhase.Execution => "execution",
+            _ => state.Phase.ToString().ToLowerInvariant()
+        };
+
+        if (inProgress.Count > 0)
+        {
+            AddWarning($"{inProgress.Count} issue(s) were still in progress when the last sprint stopped. They will be retried — use /run to continue.");
+        }
+
+        AddHint($"↩ [bold]{activeIssues.Count}[/] sprint item(s) waiting in [bold]{phaseName}[/] phase. Use [cyan]/run[/] to resume or [cyan]/status[/] to review.");
     }
 
     // ── Message factories ──────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-//# hash=6545573a8e72201d1feb0cf93e0def9f
+//# hash=e7f52e6cd96b0731f43568a61b910355
 //# sourceMappingURL=shell-commands.test.js.map
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
@@ -388,4 +388,86 @@ test("End key returns to follow-latest mode after scrolling", function(param) {
             }
         });
     })();
+});
+// ── /worktrees command (requires a workspace — use ui-harness) ──────────────
+// The /worktrees command needs an existing workspace state to read/write.
+// Run these tests using the ui-harness execution scenario to provide state.
+test.describe("worktrees command (ui-harness)", function() {
+    test.use({
+        program: {
+            file: "dotnet",
+            args: [
+                "run",
+                "--project",
+                "../../src/DevTeam.Cli/DevTeam.Cli.csproj",
+                "--",
+                "ui-harness",
+                "--scenario",
+                "execution"
+            ]
+        },
+        rows: 40,
+        columns: 120
+    });
+    test("worktrees on shows enabled confirmation", function(param) {
+        var terminal = param.terminal;
+        return _async_to_generator(function() {
+            return _ts_generator(this, function(_state) {
+                switch(_state.label){
+                    case 0:
+                        // Wait for Phase: header which signals the harness is ready
+                        return [
+                            4,
+                            expect(terminal.getByText("Phase:")).toBeVisible({
+                                timeout: BUILD_TIMEOUT
+                            })
+                        ];
+                    case 1:
+                        _state.sent();
+                        terminal.submit("/worktrees on");
+                        return [
+                            4,
+                            expect(terminal.getByText("Worktree mode enabled")).toBeVisible({
+                                timeout: 10000
+                            })
+                        ];
+                    case 2:
+                        _state.sent();
+                        return [
+                            2
+                        ];
+                }
+            });
+        })();
+    });
+    test("worktrees off shows disabled confirmation", function(param) {
+        var terminal = param.terminal;
+        return _async_to_generator(function() {
+            return _ts_generator(this, function(_state) {
+                switch(_state.label){
+                    case 0:
+                        return [
+                            4,
+                            expect(terminal.getByText("Phase:")).toBeVisible({
+                                timeout: BUILD_TIMEOUT
+                            })
+                        ];
+                    case 1:
+                        _state.sent();
+                        terminal.submit("/worktrees off");
+                        return [
+                            4,
+                            expect(terminal.getByText("Worktree mode disabled")).toBeVisible({
+                                timeout: 10000
+                            })
+                        ];
+                    case 2:
+                        _state.sent();
+                        return [
+                            2
+                        ];
+                }
+            });
+        })();
+    });
 });

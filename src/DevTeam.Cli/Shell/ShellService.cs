@@ -117,6 +117,7 @@ internal sealed partial class ShellService : IDisposable
         {
             CheckAndUpdateContext(initialState);
             RefreshLayoutSnapshot(initialState);
+            ShowSprintResumeHint(initialState);
         }
 
         await Task.CompletedTask; // keeps method async for future awaits
@@ -681,7 +682,11 @@ internal sealed partial class ShellService : IDisposable
 
                 case "worktrees":
                 {
-                    var current = _store.Load();
+                    if (!TryLoadState(out var current) || current is null)
+                    {
+                        AddWarning("No workspace found. Use [cyan]/init[/] to create one first.");
+                        break;
+                    }
                     if (tokens.Count > 1)
                     {
                         var flag = tokens[1].Trim().ToLowerInvariant();
@@ -689,13 +694,13 @@ internal sealed partial class ShellService : IDisposable
                         {
                             current.Runtime.WorktreeMode = true;
                             _store.Save(current);
-                            AddSuccess("Worktree mode [bold]enabled[/]. Each parallel agent run will execute in its own git worktree branch.");
+                            AddSuccess("Worktree mode enabled. Each parallel agent run will execute in its own git worktree branch.");
                         }
                         else if (flag is "off" or "false" or "0")
                         {
                             current.Runtime.WorktreeMode = false;
                             _store.Save(current);
-                            AddSuccess("Worktree mode [bold]disabled[/].");
+                            AddSuccess("Worktree mode disabled.");
                         }
                         else
                         {

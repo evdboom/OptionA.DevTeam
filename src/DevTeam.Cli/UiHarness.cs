@@ -54,11 +54,12 @@ internal static class UiHarness
             "architect" => BuildArchitectScenario(workspacePath),
             "execution" => BuildExecutionScenario(workspacePath),
             "questions" => BuildQuestionsScenario(workspacePath),
+            "sprint-resume" => BuildSprintResumeScenario(workspacePath),
             _ => BuildExecutionScenario(workspacePath),
         };
     }
 
-    private static WorkspaceState BuildBaseState(string workspacePath)
+    internal static WorkspaceState BuildBaseState(string workspacePath)
     {
         return new WorkspaceState
         {
@@ -175,6 +176,33 @@ internal static class UiHarness
             new QuestionItem { Id = 1, Text = "Should the dashboard support dark mode by default?", IsBlocking = false, Status = QuestionStatus.Open },
             new QuestionItem { Id = 2, Text = "What authentication provider should we use for WebSocket connections?", IsBlocking = true, Status = QuestionStatus.Open },
         ]);
+        return state;
+    }
+
+    /// <summary>
+    /// Simulates returning to a workspace after a sprint was interrupted:
+    /// a few items were in-flight (InProgress) and others are still queued (Open).
+    /// The shell should display the resume hint on startup.
+    /// </summary>
+    internal static WorkspaceState BuildSprintResumeScenario(string workspacePath)
+    {
+        var state = BuildBaseState(workspacePath);
+        state.Phase = WorkflowPhase.Execution;
+        state.ActiveGoal = new GoalState { GoalText = "Build a real-time dashboard with WebSocket support" };
+        state.Budget.CreditsCommitted = 7.2;
+        state.Budget.PremiumCreditsCommitted = 1.8;
+        state.Issues.AddRange([
+            new IssueItem { Id = 1, Title = "Plan dashboard", RoleSlug = "planner", IsPlanningIssue = true, Status = ItemStatus.Done, Priority = 100 },
+            new IssueItem { Id = 2, Title = "Design architecture", RoleSlug = "architect", Status = ItemStatus.Done, Priority = 90 },
+            new IssueItem { Id = 3, Title = "Implement SignalR hub", RoleSlug = "developer", Status = ItemStatus.InProgress, Priority = 80 },
+            new IssueItem { Id = 4, Title = "Create Blazor dashboard component", RoleSlug = "developer", Status = ItemStatus.Open, Priority = 70 },
+            new IssueItem { Id = 5, Title = "Write WebSocket integration tests", RoleSlug = "tester", Status = ItemStatus.Open, Priority = 60, DependsOnIssueIds = [3] },
+        ]);
+        state.AgentRuns.Add(new AgentRun
+        {
+            Id = 5, IssueId = 3, RoleSlug = "developer", ModelName = "claude-sonnet-4.6",
+            Status = AgentRunStatus.Running, SessionId = "ses-dev-3-interrupted"
+        });
         return state;
     }
 }

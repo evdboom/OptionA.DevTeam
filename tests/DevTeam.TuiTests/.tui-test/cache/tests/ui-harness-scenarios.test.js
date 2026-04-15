@@ -1,4 +1,4 @@
-//# hash=e8ccc34ef46cdbd4f864ace26f56497c
+//# hash=6a2dd25bf8d3e855457e1a4580cc5236
 //# sourceMappingURL=ui-harness-scenarios.test.js.map
 
 function _array_like_to_array(arr, len) {
@@ -421,6 +421,134 @@ test.describe("questions scenario", function() {
                         return [
                             4,
                             expect(terminal.getByText("Execution")).toBeVisible()
+                        ];
+                    case 2:
+                        _state.sent();
+                        return [
+                            2
+                        ];
+                }
+            });
+        })();
+    });
+});
+// ── Sprint-resume scenario ───────────────────────────────────────────────────
+// Phase: Execution. One in-progress issue (interrupted sprint) + two open issues.
+// On startup the shell should show a resume hint and an in-progress warning.
+test.describe("sprint-resume scenario", function() {
+    test.use({
+        program: {
+            file: "dotnet",
+            args: _to_consumable_array(BASE_ARGS).concat([
+                "--scenario",
+                "sprint-resume"
+            ])
+        },
+        rows: 40,
+        columns: 120
+    });
+    test("header shows Execution phase", function(param) {
+        var terminal = param.terminal;
+        return _async_to_generator(function() {
+            return _ts_generator(this, function(_state) {
+                switch(_state.label){
+                    case 0:
+                        return [
+                            4,
+                            waitForReady(terminal)
+                        ];
+                    case 1:
+                        _state.sent();
+                        return [
+                            4,
+                            expect(terminal.getByText("Execution")).toBeVisible()
+                        ];
+                    case 2:
+                        _state.sent();
+                        return [
+                            2
+                        ];
+                }
+            });
+        })();
+    });
+    test("shows sprint resume hint on startup", function(param) {
+        var terminal = param.terminal;
+        return _async_to_generator(function() {
+            return _ts_generator(this, function(_state) {
+                switch(_state.label){
+                    case 0:
+                        return [
+                            4,
+                            waitForReady(terminal)
+                        ];
+                    case 1:
+                        _state.sent();
+                        // The sprint-resume scenario has open items from a prior sprint.
+                        // The hint text includes "sprint item" — verify it appears in the progress panel.
+                        return [
+                            4,
+                            expect(terminal.getByText("sprint item")).toBeVisible({
+                                timeout: 10000
+                            })
+                        ];
+                    case 2:
+                        _state.sent();
+                        return [
+                            2
+                        ];
+                }
+            });
+        })();
+    });
+    test("shows in-progress warning for interrupted issue", function(param) {
+        var terminal = param.terminal;
+        return _async_to_generator(function() {
+            return _ts_generator(this, function(_state) {
+                switch(_state.label){
+                    case 0:
+                        return [
+                            4,
+                            waitForReady(terminal)
+                        ];
+                    case 1:
+                        _state.sent();
+                        // The scenario has one InProgress issue (issue #3, SignalR hub).
+                        // The warning text includes "in progress" — verify it appears.
+                        return [
+                            4,
+                            expect(terminal.getByText("in progress")).toBeVisible({
+                                timeout: 10000
+                            })
+                        ];
+                    case 2:
+                        _state.sent();
+                        return [
+                            2
+                        ];
+                }
+            });
+        })();
+    });
+    test("hint suggests /run to resume", function(param) {
+        var terminal = param.terminal;
+        return _async_to_generator(function() {
+            return _ts_generator(this, function(_state) {
+                switch(_state.label){
+                    case 0:
+                        return [
+                            4,
+                            waitForReady(terminal)
+                        ];
+                    case 1:
+                        _state.sent();
+                        // The hint text ends with "Use /run to resume or /status to review."
+                        // "to resume" is unique to the sprint resume hint.
+                        return [
+                            4,
+                            expect(terminal.getByText("to resume")).toBeVisible({
+                                timeout: 10000
+                            })
                         ];
                     case 2:
                         _state.sent();
