@@ -1,13 +1,12 @@
 name: Publish NuGet tool
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*.*.*'
 
 permissions:
-  contents: read
+  contents: write   # needed to create a GitHub release
 
 defaults:
   run:
@@ -23,6 +22,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve version from tag
+        id: version
+        run: |
+          $tag = "${{ github.ref_name }}"          # e.g. v0.5.40
+          $ver = $tag.TrimStart('v')               # e.g. 0.5.40
+          Write-Host "Tag: $tag  →  Version: $ver"
+          "value=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -32,7 +39,7 @@ jobs:
         run: dotnet restore ./DevTeam.slnx
 
       - name: Build
-        run: dotnet build ./DevTeam.slnx --configuration Release --no-restore
+        run: dotnet build ./DevTeam.slnx --configuration Release --no-restore /p:Version=${{ steps.version.outputs.value }}
 
       - name: Run smoke tests
         run: dotnet run --project ./tests/DevTeam.SmokeTests/DevTeam.SmokeTests.csproj --configuration Release --no-build
@@ -40,7 +47,7 @@ jobs:
       - name: Pack tool
         run: |
           New-Item -ItemType Directory -Force -Path $env:PACKAGE_OUTPUT | Out-Null
-          dotnet pack $env:TOOL_PROJECT --configuration Release --no-build --output $env:PACKAGE_OUTPUT
+          dotnet pack $env:TOOL_PROJECT --configuration Release --no-build --output $env:PACKAGE_OUTPUT /p:Version=${{ steps.version.outputs.value }}
 
       - name: Publish to NuGet
         run: |
@@ -52,3 +59,12 @@ jobs:
               Write-Host "::warning::Package $($_.Name) already exists on NuGet — skipped."
             }
           }
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            --title "DevTeam ${{ github.ref_name }}" `
+            --generate-notes `
+            $env:PACKAGE_OUTPUT/*.nupkg
