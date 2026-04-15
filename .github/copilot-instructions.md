@@ -52,3 +52,17 @@ These apply when editing any source in this repo. DevTeam role prompts should mi
 - **Separate presentation from logic.** Blazor `.razor` files contain markup and minimal binding glue only. All logic lives in the paired `.razor.cs` code-behind file. Never put real logic inside `@code { }` blocks. The same principle applies broadly: a file that mixes rendering and domain logic should be split.
 - **Entry points are bootstrap only.** `Program.cs` (or equivalent top-level file) should be ≤ ~30 lines: wire DI, resolve the dispatcher, call it. All logic belongs in focused service classes.
 - **When adding a feature**, check whether an existing file is already close to the size limit before adding to it. If so, extract first, then add.
+
+## Testability conventions
+
+These apply to all production code in `src\` and to tests in `tests\`. Testability is a first-class design constraint, not an afterthought.
+
+- **Inject all dependencies via constructor.** Never use `new` inside business logic for non-trivial collaborators. Use interfaces, not concrete types, as constructor parameters. This is the single most important rule — it makes every class independently testable.
+- **No static I/O.** Do not call `File.*`, `Directory.*`, `Process.Start`, or `Console.*` directly in `DevTeam.Core`. These must be behind injected interfaces (`IFileSystem`, `IGitRepository`, `IConsoleOutput`, etc.) so tests can substitute them without touching the real file system or spawning processes.
+- **No static clocks.** Do not call `DateTimeOffset.UtcNow` or `DateTime.Now` directly. Use an injected `ISystemClock`. Tests control time via a fake implementation.
+- **No static factory methods as hidden dependencies.** If a class needs a factory, accept `IXxxFactory` via constructor. Nullable parameters that fall back to a static default hide dependencies and break test isolation.
+- **Do not seal service and infrastructure classes.** Reserve `sealed` for value objects, DTOs, and records. Sealing infrastructure classes prevents test doubles and proxy-based mocking frameworks from working.
+- **Test project structure.** The `tests\` folder contains two projects: `DevTeam.SmokeTests` (end-to-end, integration-style, slow) and `DevTeam.UnitTests` (fast, isolated, one test class per production class). Shared test infrastructure (fakes, builders, helpers) lives in `DevTeam.TestInfrastructure` and is referenced by both test projects.
+- **Unit test file size.** Apply the same ~400-line limit to test files. One test class per file. When a test class grows large, extract nested test classes or split by scenario group into separate files.
+- **One assert per concept.** Each test method should verify one logical outcome. Prefer multiple focused tests over one test with many unrelated assertions.
+- **Smoke tests are the regression guard, not the only guard.** Smoke tests cover the happy-path end-to-end flow. Unit tests cover edge cases, error paths, boundary conditions, and concurrency scenarios. Do not rely solely on smoke tests as evidence of correctness.

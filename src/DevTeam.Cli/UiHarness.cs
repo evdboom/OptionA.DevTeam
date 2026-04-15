@@ -78,10 +78,10 @@ internal static class UiHarness
         };
     }
 
-    private static WorkspaceState BuildEmptyScenario(string workspacePath) =>
+    internal static WorkspaceState BuildEmptyScenario(string workspacePath) =>
         BuildBaseState(workspacePath);
 
-    private static WorkspaceState BuildPlanningScenario(string workspacePath)
+    internal static WorkspaceState BuildPlanningScenario(string workspacePath)
     {
         var state = BuildBaseState(workspacePath);
         state.Phase = WorkflowPhase.Planning;
@@ -98,7 +98,7 @@ internal static class UiHarness
         return state;
     }
 
-    private static WorkspaceState BuildArchitectScenario(string workspacePath)
+    internal static WorkspaceState BuildArchitectScenario(string workspacePath)
     {
         var state = BuildBaseState(workspacePath);
         state.Phase = WorkflowPhase.ArchitectPlanning;
@@ -117,7 +117,7 @@ internal static class UiHarness
         return state;
     }
 
-    private static WorkspaceState BuildExecutionScenario(string workspacePath)
+    internal static WorkspaceState BuildExecutionScenario(string workspacePath)
     {
         // Mirrors the real AOTfier workspace: 44 issues, 1 running agent,
         // many done/open items — exercises the roadmap scrolling and long lists.
@@ -168,7 +168,7 @@ internal static class UiHarness
         return state;
     }
 
-    private static WorkspaceState BuildQuestionsScenario(string workspacePath)
+    internal static WorkspaceState BuildQuestionsScenario(string workspacePath)
     {
         var state = BuildExecutionScenario(workspacePath);
         state.Questions.AddRange([

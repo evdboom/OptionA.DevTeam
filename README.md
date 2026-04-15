@@ -109,6 +109,14 @@ Start the interactive shell:
 devteam /start --workspace .devteam
 ```
 
+For CI or piped usage (non-interactive, reads commands from stdin):
+
+```powershell
+devteam /start --workspace .devteam --no-tty
+```
+
+The shell also auto-detects `--no-tty` mode when stdin or stdout is redirected.
+
 Generate the first plan:
 
 ```text

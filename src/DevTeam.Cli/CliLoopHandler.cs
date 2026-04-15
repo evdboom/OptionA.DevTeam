@@ -23,7 +23,18 @@ internal static class CliLoopHandler
             exitCts.Cancel();
         };
 
-        await SpectreShellHost.RunAsync(shell, exitCts.Token);
+        var noTty = CliOptionParser.GetBoolOption(startOptions, "no-tty", false)
+            || Console.IsInputRedirected
+            || Console.IsOutputRedirected;
+
+        if (noTty)
+        {
+            await NonInteractiveShellHost.RunAsync(shell, exitCts.Token);
+        }
+        else
+        {
+            await SpectreShellHost.RunAsync(shell, exitCts.Token);
+        }
         return 0;
     }
 
@@ -70,7 +81,7 @@ internal static class CliLoopHandler
         var sessionId = $"devteam-adhoc-{roleSlug}";
         ChatConsole.WriteEvent("→", $"Asking {roleSlug} via {model}...", "dim cyan");
 
-        var client = AgentClientFactory.Create("sdk");
+        var client = new DefaultAgentClientFactory().Create("sdk");
         try
         {
             var response = await client.InvokeAsync(new AgentInvocationRequest

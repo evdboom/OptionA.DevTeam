@@ -1,6 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="DevTeam.ShellTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\DevTeam.Core\DevTeam.Core.csproj" />
   </ItemGroup>
 
@@ -23,7 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Spectre.Console" Version="0.54.0" />
+    <PackageReference Include="Spectre.Console" Version="0.55.0" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -35,7 +39,7 @@
     <ToolCommandName>devteam</ToolCommandName>
     <PackageId>OptionA.DevTeam</PackageId>
     <Title>OptionA.DevTeam</Title>
-    <Version>0.5.14</Version>
+    <Version>0.5.18</Version>
     <Authors>OptionA</Authors>
     <Company>OptionA</Company>
     <Description>OptionA.DevTeam is a plan-first autonomous development runtime and CLI with pipeline orchestration, workspace MCP tools, and mode guardrails.</Description>

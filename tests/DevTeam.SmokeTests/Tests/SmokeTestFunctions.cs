@@ -1,5 +1,6 @@
 using DevTeam.Cli;
 using DevTeam.Core;
+using DevTeam.TestInfrastructure;
 using static DevTeam.SmokeTests.TestHelpers;
 
 namespace DevTeam.SmokeTests;
@@ -353,7 +354,7 @@ internal static class SmokeTestFunctions
         var agent = new RecordingAgentClient(
             "OUTCOME: completed\nSUMMARY:\nInitial planning pass complete.",
             "OUTCOME: completed\nSUMMARY:\nPlanning updated after feedback.");
-        var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+        var executor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => agent));
     
         executor.RunAsync(
             harness.State,
@@ -391,7 +392,7 @@ internal static class SmokeTestFunctions
         var agent = new RecordingAgentClient(
             "OUTCOME: failed\nSUMMARY:\nNeed another pass.",
             "OUTCOME: completed\nSUMMARY:\nCompleted on retry.");
-        var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+        var executor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => agent));
     
         executor.RunAsync(
             harness.State,
@@ -428,7 +429,7 @@ internal static class SmokeTestFunctions
         harness.Runtime.AddIssue(harness.State, "Plan menus", "", "architect", 95, null, [], "menus");
         harness.Store.Save(harness.State);
         var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nPlanned.");
-        var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+        var executor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => agent));
     
         executor.RunAsync(
             harness.State,
@@ -564,7 +565,7 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => new FakeAgentClient("OUTCOME: completed\nSUMMARY:\nCompleted the assigned task."));
+            new FuncAgentClientFactory(_ => new FakeAgentClient("OUTCOME: completed\nSUMMARY:\nCompleted the assigned task.")));
     
         var report = executor.RunAsync(
             harness.State,
@@ -625,7 +626,7 @@ internal static class SmokeTestFunctions
     QUESTIONS:
     (none)
     """);
-        var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => client);
+        var executor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => client));
     
         var report = executor.RunAsync(
             harness.State,
@@ -652,7 +653,7 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => new FakeAgentClient("OUTCOME: completed\nSUMMARY:\nPlanning finished."));
+            new FuncAgentClientFactory(_ => new FakeAgentClient("OUTCOME: completed\nSUMMARY:\nPlanning finished.")));
     
         var report = executor.RunAsync(
             harness.State,
@@ -679,13 +680,13 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => new FakeAgentClient("""
+            new FuncAgentClientFactory(_ => new FakeAgentClient("""
     OUTCOME: blocked
     SUMMARY:
     Need a decision before continuing.
     QUESTIONS:
     - [blocking] Should the game use pixel art or vector art?
-    """));
+    """)));
     
         var report = executor.RunAsync(
             harness.State,
@@ -717,13 +718,13 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => new FakeAgentClient("""
+            new FuncAgentClientFactory(_ => new FakeAgentClient("""
     OUTCOME: completed
     SUMMARY:
     Build a small HTML5 Canvas game first, then add physics, obstacles, collision handling, score tracking, and playtesting.
     QUESTIONS:
     (none)
-    """));
+    """)));
     
         var report = executor.RunAsync(
             harness.State,
@@ -856,7 +857,7 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => new FakeAgentClient("""
+            new FuncAgentClientFactory(_ => new FakeAgentClient("""
     OUTCOME: completed
     SUMMARY:
     Architecture is defined. Implementation can proceed in small steps.
@@ -864,7 +865,7 @@ internal static class SmokeTestFunctions
     - role=frontend-developer; priority=95; depends=none; title=Create HTML5 Canvas game scaffold; detail=Create the scaffold and render loop.
     QUESTIONS:
     (none)
-    """));
+    """)));
     
         var report = executor.RunAsync(
             harness.State,
@@ -958,7 +959,7 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => agent);
+            new FuncAgentClientFactory(_ => agent));
     
         var report = executor.RunAsync(
             harness.State,
@@ -1059,7 +1060,7 @@ internal static class SmokeTestFunctions
         harness.Runtime.AddIssue(harness.State, "Build gameplay loop", "Create a playable gameplay loop.", "developer", 100, null, []);
         harness.Store.Save(harness.State);
         var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDone.");
-        var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+        var executor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => agent));
     
         executor.RunAsync(
             harness.State,
@@ -1088,7 +1089,7 @@ internal static class SmokeTestFunctions
         harness.Runtime.CompleteRun(harness.State, queued.QueuedRuns.Single().RunId, "completed", "Use a simple game loop, obstacle spawner, and a shared collision model.");
         harness.Store.Save(harness.State);
         var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nImplemented the gameplay loop.");
-        var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+        var executor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => agent));
     
         executor.RunAsync(
             harness.State,
@@ -1115,7 +1116,7 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => new FakeAgentClient("OUTCOME: completedSUMMARY:\nScaffolded the app.\nISSUES:\n(none)\nQUESTIONS:\n(none)"));
+            new FuncAgentClientFactory(_ => new FakeAgentClient("OUTCOME: completedSUMMARY:\nScaffolded the app.\nISSUES:\n(none)\nQUESTIONS:\n(none)")));
     
         executor.RunAsync(
             harness.State,
@@ -1144,7 +1145,7 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => new FakeAgentClient("""
+            new FuncAgentClientFactory(_ => new FakeAgentClient("""
     OUTCOME: completed
     SUMMARY:
     Implemented the game loop.
@@ -1158,7 +1159,7 @@ internal static class SmokeTestFunctions
     - node
     QUESTIONS:
     (none)
-    """));
+    """)));
     
         executor.RunAsync(
             harness.State,
@@ -1346,7 +1347,7 @@ internal static class SmokeTestFunctions
             var executor = new LoopExecutor(
                 localRuntime,
                 localStore,
-                _ => new FileWritingAgentClient("generated.txt", "OUTCOME: completed\nSUMMARY:\nDone."));
+                new FuncAgentClientFactory(_ => new FileWritingAgentClient("generated.txt", "OUTCOME: completed\nSUMMARY:\nDone.")));
     
             executor.RunAsync(
                 localState,
@@ -1512,7 +1513,7 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => new FakeStaggeredAgentClient("""
+            new FuncAgentClientFactory(_ => new FakeStaggeredAgentClient("""
     OUTCOME: completed
     SUMMARY:
     Run the architect batch first.
@@ -1526,7 +1527,7 @@ internal static class SmokeTestFunctions
     (none)
     QUESTIONS:
     (none)
-    """.Replace("ISSUE_ID", issue.Id.ToString(), StringComparison.Ordinal), TimeSpan.FromMilliseconds(150), TimeSpan.Zero));
+    """.Replace("ISSUE_ID", issue.Id.ToString(), StringComparison.Ordinal), TimeSpan.FromMilliseconds(150), TimeSpan.Zero)));
     
         executor.RunAsync(
             harness.State,
@@ -1621,7 +1622,7 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => new FakeAgentClient("OUTCOME: completed\nSUMMARY:\nDone."));
+            new FuncAgentClientFactory(_ => new FakeAgentClient("OUTCOME: completed\nSUMMARY:\nDone.")));
     
         var messages = new List<string>();
         var report = executor.RunAsync(
@@ -1664,7 +1665,7 @@ internal static class SmokeTestFunctions
         var architectIssue = harness.Runtime.AddIssue(harness.State, "Design the architecture", "Choose patterns.", "architect", 100, null, []);
         harness.Store.Save(harness.State);
         var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDesigned.");
-        var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+        var executor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => agent));
         executor.RunAsync(harness.State, new LoopExecutionOptions { Backend = "sdk", MaxIterations = 1, MaxSubagents = 1, Verbosity = LoopVerbosity.Normal }).GetAwaiter().GetResult();
         var architectPrompt = agent.LastPrompt ?? throw new InvalidOperationException("Expected architect prompt.");
         AssertTrue(architectPrompt.Contains("FILE BOUNDARY", StringComparison.Ordinal), "Architect prompt should include FILE BOUNDARY enforcement.");
@@ -1674,7 +1675,7 @@ internal static class SmokeTestFunctions
         var devIssue = harness.Runtime.AddIssue(harness.State, "Build the game loop", "Implement it.", "developer", 80, null, []);
         harness.Store.Save(harness.State);
         var devAgent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nBuilt.");
-        var devExecutor = new LoopExecutor(harness.Runtime, harness.Store, _ => devAgent);
+        var devExecutor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => devAgent));
         devExecutor.RunAsync(harness.State, new LoopExecutionOptions { Backend = "sdk", MaxIterations = 1, MaxSubagents = 1, Verbosity = LoopVerbosity.Normal }).GetAwaiter().GetResult();
         var devPrompt = devAgent.LastPrompt ?? throw new InvalidOperationException("Expected developer prompt.");
         AssertTrue(!devPrompt.Contains("FILE BOUNDARY", StringComparison.Ordinal), "Developer prompt should NOT include FILE BOUNDARY enforcement.");
@@ -1743,13 +1744,13 @@ internal static class SmokeTestFunctions
         var executor = new LoopExecutor(
             harness.Runtime,
             harness.Store,
-            _ => new FakeAgentClient("""
+            new FuncAgentClientFactory(_ => new FakeAgentClient("""
                 OUTCOME: completed
                 SUMMARY:
                 Use a flat ECS data model: Position, Velocity, Sprite components; PhysicsSystem, RenderSystem.
                 QUESTIONS:
                 (none)
-                """));
+                """)));
     
         executor.RunAsync(
             harness.State,
@@ -1781,7 +1782,7 @@ internal static class SmokeTestFunctions
         harness.Runtime.AddIssue(harness.State, "Add score tests", "Test scoring.", "tester", 75, null, [], "testing");
     
         var agent = new FakeConcurrentAgentClient("OUTCOME: completed\nSUMMARY:\nCompleted the task.");
-        var executor = new LoopExecutor(harness.Runtime, harness.Store, _ => agent);
+        var executor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => agent));
     
         executor.RunAsync(
             harness.State,

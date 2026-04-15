@@ -1,5 +1,6 @@
 using DevTeam.Cli;
 using DevTeam.Core;
+using DevTeam.TestInfrastructure;
 
 namespace DevTeam.SmokeTests;
 

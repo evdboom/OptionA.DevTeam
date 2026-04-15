@@ -2,14 +2,18 @@ using System.Text.RegularExpressions;
 
 namespace DevTeam.Core;
 
-public sealed class LoopExecutor(
+public class LoopExecutor(
     DevTeamRuntime runtime,
     WorkspaceStore store,
-    Func<string, IAgentClient>? agentClientFactory = null)
+    IAgentClientFactory? agentClientFactory = null,
+    IGitRepository? gitRepository = null,
+    ISystemClock? clock = null)
 {
     private readonly DevTeamRuntime _runtime = runtime;
     private readonly WorkspaceStore _store = store;
-    private readonly Func<string, IAgentClient> _agentClientFactory = agentClientFactory ?? (backend => AgentClientFactory.Create(backend));
+    private readonly IAgentClientFactory _agentClientFactory = agentClientFactory ?? new DefaultAgentClientFactory();
+    private readonly IGitRepository _git = gitRepository ?? new ProcessGitRepository();
+    private readonly ISystemClock _clock = clock ?? new SystemClock();
 
     public async Task<LoopExecutionReport> RunAsync(
         WorkspaceState state,
@@ -25,7 +29,7 @@ public sealed class LoopExecutor(
             cancellationToken.ThrowIfCancellationRequested();
             iterations = iteration;
             var created = Array.Empty<string>();
-            var gitStatusBeforeIteration = GitWorkspace.TryCaptureStatus(state.RepoRoot);
+            var gitStatusBeforeIteration = _git.TryCaptureStatus(state.RepoRoot);
             var runsToExecute = GetPendingRuns(state, options.MaxSubagents);
             if (runsToExecute.Count == 0)
             {
@@ -118,7 +122,7 @@ public sealed class LoopExecutor(
                     queuedRun,
                     sessionId,
                     ExecuteRunAsync(state, options, queuedRun, sessionId, cancellationToken),
-                    DateTimeOffset.UtcNow));
+                    _clock.UtcNow));
             }
 
             _store.Save(state);
@@ -209,7 +213,7 @@ public sealed class LoopExecutor(
 
             LogBudget(state, log, options.Verbosity);
             LogDetailed(log, options.Verbosity, "  Finalizing iteration and staging changed paths...");
-            var stagedPaths = GitWorkspace.StagePathsChangedSince(state.RepoRoot, gitStatusBeforeIteration);
+            var stagedPaths = _git.StagePathsChangedSince(state.RepoRoot, gitStatusBeforeIteration);
             if (stagedPaths.Count > 0)
             {
                 LogDetailed(log, options.Verbosity, $"  Staged {stagedPaths.Count} path(s) for the next orchestrator pass.");
@@ -266,7 +270,7 @@ public sealed class LoopExecutor(
         return $"Issue #{issueId} completed with outcome: {result.Outcome}. Summary: {result.Summary}";
     }
 
-    private static async Task<AgentExecutionResult> AwaitNextCompletionAsync(
+    private async Task<AgentExecutionResult> AwaitNextCompletionAsync(
         IReadOnlyList<PendingAgentRun> pendingRuns,
         LoopExecutionOptions options,
         Action<string>? log,
@@ -291,12 +295,12 @@ public sealed class LoopExecutor(
             {
                 foreach (var item in running)
                 {
-                    var elapsed = DateTimeOffset.UtcNow - item.StartedAtUtc;
+                    var elapsed = _clock.UtcNow - item.StartedAtUtc;
                     log?.Invoke($"    Still running issue #{item.Run.IssueId} ({elapsed.TotalSeconds:0}s elapsed)...");
                 }
             }
             options.ProgressReporter?.Invoke(running
-                .Select(item => new RunProgressSnapshot(item.Run.IssueId, item.Run.RoleSlug, item.Run.Title, DateTimeOffset.UtcNow - item.StartedAtUtc))
+                .Select(item => new RunProgressSnapshot(item.Run.IssueId, item.Run.RoleSlug, item.Run.Title, _clock.UtcNow - item.StartedAtUtc))
                 .ToList());
         }
     }
@@ -494,7 +498,7 @@ public sealed class LoopExecutor(
         string sessionId,
         CancellationToken cancellationToken)
     {
-        var client = _agentClientFactory(options.Backend);
+        var client = _agentClientFactory.Create(options.Backend);
         var issue = state.Issues.First(item => item.Id == queuedRun.IssueId);
         var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
         try
@@ -553,9 +557,9 @@ public sealed class LoopExecutor(
         _runtime.ClearExecutionSelection(state);
         var orchestratorSession = _runtime.GetOrCreateExecutionOrchestratorSession(state);
         var prompt = AgentPromptBuilder.BuildOrchestratorPrompt(state, candidates, options.MaxSubagents);
-        var client = _agentClientFactory(options.Backend);
+        var client = _agentClientFactory.Create(options.Backend);
         Log(log, options.Verbosity, $"  Running execution orchestrator via {options.Backend} (session {orchestratorSession.SessionId}, candidates {candidates.Count}, max {options.MaxSubagents})");
-        var startedAtUtc = DateTimeOffset.UtcNow;
+        var startedAtUtc = _clock.UtcNow;
         var response = await AwaitInvocationWithHeartbeatAsync(
             client.InvokeAsync(new AgentInvocationRequest
             {
@@ -709,7 +713,7 @@ public sealed class LoopExecutor(
         return selected;
     }
 
-    private static async Task<T> AwaitInvocationWithHeartbeatAsync<T>(
+    private async Task<T> AwaitInvocationWithHeartbeatAsync<T>(
         Task<T> task,
         LoopExecutionOptions options,
         Action<string>? log,
@@ -732,7 +736,7 @@ public sealed class LoopExecutor(
                 return await task;
             }
 
-            var elapsed = DateTimeOffset.UtcNow - startedAtUtc;
+            var elapsed = _clock.UtcNow - startedAtUtc;
             if (options.ProgressReporter is null)
             {
                 log?.Invoke($"    Still running {label} ({elapsed.TotalSeconds:0}s elapsed)...");

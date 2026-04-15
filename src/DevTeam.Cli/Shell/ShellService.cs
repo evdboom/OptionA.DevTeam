@@ -889,7 +889,7 @@ internal sealed partial class ShellService : IDisposable
         var sessionId = $"devteam-adhoc-{roleSlug}";
         AddEvent("→", $"Asking {Markup.Escape(roleSlug)} via {Markup.Escape(model)}...", "dim cyan");
 
-        var client = AgentClientFactory.Create("sdk");
+        var client = new DefaultAgentClientFactory().Create("sdk");
         try
         {
             var response = await client.InvokeAsync(new AgentInvocationRequest

@@ -1,7 +1,7 @@
 using System.Diagnostics;
 namespace DevTeam.Core;
 
-public sealed class ProcessCommandRunner : ICommandRunner
+public class ProcessCommandRunner : ICommandRunner
 {
     public async Task<CommandExecutionResult> RunAsync(CommandExecutionSpec spec, CancellationToken cancellationToken = default)
     {

@@ -3,7 +3,7 @@ using GitHub.Copilot.SDK;
 
 namespace DevTeam.Core;
 
-public sealed class CopilotSdkAgentClient : IAgentClient
+public class CopilotSdkAgentClient : IAgentClient
 {
     public string Name => "copilot-sdk";
 

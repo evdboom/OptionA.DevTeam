@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 
 namespace DevTeam.Core;
 
-public sealed class WorkspaceStore
+public class WorkspaceStore
 {
     private const int CurrentFormatVersion = 4;
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -15,11 +15,18 @@ public sealed class WorkspaceStore
         Converters = { new JsonStringEnumConverter(), new FlexibleDateTimeOffsetJsonConverter() }
     };
 
-    public WorkspaceStore(string workspacePath)
+    private readonly IFileSystem _fs;
+    private readonly IConfigurationLoader? _configLoader;
+
+    public WorkspaceStore(string workspacePath, IFileSystem? fileSystem = null, IConfigurationLoader? configLoader = null)
     {
+        if (string.IsNullOrWhiteSpace(workspacePath))
+            throw new ArgumentException("Workspace path must not be empty.", nameof(workspacePath));
         WorkspacePath = Path.GetFullPath(workspacePath);
         StatePath = Path.Combine(WorkspacePath, "workspace.json");
         StateDirectoryPath = Path.Combine(WorkspacePath, "state");
+        _fs = fileSystem ?? new PhysicalFileSystem();
+        _configLoader = configLoader;
     }
 
     public string WorkspacePath { get; }
@@ -31,11 +38,11 @@ public sealed class WorkspaceStore
         return WithWorkspaceLock(() =>
         {
             ResetWorkspaceArtifacts();
-            Directory.CreateDirectory(WorkspacePath);
-            Directory.CreateDirectory(Path.Combine(WorkspacePath, "runs"));
-            Directory.CreateDirectory(Path.Combine(WorkspacePath, "decisions"));
-            Directory.CreateDirectory(Path.Combine(WorkspacePath, "artifacts"));
-            var state = SeedData.BuildInitialState(repoRoot, totalCreditCap, premiumCreditCap);
+            _fs.CreateDirectory(WorkspacePath);
+            _fs.CreateDirectory(Path.Combine(WorkspacePath, "runs"));
+            _fs.CreateDirectory(Path.Combine(WorkspacePath, "decisions"));
+            _fs.CreateDirectory(Path.Combine(WorkspacePath, "artifacts"));
+            var state = SeedData.BuildInitialState(repoRoot, totalCreditCap, premiumCreditCap, _configLoader);
             Save(state);
             return state;
         });
@@ -45,13 +52,13 @@ public sealed class WorkspaceStore
     {
         return WithWorkspaceLock(() =>
         {
-            if (!File.Exists(StatePath))
+            if (!_fs.FileExists(StatePath))
             {
                 throw new InvalidOperationException(
                     $"Workspace state not found at '{StatePath}'. Run 'init' first.");
             }
 
-            using var doc = JsonDocument.Parse(File.ReadAllText(StatePath));
+            using var doc = JsonDocument.Parse(_fs.ReadAllText(StatePath));
             WorkspaceState? state;
             var migratedFromLegacy = false;
             if (doc.RootElement.TryGetProperty("FormatVersion", out var formatVersionElement)
@@ -76,7 +83,7 @@ public sealed class WorkspaceStore
                 throw new InvalidOperationException("Failed to deserialize workspace state.");
             }
 
-            var hydratedMetadata = SeedData.HydrateMissingWorkspaceMetadata(state);
+            var hydratedMetadata = SeedData.HydrateMissingWorkspaceMetadata(state, _configLoader);
             if (migratedFromLegacy || hydratedMetadata)
             {
                 Save(state);
@@ -90,11 +97,11 @@ public sealed class WorkspaceStore
     {
         WithWorkspaceLock(() =>
         {
-            Directory.CreateDirectory(WorkspacePath);
-            Directory.CreateDirectory(Path.Combine(WorkspacePath, "runs"));
-            Directory.CreateDirectory(Path.Combine(WorkspacePath, "decisions"));
-            Directory.CreateDirectory(Path.Combine(WorkspacePath, "artifacts"));
-            Directory.CreateDirectory(StateDirectoryPath);
+            _fs.CreateDirectory(WorkspacePath);
+            _fs.CreateDirectory(Path.Combine(WorkspacePath, "runs"));
+            _fs.CreateDirectory(Path.Combine(WorkspacePath, "decisions"));
+            _fs.CreateDirectory(Path.Combine(WorkspacePath, "artifacts"));
+            _fs.CreateDirectory(StateDirectoryPath);
             SaveCollections(state);
             AtomicWriteAllText(StatePath, JsonSerializer.Serialize(CreateManifest(state), JsonOptions));
             WriteIssueBoard(state);
@@ -105,7 +112,7 @@ public sealed class WorkspaceStore
 
     private void ResetWorkspaceArtifacts()
     {
-        if (!Directory.Exists(WorkspacePath))
+        if (!_fs.DirectoryExists(WorkspacePath))
         {
             return;
         }
@@ -113,18 +120,18 @@ public sealed class WorkspaceStore
         foreach (var directory in new[] { "runs", "decisions", "artifacts", "issues", "state" })
         {
             var path = Path.Combine(WorkspacePath, directory);
-            if (Directory.Exists(path))
+            if (_fs.DirectoryExists(path))
             {
-                Directory.Delete(path, true);
+                _fs.DeleteDirectory(path, true);
             }
         }
 
         foreach (var file in new[] { "workspace.json", "questions.md", "plan.md" })
         {
             var path = Path.Combine(WorkspacePath, file);
-            if (File.Exists(path))
+            if (_fs.FileExists(path))
             {
-                File.Delete(path);
+                _fs.DeleteFile(path);
             }
         }
     }
@@ -206,12 +213,12 @@ public sealed class WorkspaceStore
     private List<T> ReadCollection<T>(string fileName)
     {
         var path = Path.Combine(StateDirectoryPath, fileName);
-        if (!File.Exists(path))
+        if (!_fs.FileExists(path))
         {
             return [];
         }
 
-        return JsonSerializer.Deserialize<List<T>>(File.ReadAllText(path), JsonOptions) ?? [];
+        return JsonSerializer.Deserialize<List<T>>(_fs.ReadAllText(path), JsonOptions) ?? [];
     }
 
     private void WriteCollection<T>(string fileName, IReadOnlyList<T> items)
@@ -223,9 +230,9 @@ public sealed class WorkspaceStore
     private void DeleteCollection(string fileName)
     {
         var path = Path.Combine(StateDirectoryPath, fileName);
-        if (File.Exists(path))
+        if (_fs.FileExists(path))
         {
-            File.Delete(path);
+            _fs.DeleteFile(path);
         }
     }
 
@@ -266,7 +273,7 @@ public sealed class WorkspaceStore
     private void WriteIssueBoard(WorkspaceState state)
     {
         var issuesDir = Path.Combine(WorkspacePath, "issues");
-        Directory.CreateDirectory(issuesDir);
+        _fs.CreateDirectory(issuesDir);
 
         var indexLines = new List<string>
         {
@@ -292,7 +299,7 @@ public sealed class WorkspaceStore
             string.Join(Environment.NewLine, indexLines) + Environment.NewLine);
     }
 
-    private static void WriteIssueFile(string issuesDir, WorkspaceState state, IssueItem issue)
+    private void WriteIssueFile(string issuesDir, WorkspaceState state, IssueItem issue)
     {
         var latestRun = state.AgentRuns
             .Where(run => run.IssueId == issue.Id)
@@ -396,40 +403,40 @@ public sealed class WorkspaceStore
         return $"OptionA.DevTeam.Workspace.{hash}";
     }
 
-    private static void AtomicWriteAllText(string path, string content)
+    private void AtomicWriteAllText(string path, string content)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        _fs.CreateDirectory(Path.GetDirectoryName(path)!);
         var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(tempPath, content, Encoding.UTF8);
-            if (File.Exists(path))
+            _fs.WriteAllText(tempPath, content);
+            if (_fs.FileExists(path))
             {
                 ReplaceWithFallback(tempPath, path, content);
                 tempPath = string.Empty;
                 return;
             }
 
-            File.Move(tempPath, path);
+            _fs.MoveFile(tempPath, path);
             tempPath = string.Empty;
         }
         finally
         {
-            if (!string.IsNullOrEmpty(tempPath) && File.Exists(tempPath))
+            if (!string.IsNullOrEmpty(tempPath) && _fs.FileExists(tempPath))
             {
-                File.Delete(tempPath);
+                _fs.DeleteFile(tempPath);
             }
         }
     }
 
-    private static void ReplaceWithFallback(string tempPath, string path, string content)
+    private void ReplaceWithFallback(string tempPath, string path, string content)
     {
         Exception? replaceFailure = null;
         for (var attempt = 0; attempt < 3; attempt++)
         {
             try
             {
-                File.Replace(tempPath, path, null, ignoreMetadataErrors: true);
+                _fs.ReplaceFile(tempPath, path);
                 return;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -441,8 +448,8 @@ public sealed class WorkspaceStore
 
         try
         {
-            OverwriteInPlace(path, content);
-            File.Delete(tempPath);
+            _fs.WriteAllText(path, content);
+            _fs.DeleteFile(tempPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -450,13 +457,6 @@ public sealed class WorkspaceStore
                 $"Failed to replace '{path}' after repeated retries and in-place fallback.",
                 new AggregateException(replaceFailure ?? ex, ex));
         }
-    }
-
-    private static void OverwriteInPlace(string path, string content)
-    {
-        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
-        using var writer = new StreamWriter(stream, Encoding.UTF8);
-        writer.Write(content);
     }
 
     private static string FormatIssueId(int id) => id.ToString("0000");

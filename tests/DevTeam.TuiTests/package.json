@@ -1,0 +1,15 @@
+{
+  "name": "devteam-tui-tests",
+  "version": "1.0.0",
+  "description": "End-to-end terminal UI tests for the DevTeam interactive shell using @microsoft/tui-test.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tui-test",
+    "test:trace": "tui-test --trace"
+  },
+  "devDependencies": {
+    "@microsoft/tui-test": "0.0.4",
+    "typescript": "^5.0.0"
+  }
+}

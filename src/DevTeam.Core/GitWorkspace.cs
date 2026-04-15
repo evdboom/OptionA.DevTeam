@@ -175,3 +175,12 @@ public static class GitWorkspace
 
     private sealed record GitCommandResult(int ExitCode, string StdOut, string StdErr);
 }
+
+public sealed class ProcessGitRepository : IGitRepository
+{
+    public bool IsGitRepository(string workingDirectory) => GitWorkspace.IsGitRepository(workingDirectory);
+    public bool EnsureRepository(string workingDirectory) => GitWorkspace.EnsureRepository(workingDirectory);
+    public GitStatusSnapshot? TryCaptureStatus(string workingDirectory) => GitWorkspace.TryCaptureStatus(workingDirectory);
+    public IReadOnlyList<string> StagePathsChangedSince(string workingDirectory, GitStatusSnapshot? beforeSnapshot) =>
+        GitWorkspace.StagePathsChangedSince(workingDirectory, beforeSnapshot);
+}

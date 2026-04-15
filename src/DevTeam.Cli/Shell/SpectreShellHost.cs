@@ -1,7 +1,6 @@
 using System.Text;
 using DevTeam.Core;
 using Spectre.Console;
-using Spectre.Console.Rendering;
 
 namespace DevTeam.Cli.Shell;
 
@@ -16,17 +15,6 @@ internal static class SpectreShellHost
     private const int HeaderSize = 4;
     private const int InputSize = 6; // 4 content lines max (border top + 4 + border bottom)
     private const int AgentsSize = 8;
-    private const int LeftColumnWidth = 60;
-    // Panel border + padding consumes 4 chars on each side ("│ " left, " │" right).
-    private const int LeftColumnContentWidth = LeftColumnWidth - 4;
-    // Roadmap line: "○ <title> (<role>)" — 5 fixed chars overhead (check+space, space+parens).
-    private const int RoadmapRoleMax = 12;
-    private const int RoadmapTitleMax = LeftColumnContentWidth - 5 - RoadmapRoleMax;
-    // Agent slot: "⚡ <role> #<id> <title>" — ~8 fixed chars overhead (icon, spaces, #, id≤3 digits).
-    private const int AgentRoleMax = 14;
-    private const int AgentTitleMax = LeftColumnContentWidth - 8 - AgentRoleMax;
-    private const int ProgressPageStep = 10;    // messages per PageUp/PageDown
-    private const int FallbackTerminalHeight = 40; // used when stdout is redirected
 
     internal static async Task RunAsync(ShellService shell, CancellationToken cancellationToken)
     {
@@ -40,32 +28,47 @@ internal static class SpectreShellHost
         var inputBuffer = new StringBuilder();
         var historyCursor = -1; // -1 = not navigating history
         var savedDraft = string.Empty; // preserves unsent input while browsing history
-        var scrollOffset = 0;  // 0 = auto-follow latest; N = scrolled N messages up
+        var scrollOffset = 0;  // 0 = auto-follow latest; N = scrolled N lines up
 
         await shell.InitializeAsync();
 
-        // Build the Layout tree ONCE. Reuse the same instance and only
-        // call .Update() on the leaf nodes each tick. This guarantees
-        // the tree shape and rendered height never change between frames,
-        // which is the prerequisite for Live display to overwrite correctly.
-        var layout = BuildLayoutTree();
-        UpdateLayout(layout, shell, string.Empty, scrollOffset);
+        // Switch to the alternate screen buffer so the shell feels like a proper TUI app:
+        // pre-launch terminal content is hidden and fully restored on exit.
+        // This is the same mechanism used by vim, less, htop, etc.
+        var useAltScreen = !Console.IsOutputRedirected && !Console.IsInputRedirected;
+        if (useAltScreen)
+            Console.Write("\x1b[?1049h"); // enter alternate screen
 
-        await console.Live(layout)
-            .Overflow(VerticalOverflow.Crop)
-            .Cropping(VerticalOverflowCropping.Top)
-            .StartAsync(async context =>
-            {
-                while (!cancellationToken.IsCancellationRequested)
+        try
+        {
+            // Build the Layout tree ONCE. Reuse the same instance and only
+            // call .Update() on the leaf nodes each tick. This guarantees
+            // the tree shape and rendered height never change between frames,
+            // which is the prerequisite for Live display to overwrite correctly.
+            var layout = BuildLayoutTree();
+            UpdateLayout(layout, shell, string.Empty, scrollOffset);
+
+            await console.Live(layout)
+                .Overflow(VerticalOverflow.Crop)
+                .Cropping(VerticalOverflowCropping.Top)
+                .StartAsync(async context =>
                 {
-                    ReadInput(inputBuffer, shell, ref historyCursor, ref savedDraft, ref scrollOffset);
-                    UpdateLayout(layout, shell, inputBuffer.ToString(), scrollOffset);
-                    context.UpdateTarget(layout);
+                    while (!cancellationToken.IsCancellationRequested)
+                    {
+                        ReadInput(inputBuffer, shell, ref historyCursor, ref savedDraft, ref scrollOffset);
+                        UpdateLayout(layout, shell, inputBuffer.ToString(), scrollOffset);
+                        context.UpdateTarget(layout);
 
-                    try { await Task.Delay(RefreshMs, cancellationToken); }
-                    catch (OperationCanceledException) { break; }
-                }
-            });
+                        try { await Task.Delay(RefreshMs, cancellationToken); }
+                        catch (OperationCanceledException) { break; }
+                    }
+                });
+        }
+        finally
+        {
+            if (useAltScreen)
+                Console.Write("\x1b[?1049l"); // restore original screen
+        }
     }
 
     /// <summary>
@@ -81,7 +84,7 @@ internal static class SpectreShellHost
                 new Layout("Input").Size(InputSize));
 
         root["Body"].SplitColumns(
-            new Layout("Left").Size(LeftColumnWidth),
+            new Layout("Left").Size(ShellPanelBuilder.LeftColumnWidth),
             new Layout("Right"));
 
         root["Left"].SplitRows(
@@ -97,26 +100,26 @@ internal static class SpectreShellHost
         var snapshot = shell.LayoutSnapshot;
         var messages = shell.Messages;
 
-        root["Header"].Update(BuildHeader(snapshot.Phase, shell.IsLoopRunning));
-        root["Input"].Update(BuildInput(shell.PromptText, activeInput));
+        root["Header"].Update(ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning));
+        root["Input"].Update(ShellPanelBuilder.BuildInput(shell.PromptText, activeInput));
 
         if (snapshot.ShowMiddleRow)
         {
-            root["Agents"].Update(BuildAgentsPanel(snapshot));
+            root["Agents"].Update(ShellPanelBuilder.BuildAgentsPanel(snapshot));
 
             // Compute how many roadmap lines can fit in the remaining left-column height
             // without overflowing: termHeight - header - input - agents slot - panel borders.
-            var th = Console.IsOutputRedirected ? FallbackTerminalHeight : Math.Max(20, Console.WindowHeight);
+            var th = Console.IsOutputRedirected ? ShellPanelBuilder.FallbackTerminalHeight : Math.Max(20, Console.WindowHeight);
             var roadmapBudget = Math.Max(2, th - HeaderSize - InputSize - AgentsSize - 3);
-            root["Roadmap"].Update(BuildRoadmapPanel(snapshot, Math.Min(MaxRoadmapLines, roadmapBudget)));
+            root["Roadmap"].Update(ShellPanelBuilder.BuildRoadmapPanel(snapshot, Math.Min(MaxRoadmapLines, roadmapBudget)));
         }
         else
         {
-            root["Agents"].Update(BuildEmptyPanel("Agents"));
-            root["Roadmap"].Update(BuildEmptyPanel("Roadmap"));
+            root["Agents"].Update(ShellPanelBuilder.BuildEmptyPanel("Agents"));
+            root["Roadmap"].Update(ShellPanelBuilder.BuildEmptyPanel("Roadmap"));
         }
 
-        root["Right"].Update(BuildProgressPanel(messages, scrollOffset));
+        root["Right"].Update(ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset));
     }
 
     // ── Input handling ─────────────────────────────────────────────────────────
@@ -129,18 +132,19 @@ internal static class SpectreShellHost
         {
             var key = Console.ReadKey(intercept: true);
 
-            // PageUp → scroll progress pane up (older messages)
+            // PageUp → scroll progress pane up (older lines)
             if (key.Key == ConsoleKey.PageUp)
             {
-                var total = shell.Messages.Count;
-                scrollOffset = Math.Min(scrollOffset + ProgressPageStep, Math.Max(0, total - 1));
+                scrollOffset = Math.Min(
+                    scrollOffset + PageStep(),
+                    ShellPanelBuilder.MaxScrollOffset(shell.Messages, Math.Max(20, Console.WindowHeight), ProgressWidth()));
                 continue;
             }
 
-            // PageDown → scroll progress pane down (newer messages)
+            // PageDown → scroll progress pane down (newer lines)
             if (key.Key == ConsoleKey.PageDown)
             {
-                scrollOffset = Math.Max(0, scrollOffset - ProgressPageStep);
+                scrollOffset = Math.Max(0, scrollOffset - PageStep());
                 continue;
             }
 
@@ -151,11 +155,10 @@ internal static class SpectreShellHost
                 continue;
             }
 
-            // Home → jump to oldest visible messages
+            // Home → jump to oldest visible content (exactly fills panel, no blank space)
             if (key.Key == ConsoleKey.Home)
             {
-                var total = shell.Messages.Count;
-                scrollOffset = Math.Max(0, total - 1);
+                scrollOffset = ShellPanelBuilder.MaxScrollOffset(shell.Messages, Math.Max(20, Console.WindowHeight), ProgressWidth());
                 continue;
             }
 
@@ -244,241 +247,23 @@ internal static class SpectreShellHost
         }
     }
 
-    // ── Panel builders ─────────────────────────────────────────────────────────
-
-    private static Panel BuildHeader(WorkflowPhase phase, bool isRunning)
+    /// <summary>
+    /// One page = the visible content rows in the progress panel (budget minus 2 hint rows).
+    /// Computed dynamically so it matches the actual rendered viewport height.
+    /// </summary>
+    private static int PageStep()
     {
-        var phaseTag = phase switch
-        {
-            WorkflowPhase.Planning => "[yellow]Planning[/]",
-            WorkflowPhase.ArchitectPlanning => "[cyan]Architect Planning[/]",
-            WorkflowPhase.Execution => "[green]Execution[/]",
-            _ => phase.ToString(),
-        };
-        var runTag = isRunning ? "  [dim]⏳ running[/]" : "";
-        return new Panel(new Markup($"[teal]Phase[/]: [bold]{phaseTag}[/]{runTag}"))
-            .Header("- [teal bold]DevTeam[/] -", Justify.Center)
-            .BorderColor(Color.Purple3)
-            .Expand();
+        var th = Console.IsOutputRedirected ? ShellPanelBuilder.FallbackTerminalHeight : Math.Max(20, Console.WindowHeight);
+        return ShellPanelBuilder.ContentRowCount(th);
     }
 
-    private static Panel BuildInput(string promptText, string activeInput)
+    /// <summary>
+    /// The usable content width of the Progress panel — same formula used in
+    /// <see cref="ShellPanelBuilder.BuildProgressPanel"/> to estimate line heights.
+    /// </summary>
+    private static int ProgressWidth()
     {
-        var label = promptText.TrimEnd().TrimEnd('>').TrimEnd();
-        var lines = activeInput.Split('\n');
-        const int MaxVisible = 4;
-
-        string displayMarkup;
-        if (lines.Length <= MaxVisible)
-        {
-            var parts = lines.Select((line, i) =>
-                i == 0 ? $"[bold aqua]>[/] {Markup.Escape(line)}"
-                       : $"  {Markup.Escape(line)}");
-            displayMarkup = string.Join("\n", parts);
-        }
-        else
-        {
-            var overflow = lines.Length - MaxVisible;
-            var visible = lines[^MaxVisible..];
-            var parts = visible.Select((line, i) =>
-                i == 0 ? $"[bold aqua]>[/] {Markup.Escape(line)}"
-                       : $"  {Markup.Escape(line)}");
-            displayMarkup = $"[dim](+{overflow} line(s) above)[/]\n" + string.Join("\n", parts);
-        }
-
-        return new Panel(new Markup(displayMarkup))
-            .Header($"- [teal bold]{Markup.Escape(label)}[/] -")
-            .BorderColor(Color.Purple3)
-            .Expand();
-    }
-
-    private static Panel BuildEmptyPanel(string title) =>
-        new Panel(new Markup("[dim]—[/]"))
-            .Header($"- [teal bold]{title}[/] -")
-            .BorderColor(Color.Grey)
-            .Expand();
-
-    private static Panel BuildAgentsPanel(ShellLayoutSnapshot snapshot)
-    {
-        var markup = snapshot.Agents.Count > 0
-            ? string.Join("\n", snapshot.Agents.Select(FormatAgentSlot))
-            : "[dim]No active agents[/]";
-        return new Panel(new Markup(markup))
-            .Header("- [teal bold]Agents[/] -")
-            .BorderColor(Color.Purple3)
-            .Expand();
-    }
-
-    private static Panel BuildRoadmapPanel(ShellLayoutSnapshot snapshot, int maxLines)
-    {
-        var items = snapshot.Roadmap.Take(maxLines).Select(FormatRoadmapSlot).ToList();
-        if (snapshot.Roadmap.Count > maxLines)
-            items.Add($"[dim]… {snapshot.Roadmap.Count - maxLines} more[/]");
-        var markup = items.Count > 0 ? string.Join("\n", items) : "[dim]No issues[/]";
-        return new Panel(new Markup(markup))
-            .Header("- [teal bold]Roadmap[/] -")
-            .BorderColor(Color.Purple3)
-            .Expand();
-    }
-
-    private static Panel BuildProgressPanel(IReadOnlyList<ShellMessage> messages, int scrollOffset)
-    {
-        var termHeight = Console.IsOutputRedirected ? FallbackTerminalHeight : Math.Max(20, Console.WindowHeight);
         var termWidth = Console.IsOutputRedirected ? 120 : Math.Max(40, Console.WindowWidth);
-
-        // Height budget: total rows minus the fixed layout slots and progress panel borders.
-        var budget = Math.Max(4, termHeight - HeaderSize - InputSize - 3);
-
-        // Progress panel inner content width: terminal width minus left column minus panel padding.
-        var progressWidth = Math.Max(20, termWidth - LeftColumnWidth - 4);
-
-        IRenderable content;
-        if (messages.Count == 0)
-        {
-            content = new Markup("[grey]No events yet[/]");
-        }
-        else
-        {
-            // scrollOffset=0 → auto-follow latest. N → scrolled N items toward older.
-            var end = Math.Clamp(messages.Count - scrollOffset, 1, messages.Count);
-            var newerCount = messages.Count - end;
-
-            var rendered = new List<IRenderable>();
-            var remaining = budget;
-
-            // Newer indicator at TOP — always visible even when the bottom overflows.
-            if (newerCount > 0)
-            {
-                rendered.Add(new Markup($"[dim]↑ {newerCount} newer  ·  PgDn or End to follow[/]"));
-                remaining--;
-            }
-
-            // Walk newest → oldest, stopping before we’d overflow the budget.
-            var oldestShown = end;
-            for (var i = end - 1; i >= 0 && remaining > 1; i--)
-            {
-                var h = EstimateMessageHeight(messages[i], progressWidth);
-                if (h > remaining - 1) break; // keep 1 row for the older banner
-                remaining -= h;
-                rendered.Add(RenderMessage(messages[i]));
-                oldestShown = i;
-            }
-
-            var olderCount = oldestShown;
-            if (olderCount > 0)
-                rendered.Add(new Markup($"[dim]↓ {olderCount} older  ·  PgUp for more[/]"));
-
-            content = new Rows(rendered);
-        }
-
-        var scrolled = scrollOffset > 0;
-        var header = scrolled
-            ? "- [teal bold]Progress[/] [dim](scrolled · End to follow)[/] -"
-            : "- [teal bold]Progress[/] -";
-        return new Panel(content)
-            .Header(header)
-            .BorderColor(scrolled ? Color.Grey : Color.Purple3)
-            .Expand();
-    }
-
-    /// <summary>
-    /// Estimates the rendered row count for a message, accounting for line wrapping
-    /// at the given panel content width.
-    /// </summary>
-    private static int EstimateMessageHeight(ShellMessage msg, int contentWidth)
-    {
-        if (msg.Kind == ShellMessageKind.Line)
-        {
-            var len = VisibleLength(msg.Markup);
-            return Math.Max(1, (len + contentWidth - 1) / contentWidth);
-        }
-        // Nested panel: 2 border rows, each content line wraps within (contentWidth - 4).
-        var innerWidth = Math.Max(1, contentWidth - 4);
-        var total = 2;
-        foreach (var line in msg.Markup.Split('\n'))
-        {
-            var len = VisibleLength(line);
-            total += Math.Max(1, (len + innerWidth - 1) / innerWidth);
-        }
-        return total;
-    }
-
-    /// <summary>
-    /// Counts visible characters in a Spectre markup string by skipping tag sequences.
-    /// Handles Spectre escapes: [[ → one '[', ]] → one ']'.
-    /// </summary>
-    private static int VisibleLength(string markup)
-    {
-        var inTag = false;
-        var count = 0;
-        for (var i = 0; i < markup.Length; i++)
-        {
-            var c = markup[i];
-            if (c == '[')
-            {
-                if (i + 1 < markup.Length && markup[i + 1] == '[')
-                {
-                    count++;
-                    i++;
-                    continue;
-                }
-                inTag = true;
-                continue;
-            }
-            if (c == ']')
-            {
-                if (inTag)
-                {
-                    inTag = false;
-                    if (i + 1 < markup.Length && markup[i + 1] == ']')
-                    {
-                        count++;
-                        i++;
-                    }
-                }
-                continue;
-            }
-            if (!inTag) count++;
-        }
-        return count;
-    }
-
-    private static IRenderable RenderMessage(ShellMessage msg)
-    {
-        if (msg.Kind == ShellMessageKind.Panel)
-        {
-            var panel = new Panel(new Markup(msg.Markup));
-            if (msg.Title is not null)
-                panel.Header = msg.TitleJustify.HasValue
-                    ? new PanelHeader(msg.Title, msg.TitleJustify.Value)
-                    : new PanelHeader(msg.Title);
-            if (msg.BorderColor is not null) panel.BorderStyle = new Style(foreground: msg.BorderColor.Value);
-            return panel;
-        }
-        return new Markup(msg.Markup);
-    }
-
-    // ── Formatting helpers ─────────────────────────────────────────────────────
-
-    private static string FormatAgentSlot(AgentSlot slot)
-    {
-        var icon = slot.Status == AgentRunStatus.Running ? "⚡" : "⏳";
-        var role = slot.RoleSlug.Length > AgentRoleMax ? slot.RoleSlug[..(AgentRoleMax - 1)] + "…" : slot.RoleSlug;
-        var title = slot.Title.Length > AgentTitleMax ? slot.Title[..(AgentTitleMax - 1)] + "…" : slot.Title;
-        return $"[dim]{icon}[/] [cyan]{Markup.Escape(role)}[/] [dim]#{slot.IssueId}[/] {Markup.Escape(title)}";
-    }
-
-    private static string FormatRoadmapSlot(RoadmapSlot slot)
-    {
-        var (check, statusColor) = slot.Status switch
-        {
-            ItemStatus.Done => ("[green]✓[/]", "green"),
-            ItemStatus.InProgress => ("[yellow]⚡[/]", "yellow"),
-            ItemStatus.Blocked => ("[red]✗[/]", "red"),
-            _ => ("[dim]○[/]", "dim"),
-        };
-        var role = slot.RoleSlug.Length > RoadmapRoleMax ? slot.RoleSlug[..(RoadmapRoleMax - 1)] + "…" : slot.RoleSlug;
-        var title = slot.Title.Length > RoadmapTitleMax ? slot.Title[..(RoadmapTitleMax - 1)] + "…" : slot.Title;
-        return $"{check} [{statusColor}]{Markup.Escape(title)}[/] [dim]({Markup.Escape(role)})[/]";
+        return Math.Max(20, termWidth - ShellPanelBuilder.LeftColumnWidth - 4);
     }
 }

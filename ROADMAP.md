@@ -1,4 +1,189 @@
 # DevTeam Roadmap
+
+## 14 — Git worktree support for parallel agents
+
+**Goal:** When multiple agents run in parallel, each agent currently works in the same working directory. This causes silent file-level conflicts: two agents editing the same file produce only one agent's changes. Git worktrees give each parallel agent its own isolated branch + working directory, making parallel execution truly conflict-safe.
+
+**How it works today:** `LoopExecutor` runs up to `MaxSubagents` issues concurrently. They all write to `state.RepoRoot`. If two developer agents both edit `src/Api.cs`, one wins and the other's changes are lost with no error.
+
+**Proposed model:**
+1. Before spawning a parallel batch, `LoopExecutor` creates a git worktree per agent: `git worktree add .devteam/worktrees/issue-{id} -b devteam/issue-{id}`
+2. Each agent runs with `WorkingDirectory` set to its worktree path instead of `RepoRoot`
+3. After an agent completes successfully, its branch is merged back into the main branch
+4. Conflicts are surfaced as a new `ConflictResolution` issue assigned to the `developer` or `architect` role with the diff attached
+5. After all agents complete (including conflict resolution), the worktrees are removed
+
+**Conflict resolution strategy:** Rather than auto-merge (which produces corrupt output), create a first-class `ConflictResolution` issue. The assigned role sees: the conflict markers, both versions, the context of what each agent was trying to do. It resolves and commits. This keeps the human-readable issue board as the conflict audit trail.
+
+| Step | Detail |
+|---|---|
+| 14.1 | Architect spike — define the worktree lifecycle: when to create, when to merge, when to clean up. What happens if the orchestrator crashes mid-batch? (Answer: worktrees survive and are re-attached on next run.) |
+| 14.2 | Add `WorktreeMode` flag to `RuntimeConfiguration`. Default off. Enable with `--worktrees` on `run-loop` or via `/worktrees on` in the shell. |
+| 14.3 | `IGitRepository` extension — add `CreateWorktree(repoRoot, path, branch)`, `RemoveWorktree(repoRoot, path)`, `MergeWorktree(repoRoot, branch)`, `GetConflictedFiles(repoRoot)`. Implement in `ProcessGitRepository`. |
+| 14.4 | `LoopExecutor` worktree allocation — before spawning parallel runs, create one worktree per run. Pass the worktree path as `WorkingDirectory` to `AgentInvocationRequest`. |
+| 14.5 | Post-merge conflict detection — after each worktree merge, check for conflicts. If found, create a `ConflictResolution` issue with the conflicted diff as the issue detail. Cancel the conflicted worktree merge and leave the worktree until the resolution issue completes. |
+| 14.6 | Shell `/worktrees` command — list active worktrees, their associated issue, and status (running/merged/conflict). |
+| 14.7 | Smoke tests for worktree lifecycle: create, parallel run, merge, conflict detection, cleanup. |
+
+**Estimated scope:** Large — touches `IGitRepository`, `LoopExecutor`, `WorkspaceState` (worktree registry), and the shell. 1 architect issue, 6–8 developer issues.
+
+---
+
+## 15 — AI family cross-pollination for review roles
+
+**Goal:** When an OpenAI model builds something, an Anthropic model reviews it (and vice versa). Independent AI families have different blind spots; cross-family review catches errors that same-family review misses.
+
+**Current model selection:** `RoleModelPolicy.ModelPool` is a list of models. `LoopExecutor` picks randomly from affordable models in the pool. There is no awareness of what model built the artifact being reviewed.
+
+**Proposed model:**
+1. Add a `Family` field to `ModelDefinition`: `"openai"`, `"anthropic"`, `"google"`, `"other"`
+2. `AgentRun` already records `ModelName` — derive `ModelFamily` from it
+3. When a review/test role is selecting from its model pool, it checks the family of the model that completed the *predecessor issue* and prefers a different family
+4. Falls back to random selection if no cross-family model is affordable
+
+**Family tagging (initial defaults):**
+
+| Family | Models |
+|---|---|
+| `openai` | gpt-5.4, gpt-5.4-mini, gpt-5-mini, gpt-5.1, gpt-5.2, gpt-5.3-codex |
+| `anthropic` | claude-sonnet-4.6, claude-haiku-4.5, claude-opus-4.6, claude-sonnet-4.5 |
+| `google` | gemini-3.1-pro-preview, gemini-3-flash-preview |
+
+**Which roles benefit:** `reviewer`, `tester`, `security`, `analyst` — roles whose value is in finding what the builder missed.
+
+| Step | Detail |
+|---|---|
+| 15.1 | Add `Family` field to `ModelDefinition`. Seed defaults from the table above. If `MODELS.json` specifies `"Family"`, use that; otherwise infer from the model name prefix. |
+| 15.2 | Add `ModelFamily` (string) to `AgentRun` so we record which family was used per run. Populate from `ModelDefinition.Family` when the run is created. |
+| 15.3 | Add `CrossFamilyReviewEnabled` flag to `RuntimeConfiguration` (default: `true`). |
+| 15.4 | In model selection logic (currently in `DevTeamRuntime` / `BudgetService`): when `CrossFamilyReviewEnabled` and the issue depends on a predecessor run, filter the model pool to prefer a different family than the predecessor's `ModelFamily`. Fall back to full pool if no cross-family model is affordable. |
+| 15.5 | Add `/cross-family <on\|off>` shell command. |
+| 15.6 | Smoke tests: verify that a reviewer issue whose predecessor used an `openai` model selects an `anthropic` model from its pool when both are affordable. |
+
+**Estimated scope:** Small-medium — mostly model selection logic + a new field. 1 architect issue, 2–3 developer issues.
+
+---
+
+## 16 — Console input: full cursor and multiline navigation
+
+**Goal:** Left/right arrows move the cursor within typed text. Up/down arrows behave *contextually*: in a single-line input they navigate command history (current behaviour); in a multiline input they move the cursor vertically within the buffer (like any modern text editor or chat interface). Currently Left/Right are ignored, and Up/Down always trigger history regardless of context.
+
+**Current state:** `SpectreShellHost.ReadInput` uses `Console.ReadKey(intercept: true)` and a `StringBuilder inputBuffer`. Left/Right `ConsoleKey` values have no handler. Up/Down always navigate `_history` — even when the user is mid-edit on line 3 of a 5-line prompt.
+
+**What needs to change — horizontal navigation:**
+- Track a `cursorPosition` integer (0 = before first char, `inputBuffer.Length` = after last)
+- Left: decrement cursor (clamped to 0); wraps to end of previous line at column 0
+- Right: increment cursor (clamped to length); wraps to start of next line at end of line
+- Backspace: delete char at `cursorPosition - 1`, decrement cursor
+- Delete: delete char at `cursorPosition` (no cursor movement)
+- Character input: insert at `cursorPosition`, increment cursor
+- Ctrl+Left / Ctrl+Right: word-by-word jumping (next/previous whitespace boundary)
+- Home key: move cursor to start of current line (within multiline buffer)
+- End key: move cursor to end of current line
+
+**What needs to change — vertical navigation (the tricky part):**
+
+The correct behaviour depends on the current input context:
+
+| Condition | Up arrow | Down arrow |
+|---|---|---|
+| Single-line input OR cursor is on line 1 | Navigate history (current behaviour) | Navigate history (current behaviour) |
+| Multiline input AND cursor row > 0 | Move cursor up one logical line, same column | Move cursor down one logical line, same column |
+| Multiline input AND cursor on last line | Move cursor down one line if possible, else navigate history forward | Navigate history forward |
+
+This matches the behaviour of VS Code's terminal input, GitHub's comment box, and this chat interface.
+
+**Design decision required (step 16.0):** The boundary case — "cursor on line 1 of a multiline input" — should trigger history navigation or do nothing? Options:
+- (A) Always prefer history on line 1 regardless of multiline state — consistent with current muscle memory
+- (B) Never trigger history while multiline content exists — prevents accidental history overwrite of a long prompt
+- (C) Require Ctrl+Up to navigate history when in multiline mode — explicit, never ambiguous
+
+This is a UX judgement call that should be an explicit **architect review issue** before implementation. The table above uses option (A) as the safe default, but the architect issue should evaluate all three with a recommendation.
+
+**Rendering:**
+- `BuildInput` / `ShellPanelBuilder.BuildInput` receives `cursorPosition` and inserts a `▌` marker at the cursor offset
+- In multiline mode, the marker appears mid-line, not just at the end
+- The `▌` approach is frame-based (100ms Live display tick) — no flicker concern
+
+| Step | Detail |
+|---|---|
+| 16.0 | **Architect review issue** — evaluate Up/Down behaviour options (A/B/C above) for the multiline boundary case. Produce a recommendation and update this step before development starts. |
+| 16.1 | Add `cursorPosition` tracking to `ReadInput`. Update character input and backspace to use cursor position (insert-at-cursor, not always append). |
+| 16.2 | Implement Left/Right, Ctrl+Left/Right, Delete, line-aware Home/End. |
+| 16.3 | Implement context-aware Up/Down per the architect-approved option. Track `cursorRow` derived from `inputBuffer` newline count and `cursorPosition` offset. |
+| 16.4 | Update `BuildInput` / `ShellPanelBuilder.BuildInput` to accept `cursorPosition`, insert `▌` at the right offset within the rendered lines. |
+| 16.5 | Thread `cursorPosition` through `SpectreShellHost.RunAsync` → `UpdateLayout`. |
+| 16.6 | Shell tests (item 11): verify `BuildInput` places `▌` at position 0, mid-string, end-of-string, and mid-multiline. Verify Up/Down dispatch logic for single-line vs multiline with cursor on different rows. |
+
+**Estimated scope:** Small-medium — contained in `SpectreShellHost` and `ShellPanelBuilder`, plus the architect review. Steps 16.1–16.2 are straightforward; 16.3 is the interesting part.
+
+---
+
+## 11 — Terminal UI snapshot tests
+
+**Goal:** Make the SpectrConsole shell testable. Currently any change to `SpectreShellHost` or `ShellService` can silently break rendering with no automated signal.
+
+**Architecture insight:** `ShellService` is already separated from rendering — it's pure state (`Messages`, `LayoutSnapshot`). `SpectreShellHost` is the renderer. This gives two clean test layers without needing Playwright/Cypress or browser tooling.
+
+**Layer 1 — ShellService logic tests (no console):**
+Call `ProcessInputAsync` with command strings, assert on `Messages` and `LayoutSnapshot`. Covers: question flow, plan approval, loop-running state transitions, `/status`, `/plan`, `@role` invocation, error handling.
+
+**Layer 2 — Panel rendering tests (TestConsole):**
+Spectre.Console ships a `TestConsole` in `Spectre.Console.Testing` that captures all rendered output as a string. Extract `SpectreShellHost`'s private `Build*Panel` methods into an `internal ShellPanelBuilder` class, then render each panel in tests and assert on visible content.
+
+**Layer 3 — Scenario regression tests:**
+Use the existing `UiHarness.BuildScenarioState` scenarios (empty, planning, architect, execution, questions) as test fixtures. Render the full layout snapshot, save output as a snapshot file, fail if it changes unexpectedly.
+
+| Step | Detail |
+|---|---|
+| 11.1 | Create `tests\DevTeam.ShellTests\` project. Reference `DevTeam.Cli` and `DevTeam.Core`. Add `Spectre.Console.Testing` package. |
+| 11.2 | Extract `SpectreShellHost`'s `Build*Panel` private static methods into `internal static class ShellPanelBuilder`. Mark `internal` members visible to the test project via `InternalsVisibleTo`. |
+| 11.3 | Add `ShellServiceTests` — test `ShellService` state management: commands, question and approval flow, loop-running guard, `@role` parsing. All state-level, no console. |
+| 11.4 | Add `ShellPanelRenderTests` — render each panel type through `TestConsole`. Assert that role names, issue IDs, phase labels, budget numbers appear correctly. |
+| 11.5 | Add `UiHarnessScenarioTests` — render the full layout for each `UiHarness` scenario. Snapshot the output. These are the regression tests — any layout change that changes visible text fails here first. |
+| 11.6 | Add `--no-tty` flag to `SpectreShellHost.RunAsync` (and wire from CLI args): when set, disable `LiveDisplay` and fall back to plain `Console.WriteLine` log lines. This makes CI/container runs clean without ANSI escape codes. |
+
+**Prerequisite:** `IConsoleOutput` abstraction from Phase 3 (`hygiene-console`) unlocks testing of `CliDispatcher` output too, but isn't required for Phase 11 steps 11.1–11.5. Step 11.6 is independent.
+
+**Estimated scope:** Small-medium — entirely additive, no existing behaviour changes. 1 architect issue, 3–4 developer issues.
+
+---
+
+## 12 — Brownfield init: automatic codebase reconnaissance
+
+**Goal:** When targeting a large existing codebase, `devteam init` should automatically run a one-shot Navigator pass and produce a `CODEBASE_CONTEXT.md` that gets injected into every subsequent planner and architect prompt. This makes DevTeam dramatically less likely to break existing conventions or duplicate existing patterns.
+
+**What the recon covers:** tech stack, folder structure, existing test framework and coverage patterns, key entry points, coding conventions (detected from existing files), known fragile areas (large files, circular deps, no tests).
+
+| Step | Detail |
+|---|---|
+| 12.1 | Architect spike: define the recon prompt and the `CODEBASE_CONTEXT.md` schema. What's the minimum context a planner needs to not repeat existing work? |
+| 12.2 | Add `--recon` flag to `init` command (default: on for non-empty repos). When set, run a single Navigator-style agent call before writing `workspace.json`. |
+| 12.3 | Store the recon output as `state.CodebaseContext` in `WorkspaceState`. Persist to `.devteam/codebase-context.md`. |
+| 12.4 | Inject `CodebaseContext` into the planner and architect prompt builders in `AgentPromptBuilder` (or equivalent). |
+| 12.5 | Add `/recon` shell command to re-run the recon on demand (e.g., after major refactors). |
+| 12.6 | Smoke tests: verify that a workspace initialized with `--recon` has a non-empty `CodebaseContext` and that it appears in the generated planner prompt. |
+
+**Estimated scope:** Medium — new init flow, new state field, prompt injection. 1 architect issue, 3–4 developer issues.
+
+---
+
+## 13 — Container and CI mode
+
+**Goal:** Run DevTeam inside a Docker container or GitHub Actions pipeline with zero TTY assumptions. The headless mode already exists (`--verbosity quiet`) but `SpectreShellHost`'s `LiveDisplay` throws or produces corrupt output in non-interactive terminals.
+
+| Step | Detail |
+|---|---|
+| 13.1 | Auto-detect non-interactive terminal: if `Console.IsOutputRedirected` or `--no-tty` is set, skip `SpectreShellHost` entirely and use plain log output. |
+| 13.2 | Add `Dockerfile` to the repo root: installs dotnet, installs the DevTeam tool, copies workspace config. Entrypoint: `devteam run-loop`. |
+| 13.3 | Add `.github/workflows/devteam-run.yml` template: checkout → install DevTeam tool → `devteam init --goal "..."` → `devteam run-loop --max-iterations 10 --verbosity quiet`. |
+| 13.4 | Non-TTY output format: structured JSON lines (`{"timestamp": ..., "event": ..., "detail": ...}`) as an alternative to plain text, for CI log parsers. Flag: `--output-format jsonl`. |
+| 13.5 | Smoke test: run `devteam start` with `Console.IsInputRedirected = true` (simulated) and verify it falls back to non-Live output without throwing. |
+
+**Estimated scope:** Small — mostly infrastructure/config. One developer issue for the TTY detection + fallback, one for the Dockerfile and workflow template.
+
+---
+
 ## 6 — GitHub mode (major feature)
 
 **Goal:** Run DevTeam against a real GitHub repository. Use GitHub Issues as the issue board, assign issues to Copilot, use PRs for implementation output, reviewer role does the PR review. While keeping the strength of the multi agent role scoped runs.
@@ -54,6 +239,41 @@
 | 7.6 | `--personas off` flag (or `Runtime.PersonasEnabled` config) to revert to plain text for automation/CI contexts. |
 
 **Estimated scope:** Small-medium — 1 architect issue, 3–4 developer issues. Entirely additive; no existing behaviour changes.
+
+---
+
+## 7b — Adventure mode 🎮 (easter egg — do not prioritise until core loop is solid)
+
+**Inspiration:** Same pixel-agents inspiration, taken all the way.
+
+**Concept:** A hidden `--adventure` flag (or `/adventure` shell command) that replaces the standard Live display with a top-down 2D ASCII map. Each agent role occupies a fixed desk on the map. The user controls a `@` character that can walk around using arrow keys. Walking up to an agent's desk and pressing Enter opens a chat dialog — mechanically equivalent to `@architect <message>` but wrapped in the spatial metaphor.
+
+```
+┌─────────────────────────────────────────┐
+│  📋 planner       🏗️ architect          │
+│  [ done ]         [ thinking... ]       │
+│                                         │
+│  💻 developer     🧪 tester             │
+│  [ running #7 ]   [ idle ]              │
+│                                         │
+│              @                          │  ← you
+└─────────────────────────────────────────┘
+  > Walking toward architect...
+```
+
+When adjacent to an agent:
+- Press **Enter** → opens inline chat, input is sent as `@{role} <text>` to the running session
+- The agent's response appears as a speech bubble above their desk tile
+- The loop continues running in the background while the user explores
+
+**Why this is cool:** It makes the multi-agent parallel loop *tangible*. You can see all your agents working simultaneously, walk over to the one that's blocked, ask it a question, and watch it unblock in real time. It's a genuine mental model shift from "I submitted a command" to "I talked to someone."
+
+**Prerequisites:** Item 7 (personas) should land first — the persona metadata (`Avatar`, `DisplayName`, `ActiveFlavour`) is reused directly. Item 10 (orchestrator-driven loop) makes the background execution more robust for this interaction pattern.
+
+**Notes:**
+- This is explicitly an easter egg — off by default, no documentation in the main README, discoverable via `/help --all` or word of mouth
+- Spectre.Console can render the map as a `Canvas` or a grid of `Markup` strings redrawn each tick
+- Arrow key navigation conflicts with the existing history navigation — needs a modal input state (normal shell mode vs. adventure mode)
 
 ---
 

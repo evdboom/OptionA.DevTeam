@@ -1,6 +1,6 @@
 namespace DevTeam.Core;
 
-public sealed class CopilotCliAgentClient(ICommandRunner? runner = null) : IAgentClient
+public class CopilotCliAgentClient(ICommandRunner? runner = null) : IAgentClient
 {
     private readonly ICommandRunner _runner = runner ?? new ProcessCommandRunner();
 

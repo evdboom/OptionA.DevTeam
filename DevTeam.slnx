@@ -5,5 +5,8 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DevTeam.SmokeTests/DevTeam.SmokeTests.csproj" />
+    <Project Path="tests/DevTeam.ShellTests/DevTeam.ShellTests.csproj" />
+    <Project Path="tests/DevTeam.TestInfrastructure/DevTeam.TestInfrastructure.csproj" />
+    <Project Path="tests/DevTeam.UnitTests/DevTeam.UnitTests.csproj" />
   </Folder>
 </Solution>

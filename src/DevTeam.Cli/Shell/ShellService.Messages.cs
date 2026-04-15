@@ -10,38 +10,47 @@ internal sealed partial class ShellService
 
     private void AddInteractiveHelp()
     {
+        var markup = BuildInteractiveHelpMarkup();
+        AddSystem(markup, "help");
+    }
+
+    /// <summary>
+    /// Builds the interactive help markup string. Extracted for testability.
+    /// </summary>
+    internal static string BuildInteractiveHelpMarkup()
+    {
         var sb = new StringBuilder();
         sb.AppendLine("[bold]Interactive commands:[/]");
-        sb.AppendLine("  [cyan]/init[/] \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]");
-        sb.AppendLine("  [cyan]/customize[/] [[--force]]    Copy default assets to .devteam-source/ for editing");
-        sb.AppendLine("  [cyan]/bug[/] [[--save PATH]] [[--redact-paths true|false]]");
-        sb.AppendLine("  [cyan]/status[/]");
-        sb.AppendLine("  [cyan]/history[/]              Show session command history (last 50)");
-        sb.AppendLine("  [cyan]/mode[/] <slug>");
-        sb.AppendLine("  [cyan]/keep-awake[/] <on|off>");
-        sb.AppendLine("  [cyan]/add-issue[/] \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--depends-on N ...]]");
-        sb.AppendLine("  [cyan]/plan[/]");
-        sb.AppendLine("  [cyan]/questions[/]");
-        sb.AppendLine("  [cyan]/budget[/] [[--total N]] [[--premium N]]");
-        sb.AppendLine("  [cyan]/check-update[/]");
-        sb.AppendLine("  [cyan]/update[/]");
-        sb.AppendLine("  [cyan]/max-iterations[/] <N>    Set workspace default max iterations");
-        sb.AppendLine("  [cyan]/max-subagents[/] <N>     Set workspace default max subagents (1=sequential, 2–4=parallel)");
-        sb.AppendLine("  [cyan]/run[/] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]]  [dim]starts in background[/]");
-        sb.AppendLine("  [cyan]/stop[/]              Cancel the running loop");
-        sb.AppendLine("  [cyan]/wait[/]              Re-attach to the running loop and wait for it to finish");
-        sb.AppendLine("  [cyan]/feedback[/] <text>");
-        sb.AppendLine("  [cyan]/approve[/] [[note]]");
-        sb.AppendLine("  [cyan]/answer[/] <id> <text>  [dim]works while the loop is running[/]");
-        sb.AppendLine("  [cyan]/goal[/] <text> [[--goal-file PATH]]");
-        sb.AppendLine("  [cyan]/exit[/]");
+        sb.AppendLine("  [cyan]/init[/] \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]  [dim]Initialise workspace with a goal[/]");
+        sb.AppendLine("  [cyan]/customize[/] [[--force]]    [dim]Copy default prompt assets to .devteam-source/ for editing[/]");
+        sb.AppendLine("  [cyan]/bug[/] [[--save PATH]] [[--redact-paths true|false]]  [dim]Generate a sanitized bug report draft[/]");
+        sb.AppendLine("  [cyan]/status[/]               [dim]Show workspace phase, open issues and questions[/]");
+        sb.AppendLine("  [cyan]/history[/]              [dim]Show session command history (last 50)[/]");
+        sb.AppendLine("  [cyan]/mode[/] <slug>          [dim]Switch the active run mode[/]");
+        sb.AppendLine("  [cyan]/keep-awake[/] <on|off>  [dim]Prevent system sleep during long runs[/]");
+        sb.AppendLine("  [cyan]/add-issue[/] \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--depends-on N ...]]  [dim]Queue a new issue[/]");
+        sb.AppendLine("  [cyan]/plan[/]                 [dim]Show or generate the current plan[/]");
+        sb.AppendLine("  [cyan]/questions[/]            [dim]List open questions[/]");
+        sb.AppendLine("  [cyan]/budget[/] [[--total N]] [[--premium N]]  [dim]View or adjust the credit budget[/]");
+        sb.AppendLine("  [cyan]/check-update[/]         [dim]Check for a newer version of DevTeam[/]");
+        sb.AppendLine("  [cyan]/update[/]               [dim]Update DevTeam to the latest version[/]");
+        sb.AppendLine("  [cyan]/max-iterations[/] <N>   [dim]Set workspace default max iterations per loop[/]");
+        sb.AppendLine("  [cyan]/max-subagents[/] <N>    [dim]Set workspace default max subagents (1=sequential, 2–4=parallel)[/]");
+        sb.AppendLine("  [cyan]/run[/] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]]  [dim]Start the loop in the background[/]");
+        sb.AppendLine("  [cyan]/stop[/]                 [dim]Cancel the running loop[/]");
+        sb.AppendLine("  [cyan]/wait[/]                 [dim]Re-attach to the running loop and wait for it to finish[/]");
+        sb.AppendLine("  [cyan]/feedback[/] <text>      [dim]Add planning feedback[/]");
+        sb.AppendLine("  [cyan]/approve[/] [[note]]     [dim]Approve the current plan and advance to the next phase[/]");
+        sb.AppendLine("  [cyan]/answer[/] <id> <text>   [dim]Answer an open question (works while the loop is running)[/]");
+        sb.AppendLine("  [cyan]/goal[/] <text> [[--goal-file PATH]]  [dim]Set or update the active goal[/]");
+        sb.AppendLine("  [cyan]/exit[/]                 [dim]Exit the shell[/]");
         sb.AppendLine();
         sb.AppendLine("If exactly one question is open, you can type a plain answer without /answer.");
         sb.AppendLine("While a plan is awaiting approval, plain text is treated as planning feedback.");
         sb.AppendLine();
         sb.AppendLine("[bold]Direct role invocation:[/]");
         sb.Append("  [cyan]@role[/] <message>    e.g. [dim]@architect can you review our API design?[/]");
-        AddSystem(sb.ToString(), "help");
+        return sb.ToString();
     }
 
     // ── Banner ─────────────────────────────────────────────────────────────────

@@ -7,25 +7,43 @@ using static DevTeam.Cli.CliLoopHandler;
 
 namespace DevTeam.Cli;
 
-internal sealed class CliDispatcher(
-    WorkspaceStore store,
-    DevTeamRuntime runtime,
-    LoopExecutor loopExecutor,
-    ToolUpdateService toolUpdateService,
-    string workspacePath)
+internal sealed class CliDispatcher
 {
+    private readonly WorkspaceStore _store;
+    private readonly DevTeamRuntime _runtime;
+    private readonly LoopExecutor _loopExecutor;
+    private readonly ToolUpdateService _toolUpdateService;
+    private readonly string _workspacePath;
+    private readonly IConsoleOutput _output;
+
+    public CliDispatcher(
+        WorkspaceStore store,
+        DevTeamRuntime runtime,
+        LoopExecutor loopExecutor,
+        ToolUpdateService toolUpdateService,
+        string workspacePath,
+        IConsoleOutput? output = null)
+    {
+        _store = store;
+        _runtime = runtime;
+        _loopExecutor = loopExecutor;
+        _toolUpdateService = toolUpdateService;
+        _workspacePath = workspacePath;
+        _output = output ?? new ConsoleOutput();
+    }
+
     public async Task<int> DispatchAsync(string command, Dictionary<string, List<string>> options)
     {
         switch (command)
         {
             case "start":
-                return await RunShellAsync(store, runtime, loopExecutor, toolUpdateService, options);
+                return await RunShellAsync(_store, _runtime, _loopExecutor, _toolUpdateService, options);
 
             case "check-update":
-                return await CheckForToolUpdatesAsync(toolUpdateService);
+                return await CheckForToolUpdatesAsync(_toolUpdateService);
 
             case "update":
-                return await ScheduleToolUpdateAsync(toolUpdateService, interactiveShell: false);
+                return await ScheduleToolUpdateAsync(_toolUpdateService, interactiveShell: false);
 
             case "ui-harness":
                 return await UiHarness.RunAsync(options);
@@ -48,10 +66,10 @@ internal sealed class CliDispatcher(
             case "init":
             {
                 var force = GetBoolOption(options, "force", false);
-                if (!force && File.Exists(store.StatePath))
+                if (!force && File.Exists(_store.StatePath))
                 {
-                    Console.Error.WriteLine($"Workspace already initialized at {Path.GetFullPath(workspacePath)}.");
-                    Console.Error.WriteLine("Use --force to reinitialize (this will reset all workspace state).");
+                    _output.WriteErrorLine($"Workspace already initialized at {Path.GetFullPath(_workspacePath)}.");
+                    _output.WriteErrorLine("Use --force to reinitialize (this will reset all workspace state).");
                     return 1;
                 }
                 var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
@@ -61,7 +79,7 @@ internal sealed class CliDispatcher(
                     GetOption(options, "goal-file"),
                     Environment.CurrentDirectory);
                 var gitInitialized = GitWorkspace.EnsureRepository(Environment.CurrentDirectory);
-                var state = store.Initialize(Environment.CurrentDirectory, totalCap, premiumCap);
+                var state = _store.Initialize(Environment.CurrentDirectory, totalCap, premiumCap);
                 var mode = GetOption(options, "mode");
                 state.Runtime.KeepAwakeEnabled = GetBoolOption(options, "keep-awake", state.Runtime.KeepAwakeEnabled);
                 state.Runtime.WorkspaceMcpEnabled = GetBoolOption(options, "workspace-mcp", true);
@@ -69,22 +87,22 @@ internal sealed class CliDispatcher(
                 state.Runtime.AutoApproveEnabled = GetBoolOption(options, "auto-approve", state.Runtime.AutoApproveEnabled);
                 if (!string.IsNullOrWhiteSpace(mode))
                 {
-                    runtime.SetMode(state, mode);
+                    _runtime.SetMode(state, mode);
                 }
                 if (!string.IsNullOrWhiteSpace(goal))
                 {
-                    runtime.SetGoal(state, goal);
+                    _runtime.SetGoal(state, goal);
                 }
-                store.Save(state);
+                _store.Save(state);
 
-                Console.WriteLine($"Initialized devteam workspace at {Path.GetFullPath(workspacePath)}");
+                _output.WriteLine($"Initialized devteam workspace at {Path.GetFullPath(_workspacePath)}");
                 if (gitInitialized)
                 {
-                    Console.WriteLine($"Initialized git repository at {Path.GetFullPath(Environment.CurrentDirectory)}");
+                    _output.WriteLine($"Initialized git repository at {Path.GetFullPath(Environment.CurrentDirectory)}");
                 }
                 if (!string.IsNullOrWhiteSpace(goal))
                 {
-                    Console.WriteLine($"Active goal saved: {goal}");
+                    _output.WriteLine($"Active goal saved: {goal}");
                 }
                 return 0;
             }
@@ -100,125 +118,125 @@ internal sealed class CliDispatcher(
             case "bug":
             case "bug-report":
             {
-                EmitBugReport(store, runtime, options, shellDiagnostics: null);
+                EmitBugReport(_store, _runtime, options, shellDiagnostics: null);
                 return 0;
             }
 
             case "set-goal":
             case "goal":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var goal = GoalInputResolver.Resolve(
                     GetPositionalValue(options),
                     GetOption(options, "goal-file"),
                     Environment.CurrentDirectory)
                     ?? throw new InvalidOperationException("Missing goal text. Provide inline text or --goal-file PATH.");
-                runtime.SetGoal(state, goal);
-                store.Save(state);
-                Console.WriteLine("Updated active goal.");
+                _runtime.SetGoal(state, goal);
+                _store.Save(state);
+                _output.WriteLine("Updated active goal.");
                 return 0;
             }
 
             case "set-mode":
             case "mode":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var mode = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing mode slug.");
-                runtime.SetMode(state, mode);
-                store.Save(state);
-                Console.WriteLine($"Updated active mode to {state.Runtime.ActiveModeSlug}.");
+                _runtime.SetMode(state, mode);
+                _store.Save(state);
+                _output.WriteLine($"Updated active mode to {state.Runtime.ActiveModeSlug}.");
                 return 0;
             }
 
             case "set-keep-awake":
             case "keep-awake":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var requested = GetPositionalValue(options) ?? GetOption(options, "enabled")
                     ?? throw new InvalidOperationException("Usage: set-keep-awake <true|false> [--workspace PATH]");
                 var enabled = ParseBoolOrThrow(requested, "Usage: set-keep-awake <true|false> [--workspace PATH]");
-                runtime.SetKeepAwake(state, enabled);
-                store.Save(state);
-                Console.WriteLine($"Updated keep-awake setting to {(enabled ? "enabled" : "disabled")}.");
+                _runtime.SetKeepAwake(state, enabled);
+                _store.Save(state);
+                _output.WriteLine($"Updated keep-awake setting to {(enabled ? "enabled" : "disabled")}.");
                 return 0;
             }
 
             case "add-roadmap":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var title = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing roadmap title.");
                 var detail = GetOption(options, "detail") ?? "";
                 var priority = GetIntOption(options, "priority", 50);
-                var item = runtime.AddRoadmapItem(state, title, detail, priority);
-                store.Save(state);
-                Console.WriteLine($"Created roadmap item #{item.Id}: {item.Title}");
+                var item = _runtime.AddRoadmapItem(state, title, detail, priority);
+                _store.Save(state);
+                _output.WriteLine($"Created roadmap item #{item.Id}: {item.Title}");
                 return 0;
             }
 
             case "add-issue":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var title = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing issue title.");
-                var role = GetOption(options, "role") ?? throw new InvalidOperationException(BuildMissingRoleMessage(runtime, state));
+                var role = GetOption(options, "role") ?? throw new InvalidOperationException(BuildMissingRoleMessage(_runtime, state));
                 var detail = GetOption(options, "detail") ?? "";
                 var area = GetOption(options, "area");
                 var priority = GetIntOption(options, "priority", 50);
                 var roadmapId = GetNullableIntOption(options, "roadmap-item-id");
                 var dependsOn = GetMultiIntOption(options, "depends-on");
-                ValidateRoleOrThrow(runtime, state, role);
-                var issue = runtime.AddIssue(state, title, detail, role, priority, roadmapId, dependsOn, area);
-                store.Save(state);
-                Console.WriteLine($"Created issue #{issue.Id}: {issue.Title} ({issue.RoleSlug}{(string.IsNullOrWhiteSpace(issue.Area) ? "" : $", area {issue.Area}")})");
+                ValidateRoleOrThrow(_runtime, state, role);
+                var issue = _runtime.AddIssue(state, title, detail, role, priority, roadmapId, dependsOn, area);
+                _store.Save(state);
+                _output.WriteLine($"Created issue #{issue.Id}: {issue.Title} ({issue.RoleSlug}{(string.IsNullOrWhiteSpace(issue.Area) ? "" : $", area {issue.Area}")})");
                 return 0;
             }
 
             case "add-question":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var text = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing question text.");
-                var question = runtime.AddQuestion(state, text, options.ContainsKey("blocking"));
-                store.Save(state);
-                Console.WriteLine($"Created {(question.IsBlocking ? "blocking" : "non-blocking")} question #{question.Id}");
+                var question = _runtime.AddQuestion(state, text, options.ContainsKey("blocking"));
+                _store.Save(state);
+                _output.WriteLine($"Created {(question.IsBlocking ? "blocking" : "non-blocking")} question #{question.Id}");
                 return 0;
             }
 
             case "answer-question":
             case "answer":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var values = GetPositionalValues(options);
                 if (values.Count < 2)
                 {
                     throw new InvalidOperationException("Usage: answer-question <id> <answer>");
                 }
-                runtime.AnswerQuestion(state, int.Parse(values[0]), string.Join(" ", values.Skip(1)));
-                store.Save(state);
-                Console.WriteLine($"Answered question #{values[0]}");
+                _runtime.AnswerQuestion(state, int.Parse(values[0]), string.Join(" ", values.Skip(1)));
+                _store.Save(state);
+                _output.WriteLine($"Answered question #{values[0]}");
                 return 0;
             }
 
             case "approve-plan":
             case "approve":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var note = GetOption(options, "note") ?? GetPositionalValue(options) ?? "User approved the current plan.";
                 if (state.Phase == WorkflowPhase.ArchitectPlanning)
                 {
-                    runtime.ApproveArchitectPlan(state, note);
-                    store.Save(state);
-                    Console.WriteLine("Approved the architect plan. Execution work can now begin.");
+                    _runtime.ApproveArchitectPlan(state, note);
+                    _store.Save(state);
+                    _output.WriteLine("Approved the architect plan. Execution work can now begin.");
                 }
                 else
                 {
-                    runtime.ApprovePlan(state, note);
-                    store.Save(state);
+                    _runtime.ApprovePlan(state, note);
+                    _store.Save(state);
                     if (state.Phase == WorkflowPhase.ArchitectPlanning)
                     {
-                        Console.WriteLine("Approved the high-level plan. Architect planning phase is next — run the loop to let the architect design the execution plan, then approve again.");
+                        _output.WriteLine("Approved the high-level plan. Architect planning phase is next — run the loop to let the architect design the execution plan, then approve again.");
                     }
                     else
                     {
-                        Console.WriteLine("Approved the current plan. Execution work can now continue.");
+                        _output.WriteLine("Approved the current plan. Execution work can now continue.");
                     }
                 }
                 return 0;
@@ -226,23 +244,23 @@ internal sealed class CliDispatcher(
 
             case "set-auto-approve":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var requested = GetPositionalValue(options) ?? GetOption(options, "enabled")
                     ?? throw new InvalidOperationException("Usage: set-auto-approve <true|false> [--workspace PATH]");
                 var enabled = ParseBoolOrThrow(requested, "Usage: set-auto-approve <true|false> [--workspace PATH]");
-                runtime.SetAutoApprove(state, enabled);
-                store.Save(state);
-                Console.WriteLine($"Updated auto-approve setting to {(enabled ? "enabled" : "disabled")}.");
+                _runtime.SetAutoApprove(state, enabled);
+                _store.Save(state);
+                _output.WriteLine($"Updated auto-approve setting to {(enabled ? "enabled" : "disabled")}.");
                 return 0;
             }
 
             case "feedback":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var feedback = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing feedback text.");
-                runtime.RecordPlanningFeedback(state, feedback);
-                store.Save(state);
-                Console.WriteLine(state.Phase == WorkflowPhase.ArchitectPlanning
+                _runtime.RecordPlanningFeedback(state, feedback);
+                _store.Save(state);
+                _output.WriteLine(state.Phase == WorkflowPhase.ArchitectPlanning
                     ? "Captured architect plan feedback."
                     : "Captured planning feedback.");
                 return 0;
@@ -250,15 +268,15 @@ internal sealed class CliDispatcher(
 
             case "run-once":
             {
-                var state = store.Load();
-                if (PlanWorkflow.RequiresPlanningBeforeRun(state, store))
+                var state = _store.Load();
+                if (PlanWorkflow.RequiresPlanningBeforeRun(state, _store))
                 {
-                    Console.WriteLine("No plan has been written yet. Run `plan` first.");
+                    _output.WriteLine("No plan has been written yet. Run `plan` first.");
                     return 1;
                 }
                 var maxSubagents = GetIntOption(options, "max-subagents", 3);
-                var result = runtime.RunOnce(state, maxSubagents);
-                store.Save(state);
+                var result = _runtime.RunOnce(state, maxSubagents);
+                _store.Save(state);
                 PrintLoopResult(result);
                 return 0;
             }
@@ -266,14 +284,14 @@ internal sealed class CliDispatcher(
             case "run-loop":
             case "run":
             {
-                var state = store.Load();
-                if (PlanWorkflow.RequiresPlanningBeforeRun(state, store))
+                var state = _store.Load();
+                if (PlanWorkflow.RequiresPlanningBeforeRun(state, _store))
                 {
-                    Console.WriteLine("No plan has been written yet. Run `plan` first.");
+                    _output.WriteLine("No plan has been written yet. Run `plan` first.");
                     return 1;
                 }
-                var report = await RunLoopAsync(store, runtime, loopExecutor, state, options);
-                Console.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
+                var report = await RunLoopAsync(_store, _runtime, _loopExecutor, state, options);
+                _output.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
                 PrintBudget(state.Budget);
                 if (report.FinalState == "awaiting-architect-approval")
                 {
@@ -284,39 +302,39 @@ internal sealed class CliDispatcher(
 
             case "complete-run":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 var runId = GetNullableIntOption(options, "run-id") ?? throw new InvalidOperationException("Missing --run-id.");
                 var outcome = GetOption(options, "outcome") ?? throw new InvalidOperationException("Missing --outcome.");
                 var summary = GetOption(options, "summary") ?? throw new InvalidOperationException("Missing --summary.");
-                runtime.CompleteRun(state, runId, outcome, summary);
-                store.Save(state);
-                Console.WriteLine($"Updated run #{runId} as {outcome}");
+                _runtime.CompleteRun(state, runId, outcome, summary);
+                _store.Save(state);
+                _output.WriteLine($"Updated run #{runId} as {outcome}");
                 return 0;
             }
 
             case "status":
-                PrintStatus(store.Load(), runtime);
+                PrintStatus(_store.Load(), _runtime);
                 return 0;
 
             case "questions":
             {
-                var state = store.Load();
-                PrintQuestions(state, store);
+                var state = _store.Load();
+                PrintQuestions(state, _store);
                 return 0;
             }
 
             case "plan":
             {
-                var state = store.Load();
-                await ShowPlanAsync(store, runtime, loopExecutor, state, options, interactive: false);
+                var state = _store.Load();
+                await ShowPlanAsync(_store, _runtime, _loopExecutor, state, options, interactive: false);
                 return 0;
             }
 
             case "budget":
             {
-                var state = store.Load();
+                var state = _store.Load();
                 UpdateBudget(state, options);
-                store.Save(state);
+                _store.Save(state);
                 PrintBudget(state.Budget);
                 return 0;
             }
@@ -333,7 +351,7 @@ internal sealed class CliDispatcher(
                     ? values
                     : [];
 
-                var client = AgentClientFactory.Create(backend);
+                var client = new DefaultAgentClientFactory().Create(backend);
                 var result = await client.InvokeAsync(new AgentInvocationRequest
                 {
                     Prompt = prompt,
@@ -341,20 +359,20 @@ internal sealed class CliDispatcher(
                     WorkingDirectory = Path.GetFullPath(workingDirectory),
                     Timeout = TimeSpan.FromSeconds(timeoutSeconds),
                     ExtraArguments = extraArgs,
-                    WorkspacePath = Path.GetFullPath(workspacePath),
+                    WorkspacePath = Path.GetFullPath(_workspacePath),
                     EnableWorkspaceMcp = GetBoolOption(options, "workspace-mcp", false),
                     ToolHostPath = System.Reflection.Assembly.GetEntryAssembly()?.Location
                 });
 
-                Console.WriteLine($"Backend: {result.BackendName}");
-                Console.WriteLine($"Exit code: {result.ExitCode}");
+                _output.WriteLine($"Backend: {result.BackendName}");
+                _output.WriteLine($"Exit code: {result.ExitCode}");
                 if (!string.IsNullOrWhiteSpace(result.StdOut))
                 {
-                    Console.WriteLine(result.StdOut.TrimEnd());
+                    _output.WriteLine(result.StdOut.TrimEnd());
                 }
                 if (!string.IsNullOrWhiteSpace(result.StdErr))
                 {
-                    Console.Error.WriteLine(result.StdErr.TrimEnd());
+                    _output.WriteErrorLine(result.StdErr.TrimEnd());
                 }
                 return result.Success ? 0 : result.ExitCode;
             }
