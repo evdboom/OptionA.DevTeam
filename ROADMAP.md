@@ -11,9 +11,17 @@ Items below are ordered by execution priority. Each item builds on what came bef
 | 3 | **#16 — Console cursor + multiline** | Small | Self-contained UX fix, no architectural coupling. Good to have before adding more interactive features. |
 | 4 | **#15 — Cross-family AI review** | Small-Medium | Small model-selection change. Gains more value once the orchestrator drives role assignment (item 10). |
 | 5 | **#14 — Git worktrees** | Large | Parallel conflict-safety. Orchestrator-driven parallelism (#10) should land first so the worktree lifecycle aligns with how batches are actually formed. |
-| 6 | **#12 — Brownfield init** | Medium | Reconnaissance for real existing codebases. Independent of items above. |
-| 7 | **#13 — Container/CI mode** | Medium | Deployment and automation path. Lower priority until core loop is solid. |
-| 8 | **#6 — GitHub mode** | Major | Issues/PRs as the work queue. Major feature; build after orchestrator loop stabilizes. |
+| 6 | **R1 — Dry-run preview before /run** | Small | High UX value, one-liner based on existing orchestrator state. No dependencies. |
+| 7 | **R5 — Question TTL / stall indicator** | Small | Timestamps already in questions.json. Visible stall warnings directly improve the blocking-question failure mode. |
+| 8 | **R2 — /edit-issue command** | Small-Medium | Markdown mirrors exist; syncing edits back is the main work. Needed before GitHub mode. |
+| 9 | **#12 — Brownfield init** | Medium | Reconnaissance for real existing codebases. Independent of items above. |
+| 10 | **R6 — Per-role token telemetry** | Small-Medium | Actionable for MODELS.json tuning. Builds on existing budget system. |
+| 11 | **R4 — Run diff (/diff-run)** | Small | Purely additive shell command over existing runs.json data. |
+| 12 | **R3 — Planner/architect --dry-run** | Small | Additive flag, no state corruption risk. Useful for prompt iteration. |
+| 13 | **R7 — Workspace export/import** | Medium | Enables team handoff and cross-machine resume. Stepping stone to GitHub mode. |
+| 14 | **R8 — Role chaining config** | Medium | pipelines.json successor rules. Gain value after orchestrator loop stabilizes. |
+| 15 | **#13 — Container/CI mode** | Medium | Deployment and automation path. Lower priority until core loop is solid. |
+| 16 | **#6 — GitHub mode** | Major | Issues/PRs as the work queue. Major feature; build after orchestrator loop stabilizes. |
 
 > Items 9 (hygiene conventions), ATM fixes, #8 (navigator scout), #10 (orchestrator loop), #16 (cursor navigation), #15 (cross-family review), #14 (git worktrees), #12 (brownfield init), and #13 (container/CI mode) are **complete** as of May 2026.
 
@@ -386,3 +394,181 @@ When adjacent to an agent:
 **Estimated scope:** Large — significant runtime change. Items 10.2 and 10.4 are the core risk. Requires item 8 as a prerequisite (shared sub-session infrastructure). Likely 1 architect issue + 5–7 developer issues.
 
 ---
+
+## R1 — Dry-run preview before /run
+
+**Goal:** Before committing credits to an iteration, let the user see exactly which issues would be batched, what roles they'd use, and a rough credit cost estimate. Reduces "burned 8 premium credits in one pass" surprises.
+
+**Current state:** `/run` immediately starts `LoopExecutor`. The ready-issue batch is computed internally and never surfaced to the user until runs have started.
+
+**Proposed model:** Add a `/preview` command (and `--dry-run` flag on `run-loop`) that calls the same batch-selection logic as `LoopExecutor` but stops before spawning any agents. Output shows: issue ID, title, assigned role, estimated model tier, and projected credit cost per issue.
+
+| Step | Detail |
+|---|---|
+| R1.1 | Extract batch-selection logic from `LoopExecutor` into a `BatchPlanner.PlanNextBatch(WorkspaceState, RuntimeConfiguration)` method returning `IReadOnlyList<PlannedRun>`. |
+| R1.2 | `PlannedRun` record: `IssueId`, `Title`, `RoleSlug`, `ModelTier`, `EstimatedCredits`. |
+| R1.3 | Add `/preview` shell command — calls `BatchPlanner.PlanNextBatch` and renders a table in the progress panel. No state changes. |
+| R1.4 | Add `--dry-run` flag to `run-loop` CLI command — prints the plan and exits without running. |
+| R1.5 | Unit tests: verify `BatchPlanner` respects dependency order, respects `max-subagents`, and returns an empty plan when no issues are ready. |
+
+**Estimated scope:** Small — `BatchPlanner` is mostly a refactor of existing `LoopExecutor` logic. Shell command is additive.
+
+---
+
+## R2 — /edit-issue command
+
+**Goal:** After the architect plan is approved, let the user tweak an issue's role assignment, priority, or description before `/run` without re-running the full architect phase.
+
+**Current state:** Issues in `workspace.json` can only be changed by re-running the planner or architect. Markdown mirrors under `.devteam/issues/` are read-only output.
+
+**Proposed model:** Make the markdown mirrors two-way. `/edit-issue <ID>` opens the issue's markdown file in `$EDITOR` (or prints it if no TTY editor). On save, parse the frontmatter + body back into the `IssueItem` and update `workspace.json`. Changes are validated (role must exist, priority must be an integer).
+
+| Step | Detail |
+|---|---|
+| R2.1 | Define the canonical markdown format for issue files (frontmatter: `id`, `title`, `role`, `priority`, `status`, `area`; body: description). `WorkspaceStore.RegenerateIssueMarkers` already writes this — make the schema explicit. |
+| R2.2 | Add `WorkspaceStore.SyncIssueFromMarkdown(issueId)` — reads `.devteam/issues/{id}.md`, parses frontmatter + body, validates, and updates `workspace.json`. |
+| R2.3 | Add `/edit-issue <ID>` shell command — writes the mirror, opens `$EDITOR` (fallback: prints the file path with instructions), then calls `SyncIssueFromMarkdown` on exit. |
+| R2.4 | Validation: role slug must exist in loaded roles, status transitions must be legal (no reopening a completed issue), priority must be a non-negative integer. |
+| R2.5 | Unit tests: round-trip parse/write for a sample issue markdown. Verify validation rejects unknown roles and illegal status transitions. |
+
+**Estimated scope:** Small-medium — markdown round-trip parsing + a new shell command.
+
+---
+
+## R3 — Planner/architect --dry-run flag
+
+**Goal:** Run the planner or architect and see its output without advancing workspace state. Useful for comparing prompts or diagnosing why a plan went sideways, without overwriting a good workspace.
+
+**Current state:** Running the planner transitions the workspace from `NoGoal`→`Planning`→awaiting approval. There is no way to re-run just the planning step against a snapshot without advancing state.
+
+**Proposed model:** Add `--dry-run` to `init` (planner) and `run-loop` (architect phase). In dry-run mode, the agent runs normally but the result is written to a temp file (`.devteam/dry-run-plan.md`) instead of committed to `workspace.json`. The user can diff against the current state.
+
+| Step | Detail |
+|---|---|
+| R3.1 | Add `DryRunEnabled` flag to `RuntimeConfiguration`. When set, `WorkspaceStore.Save` writes to a side-car path instead of `workspace.json`. |
+| R3.2 | Pipe dry-run output to `.devteam/dry-run-{timestamp}.json` + a human-readable `.md` summary alongside it. |
+| R3.3 | Add `--dry-run` flag to `init` and `run-loop` CLI commands. |
+| R3.4 | Shell: show a `[dry-run]` badge in the header when in dry-run mode so the user can't accidentally forget they're previewing. |
+| R3.5 | Unit tests: verify that `WorkspaceStore.Save` in dry-run mode writes the side-car and leaves the real `workspace.json` unchanged. |
+
+**Estimated scope:** Small — mostly a flag threaded through existing save paths.
+
+---
+
+## R4 — Run diff (/diff-run)
+
+**Goal:** Show what changed in the issue board between two loop iterations, making it easy to understand what the orchestrator actually accomplished each run.
+
+**Current state:** `runs.json` records each run's `IssueId`, `Outcome`, `Summary`, and timestamps. There is no command to compare two iterations.
+
+**Proposed model:** `/diff-run <N>` shows what changed between iteration N-1 and N: issues completed, issues added, issues that changed status, and questions raised. `/diff-run <N> <M>` compares any two iterations.
+
+| Step | Detail |
+|---|---|
+| R4.1 | `RunDiffer.Diff(WorkspaceState snapshot1, WorkspaceState snapshot2)` — compare issue boards, return `IssueAdded`, `IssueCompleted`, `IssueStatusChanged`, `QuestionAdded` change records. |
+| R4.2 | `WorkspaceStore` already writes per-iteration snapshots to `.devteam/runs/`. Use those as inputs to `RunDiffer` — no new storage needed. |
+| R4.3 | Add `/diff-run <N> [<M>]` shell command — renders the diff as a colour-coded table in the progress panel. |
+| R4.4 | Unit tests: verify `RunDiffer` correctly identifies added, completed, and status-changed issues between two synthetic snapshots. |
+
+**Estimated scope:** Small — purely additive, operates over existing data.
+
+---
+
+## R5 — Question TTL and stall indicator
+
+**Goal:** Make the "loop stalled on a blocking question" failure mode visible before the user notices nothing has happened for two iterations.
+
+**Current state:** `QuestionItem` has `AskedAt` (timestamp) and `IsBlocking`. There is no indicator in `/status` or the shell header showing how long the loop has been stalled, and non-blocking questions have no age display.
+
+**Proposed model:**
+- In the shell header / `/status` output, show "⚠ Stalled — blocking question unanswered for N iterations" when a blocking question is open and no runs have completed since it was raised.
+- In the questions panel, show an age indicator next to each open question: "asked 2 iterations ago".
+- Non-blocking open questions show a softer "💬 N open questions" count rather than a stall warning.
+
+| Step | Detail |
+|---|---|
+| R5.1 | Add `StallDetector.IsStalled(WorkspaceState)` — returns true if there is a blocking open question and the last completed run predates the question's `AskedAt`. |
+| R5.2 | `LayoutSnapshot` — add `IsStalled` bool and `StalledSinceIteration` int. Populated from `StallDetector` in `ShellService.UpdateLayout`. |
+| R5.3 | Shell header panel — when `IsStalled`, replace or augment the phase label with the stall warning. |
+| R5.4 | Questions panel — show age in iterations next to each open question (derive from `AskedAt` vs current iteration count). |
+| R5.5 | Unit tests for `StallDetector`: verify stall / no-stall for all combinations of blocking/non-blocking questions and run timestamps. |
+
+**Estimated scope:** Small — new detector + two panel tweaks.
+
+---
+
+## R6 — Per-role token and cost telemetry
+
+**Goal:** For each completed run, record approximate token counts (input + output) and cost in USD alongside the existing credit count. Makes `MODELS.json` tuning actionable — you can see which roles consume disproportionate tokens.
+
+**Current state:** `AgentRun` records `CreditsUsed` (integer, DevTeam credit unit). No token counts. No USD cost.
+
+**Proposed model:**
+- `AgentRun` gains `InputTokens`, `OutputTokens`, `EstimatedCostUsd` (nullable decimal).
+- Model definitions in `MODELS.json` add optional `InputCostPer1kTokens` and `OutputCostPer1kTokens` fields.
+- The Copilot SDK response may not expose token counts directly — record what's available; fall back to `null` gracefully.
+- `/status` and run artifact files show token totals per role and a grand total for the workspace.
+
+| Step | Detail |
+|---|---|
+| R6.1 | Add `InputCostPer1kTokens` and `OutputCostPer1kTokens` to `ModelDefinition`. Seed known values for common models. |
+| R6.2 | Add `InputTokens`, `OutputTokens`, `EstimatedCostUsd` to `AgentRun`. Populate from SDK response if available. |
+| R6.3 | `BudgetService` — add `GetTokenSummary()` aggregating token totals by role slug across all runs. |
+| R6.4 | `/status` output — add a "Token usage by role" section. Also include in run artifact JSON. |
+| R6.5 | Unit tests: `BudgetService.GetTokenSummary` aggregates correctly; cost calculation is correct for known model rates. |
+
+**Estimated scope:** Small-medium — new fields + aggregation logic. SDK token exposure may limit data quality but the plumbing should exist regardless.
+
+---
+
+## R7 — Workspace export and import
+
+**Goal:** Hand off a `.devteam/` workspace to a colleague or resume from a checkpoint on a different machine. Stepping stone toward GitHub mode and team workflows.
+
+**Current state:** The workspace is entirely local. There is no supported way to move it except copying the `.devteam/` folder manually.
+
+**Proposed model:**
+- `devteam export --output workspace.zip` — packages `workspace.json`, `issues/`, `decisions/`, `runs/`, and `artifacts/` into a zip. Excludes worktrees and temp files.
+- `devteam import --input workspace.zip` — unpacks into `.devteam/` in the current directory, with a conflict check (abort if `.devteam/workspace.json` already exists unless `--force`).
+- Export respects `--since <iteration>` to package only recent history.
+
+| Step | Detail |
+|---|---|
+| R7.1 | `WorkspaceExporter.Export(sourceDir, outputPath, sinceIteration?)` — zip the canonical workspace files, write a manifest with export timestamp and iteration range. |
+| R7.2 | `WorkspaceImporter.Import(zipPath, targetDir, force)` — validate manifest, unpack, refuse to overwrite unless `--force`. |
+| R7.3 | Add `export` and `import` CLI commands. |
+| R7.4 | Shell `/export` command as a convenience wrapper. |
+| R7.5 | Unit tests: round-trip export → import produces identical `workspace.json`. Import fails without `--force` when target exists. |
+
+**Estimated scope:** Medium — new CLI commands + zip I/O, but no core loop changes.
+
+---
+
+## R8 — Role chaining configuration
+
+**Goal:** Let users define custom role successor rules in `.devteam-source/` so that, for example, completing a developer issue automatically queues a docs agent for that area — without requiring the full orchestrator-driven loop (item 10).
+
+**Current state:** Role pipelines follow hardcoded patterns in `LoopExecutor` (developer → tester chains defined implicitly by issue structure). Users cannot add "after security, always run docs" without modifying role prompts.
+
+**Proposed model:** A `pipelines.json` in `.devteam-source/` defines successor rules:
+
+```json
+[
+  { "trigger": "developer", "area": "*",        "successor": "tester"    },
+  { "trigger": "developer", "area": "api",      "successor": "docs"      },
+  { "trigger": "security",  "area": "*",        "successor": "developer" }
+]
+```
+
+When an issue with role `trigger` completes successfully, `LoopExecutor` auto-queues a successor issue for the same area (unless one already exists). Area `"*"` matches any area.
+
+| Step | Detail |
+|---|---|
+| R8.1 | Define `PipelineRule` record: `Trigger` (role slug), `Area` (string or `"*"`), `Successor` (role slug), optional `OnlyIfOutcome` (completed / blocked / failed). |
+| R8.2 | Load `pipelines.json` in `AssetLoader` alongside roles and superpowers. Expose via `RuntimeConfiguration.PipelineRules`. |
+| R8.3 | `PipelineEvaluator.GetSuccessors(AgentRun, IReadOnlyList<PipelineRule>, IReadOnlyList<IssueItem>)` — returns the successor issues to queue, deduplicating against already-open issues in the same area. |
+| R8.4 | Call `PipelineEvaluator` in `LoopExecutor` after each successful run. Newly queued issues are added to `workspace.json` with status `Open`. |
+| R8.5 | Seed a sensible default `pipelines.json` (developer → tester for all areas). Users can override by editing `.devteam-source/pipelines.json`. |
+| R8.6 | Unit tests: verify successor is queued, not duplicated, and respects `OnlyIfOutcome` filter. |
+
+**Estimated scope:** Medium — new config file, loader, evaluator, and `LoopExecutor` hook. No UI changes required.
