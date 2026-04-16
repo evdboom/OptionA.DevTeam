@@ -131,6 +131,15 @@ internal sealed class CliDispatcher
                 return 0;
             }
 
+            case "start-here":
+            {
+                var state = File.Exists(_store.StatePath) ? _store.Load() : null;
+                var persona = GetPositionalValue(options);
+                _output.WriteLine(DevTeam.Cli.Shell.NonInteractiveShellHost.StripMarkup(
+                    OnboardingGuideBuilder.BuildMarkup(state, _runtime, persona)));
+                return 0;
+            }
+
             case "bug":
             case "bug-report":
             {
@@ -282,6 +291,25 @@ internal sealed class CliDispatcher
                 return 0;
             }
 
+            case "preview":
+            {
+                var state = _store.Load();
+                if (PlanWorkflow.RequiresPlanningBeforeRun(state, _store))
+                {
+                    _output.WriteLine("No plan has been written yet. Run `plan` first.");
+                    return 0;
+                }
+                if (PlanWorkflow.IsAwaitingApproval(state, _store))
+                {
+                    _output.WriteLine("A plan is ready. Review it with `plan`, provide feedback, or approve it before starting the loop.");
+                    return 0;
+                }
+
+                var maxSubagents = GetIntOption(options, "max-subagents", state.Runtime.DefaultMaxSubagents);
+                RunPreviewPrinter.PrintPreview(state, _runtime, maxSubagents);
+                return 0;
+            }
+
             case "run-once":
             {
                 var state = _store.Load();
@@ -305,6 +333,18 @@ internal sealed class CliDispatcher
                 {
                     _output.WriteLine("No plan has been written yet. Run `plan` first.");
                     return 1;
+                }
+                if (PlanWorkflow.IsAwaitingApproval(state, _store))
+                {
+                    _output.WriteLine("A plan is ready. Review it with `plan`, provide feedback, or approve it before starting the loop.");
+                    return 1;
+                }
+                if (GetBoolOption(options, "dry-run", false))
+                {
+                    var maxSubagents = GetIntOption(options, "max-subagents", state.Runtime.DefaultMaxSubagents);
+                    RunPreviewPrinter.PrintPreview(state, _runtime, maxSubagents);
+                    _output.WriteLine("Dry run only — nothing was executed.");
+                    return 0;
                 }
                 var report = await RunLoopAsync(_store, _runtime, _loopExecutor, state, options);
                 _output.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
@@ -335,7 +375,7 @@ internal sealed class CliDispatcher
             case "questions":
             {
                 var state = _store.Load();
-                PrintQuestions(state, _store);
+                PrintQuestions(state, _store, _runtime);
                 return 0;
             }
 

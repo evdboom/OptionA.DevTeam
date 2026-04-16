@@ -263,6 +263,10 @@ public class WorkspaceStore
             lines.Add("");
             lines.Add($"- Type: {(question.IsBlocking ? "blocking" : "non-blocking")}");
             lines.Add($"- Status: {question.Status}");
+            if (question.CreatedAtUtc != default)
+            {
+                lines.Add($"- Asked: {question.CreatedAtUtc:O}");
+            }
             lines.Add("");
             lines.Add(question.Text);
             lines.Add("");

@@ -5,6 +5,7 @@ import { cliArgs } from "./helpers.js";
 const HELP_COMMANDS = [
   "/init",
   "/customize",
+  "/start-here",
   "/bug",
   "/status",
   "/history",

@@ -109,6 +109,12 @@ Start the interactive shell:
 devteam /start --workspace .devteam
 ```
 
+If you want DevTeam to guide you instead of starting from the raw command list, open the shell and run:
+
+```text
+/start-here new
+```
+
 For CI or piped usage (non-interactive, reads commands from stdin):
 
 ```powershell
@@ -181,9 +187,21 @@ devteam> /run --max-iterations 5 --max-subagents 3
 
 | User | Recommended workflow |
 |------|----------------------|
-| **New user / non-programmer** | Start in the interactive shell, keep `max-subagents` at **1**, use `/plan`, then respond in plain English with feedback or `/approve`. |
-| **Medior user** | Use `/status`, `/questions`, `/budget`, and `/run --max-subagents 2` or `3` to keep the loop understandable while still getting parallelism. |
-| **Expert user** | Use `/customize`, `@role`, and mode changes such as `autopilot` once you already understand the plan and recovery flow. |
+| **New user / non-programmer** | Start with `/start-here new`, keep `max-subagents` at **1**, use `/plan`, then respond in plain English with feedback or `/approve`. |
+| **Medior user** | Start with `/start-here medior`, then use `/status`, `/questions`, `/budget`, and `/run --max-subagents 2` or `3` to keep the loop understandable while still getting parallelism. |
+| **Expert user** | Start with `/start-here expert`, then use `/customize`, `@role`, worktrees, and mode changes such as `autopilot` once you already understand the plan and recovery flow. |
+
+### In-product onboarding
+
+DevTeam now exposes a guided onboarding command in both the shell and the non-interactive CLI:
+
+```text
+devteam> /start-here new
+devteam> /start-here medior
+devteam> /start-here expert
+```
+
+Use it whenever you want the next recommended step for your current workspace phase instead of scanning the full help output.
 
 ### Common interactive moments
 
@@ -198,7 +216,7 @@ devteam> Focus on a local CLI first. Skip cloud deployment for now.
 
 **Answering a blocking question**
 
-If exactly one question is open, you can answer it with plain text. Otherwise use `/answer <id> <text>`:
+If exactly one question is open, you can answer it with plain text. Otherwise use `/answer <id> <text>`. `/questions` shows how long each question has been open, and `/status` makes it explicit when the loop is stalled on user input:
 
 ```text
 devteam> /questions
@@ -211,18 +229,21 @@ If you are still learning the workflow, start sequentially and then increase con
 
 ```text
 devteam> /max-subagents 1
+devteam> /preview
 devteam> /run --max-iterations 3
 ```
 
 ## Interactive shell commands
 
 ```text
-/status                                   Show workspace state
+/status                                   Show workspace state and stall status
+/start-here [new|medior|expert]           Show the guided onboarding flow for your persona
 /plan                                     Generate or show the plan
 /feedback <text>                          Revise the plan with feedback
+/preview [--max-subagents N]             Preview the next batch without starting the loop
 /approve [note]                           Approve the plan and move to execution
-/run [--max-iterations N] [--max-subagents N]  Run the execution loop
-/questions                                List open questions
+/run [--max-iterations N] [--max-subagents N] [--dry-run]  Run the execution loop
+/questions                                List open questions with age and blocking state
 /answer-question <ID> <answer>            Answer a question
 /budget [--total N] [--premium N]         Show or adjust budget
 /bug [--save PATH] [--redact-paths true|false]  Generate a bug report draft
@@ -238,9 +259,12 @@ Every shell command also works as a standalone CLI invocation:
 
 ```powershell
 devteam /init --workspace .devteam --goal "Build a CLI Tetris clone"
+devteam /start-here expert --workspace .devteam
 devteam /plan --workspace .devteam
+devteam /preview --workspace .devteam --max-subagents 2
 devteam /approve-plan --workspace .devteam --note "Looks good. Start building."
 devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3
+devteam /run --workspace .devteam --max-subagents 3 --dry-run
 devteam /status --workspace .devteam
 devteam /questions --workspace .devteam
 devteam /answer-question 1 "Use keyboard controls only." --workspace .devteam

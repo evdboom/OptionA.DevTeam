@@ -26,14 +26,15 @@ internal sealed partial class ShellService
         sb.AppendLine();
         sb.AppendLine("  [cyan]/init[/] \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]  [dim]Initialise workspace with a goal[/]");
         sb.AppendLine("  [cyan]/customize[/] [[--force]]    [dim]Copy default prompt assets to .devteam-source/ for editing[/]");
+        sb.AppendLine("  [cyan]/start-here[/] [[new|medior|expert]]  [dim]Show the guided onboarding flow for your persona[/]");
         sb.AppendLine("  [cyan]/bug[/] [[--save PATH]] [[--redact-paths true|false]]  [dim]Generate a sanitized bug report draft[/]");
-        sb.AppendLine("  [cyan]/status[/]               [dim]Show workspace phase, open issues and questions[/]");
+        sb.AppendLine("  [cyan]/status[/]               [dim]Show workspace phase, open issues, and stall state[/]");
         sb.AppendLine("  [cyan]/history[/]              [dim]Show session command history (last 50)[/]");
         sb.AppendLine("  [cyan]/mode[/] <slug>          [dim]Switch the active run mode[/]");
         sb.AppendLine("  [cyan]/keep-awake[/] <on|off>  [dim]Prevent system sleep during long runs[/]");
         sb.AppendLine("  [cyan]/add-issue[/] \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--depends-on N ...]]  [dim]Queue a new issue[/]");
         sb.AppendLine("  [cyan]/plan[/]                 [dim]Show or generate the current plan[/]");
-        sb.AppendLine("  [cyan]/questions[/]            [dim]List open questions[/]");
+        sb.AppendLine("  [cyan]/questions[/]            [dim]List open questions with age and blocking state[/]");
         sb.AppendLine("  [cyan]/budget[/] [[--total N]] [[--premium N]]  [dim]View or adjust the credit budget[/]");
         sb.AppendLine("  [cyan]/check-update[/]         [dim]Check for a newer version of DevTeam[/]");
         sb.AppendLine("  [cyan]/update[/]               [dim]Update DevTeam to the latest version[/]");
@@ -41,7 +42,8 @@ internal sealed partial class ShellService
         sb.AppendLine("  [cyan]/max-subagents[/] <N>    [dim]Set workspace default max subagents (1=sequential, 2–4=parallel)[/]");
         sb.AppendLine("  [cyan]/worktrees[/] <on|off>   [dim]Enable/disable git worktree isolation for parallel runs[/]");
         sb.AppendLine("  [cyan]/recon[/] [[--backend B]] [[--timeout-seconds N]]  [dim]Re-run codebase reconnaissance and update context[/]");
-        sb.AppendLine("  [cyan]/run[/] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]]  [dim]Start the loop in the background[/]");
+        sb.AppendLine("  [cyan]/preview[/] [[--max-subagents N]]  [dim]Preview the next batch without spending credits[/]");
+        sb.AppendLine("  [cyan]/run[/] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--dry-run]]  [dim]Start the loop in the background[/]");
         sb.AppendLine("  [cyan]/stop[/]                 [dim]Cancel the running loop[/]");
         sb.AppendLine("  [cyan]/wait[/]                 [dim]Re-attach to the running loop and wait for it to finish[/]");
         sb.AppendLine("  [cyan]/feedback[/] <text>      [dim]Add planning feedback[/]");

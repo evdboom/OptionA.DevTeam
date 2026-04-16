@@ -237,7 +237,7 @@ internal static class CliLoopHandler
         }
 
         WorkspaceStatusPrinter.PrintPlan(store);
-        WorkspaceStatusPrinter.PrintOpenQuestions(state, interactive);
+        WorkspaceStatusPrinter.PrintOpenQuestions(state, interactive, runtime);
 
         if (state.Phase == WorkflowPhase.Planning)
         {

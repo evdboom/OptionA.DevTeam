@@ -176,6 +176,47 @@ public class DevTeamRuntime
         return _issueService.GetReadyIssues(state, maxSubagents);
     }
 
+    public IReadOnlyList<QueuedRunInfo> BuildRunPreview(WorkspaceState state, int maxSubagents)
+    {
+        _issueService.EnsurePipelineAssignments(state);
+        var readyIssues = _issueService.GetReadyIssues(state, maxSubagents);
+        if (readyIssues.Count == 0)
+        {
+            return [];
+        }
+
+        var previewState = new WorkspaceState
+        {
+            Models = state.Models,
+            Roles = state.Roles,
+            Budget = new BudgetState
+            {
+                TotalCreditCap = state.Budget.TotalCreditCap,
+                PremiumCreditCap = state.Budget.PremiumCreditCap,
+                CreditsCommitted = state.Budget.CreditsCommitted,
+                PremiumCreditsCommitted = state.Budget.PremiumCreditsCommitted
+            }
+        };
+
+        var preview = new List<QueuedRunInfo>();
+        foreach (var issue in readyIssues)
+        {
+            var excludeFamily = GetExcludeFamilyForReview(state, issue);
+            var model = _budgetService.SelectModelForRole(previewState, issue.RoleSlug, excludeFamily);
+            _budgetService.CommitCredits(previewState, model);
+            preview.Add(new QueuedRunInfo
+            {
+                IssueId = issue.Id,
+                Title = issue.Title,
+                RoleSlug = issue.RoleSlug,
+                Area = issue.Area,
+                ModelName = model.Name
+            });
+        }
+
+        return preview;
+    }
+
     public IReadOnlyList<string> PrepareForLoop(WorkspaceState state)
     {
         _planningService.EnsureApprovedPlanningIssuesClosed(state);
@@ -556,6 +597,21 @@ public class DevTeamRuntime
     public StatusReport BuildStatusReport(WorkspaceState state)
     {
         _issueService.EnsurePipelineAssignments(state);
+        var now = _clock.UtcNow;
+        var queuedRuns = state.AgentRuns.Where(run => run.Status is AgentRunStatus.Queued or AgentRunStatus.Running).ToList();
+        var openQuestions = state.Questions.Where(question => question.Status == QuestionStatus.Open).OrderBy(question => question.Id).ToList();
+        var openQuestionAges = openQuestions.ToDictionary(
+            question => question.Id,
+            question => now - NormalizeQuestionCreatedAt(question, now));
+        var blockingQuestions = openQuestions
+            .Where(question => question.IsBlocking)
+            .OrderBy(question => NormalizeQuestionCreatedAt(question, now))
+            .ThenBy(question => question.Id)
+            .ToList();
+        var loopState = queuedRuns.Count > 0 ? "running" : GetLoopStateWhenNoReadyWork(state);
+        var isWaitingOnBlockingQuestion = string.Equals(loopState, "waiting-for-user", StringComparison.OrdinalIgnoreCase)
+            && blockingQuestions.Count > 0;
+
         return new StatusReport
         {
             Counts = new Dictionary<string, int>
@@ -568,14 +624,30 @@ public class DevTeamRuntime
                 ["roles"] = state.Roles.Count,
                 ["superpowers"] = state.Superpowers.Count
             },
+            LoopState = loopState,
             Budget = state.Budget,
-            QueuedRuns = state.AgentRuns.Where(run => run.Status is AgentRunStatus.Queued or AgentRunStatus.Running).ToList(),
-            OpenQuestions = state.Questions.Where(question => question.Status == QuestionStatus.Open).ToList(),
+            QueuedRuns = queuedRuns,
+            OpenQuestions = openQuestions,
+            OpenQuestionAges = openQuestionAges,
+            IsWaitingOnBlockingQuestion = isWaitingOnBlockingQuestion,
+            OldestBlockingQuestionAge = isWaitingOnBlockingQuestion
+                ? openQuestionAges[blockingQuestions[0].Id]
+                : null,
             RecentDecisions = state.Decisions
                 .OrderByDescending(item => item.CreatedAtUtc)
                 .Take(5)
                 .ToList()
         };
+    }
+
+    private static DateTimeOffset NormalizeQuestionCreatedAt(QuestionItem question, DateTimeOffset now)
+    {
+        if (question.CreatedAtUtc == default || question.CreatedAtUtc > now)
+        {
+            return now;
+        }
+
+        return question.CreatedAtUtc;
     }
 
     private List<QueuedRunInfo> QueueIssues(WorkspaceState state, IReadOnlyList<IssueItem> issues)

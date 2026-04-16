@@ -25,7 +25,8 @@ public sealed class QuestionService : IQuestionService
         {
             Id = state.NextQuestionId++,
             Text = normalized,
-            IsBlocking = blocking
+            IsBlocking = blocking,
+            CreatedAtUtc = _clock.UtcNow
         };
         state.Questions.Add(question);
         return question;

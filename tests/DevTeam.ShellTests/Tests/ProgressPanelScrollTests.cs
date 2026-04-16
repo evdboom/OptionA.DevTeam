@@ -499,11 +499,11 @@ internal static class ProgressPanelScrollTests
         var markup = ShellService.BuildInteractiveHelpMarkup();
         string[] requiredCommands =
         [
-            "/init", "/customize", "/bug", "/status", "/history",
+            "/init", "/customize", "/start-here", "/bug", "/status", "/history",
             "/mode", "/keep-awake", "/add-issue", "/plan", "/questions",
             "/budget", "/check-update", "/update", "/max-iterations",
             "/max-subagents", "/run", "/stop", "/wait", "/feedback",
-            "/approve", "/answer", "/goal", "/exit", "@role",
+            "/preview", "/approve", "/answer", "/goal", "/exit", "@role",
         ];
         foreach (var cmd in requiredCommands)
             Assert.That(markup.Contains(cmd), $"Help markup missing command: {cmd}");

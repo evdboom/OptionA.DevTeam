@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using DevTeam.Cli;
 using DevTeam.Core;
 using Spectre.Console;
 
@@ -94,7 +95,7 @@ internal sealed partial class ShellService : IDisposable
 
         if (initialState is null)
         {
-            AddLine("[dim]No workspace found.[/] Use [cyan]/init[/] [dim]--goal \"<your goal>\"[/] to get started.");
+            AddLine("[dim]No workspace found.[/] Use [cyan]/start-here new[/] for a guided first run or [cyan]/init[/] [dim]--goal \"<your goal>\"[/] to get started.");
         }
 
         // Apply keep-awake
@@ -273,6 +274,14 @@ internal sealed partial class ShellService : IDisposable
                     var target = Path.Combine(Environment.CurrentDirectory, ".devteam-source");
                     var force = GetBoolOption(options, "force", false);
                     CopyPackagedAssets(target, force);
+                    break;
+                }
+
+                case "start-here":
+                {
+                    TryLoadState(out var current);
+                    var persona = GetPositionalValue(options);
+                    AddSystem(OnboardingGuideBuilder.BuildMarkup(current, _runtime, persona), "start here");
                     break;
                 }
 
@@ -565,6 +574,26 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "preview":
+                {
+                    var current = _store.Load();
+                    if (PlanWorkflow.RequiresPlanningBeforeRun(current, _store))
+                    {
+                        AddLine("No plan has been written yet. Run [cyan]/plan[/] first.");
+                        break;
+                    }
+                    if (PlanWorkflow.IsAwaitingApproval(current, _store))
+                    {
+                        AddLine("A plan is ready. Use [cyan]/plan[/] to review, type feedback to revise, or [cyan]/approve[/] to continue.");
+                        break;
+                    }
+
+                    var usingSubagents = options.ContainsKey("max-subagents") ? int.Parse(options["max-subagents"][0]) : current.Runtime.DefaultMaxSubagents;
+                    AddSystem(RunPreviewPrinter.BuildPreviewMarkup(current, _runtime, usingSubagents), "preview");
+                    AddHint("Use [cyan]/run[/] to start the loop, or [cyan]/max-subagents N[/] to change the previewed batch size.");
+                    break;
+                }
+
                 case "answer":
                 case "answer-question":
                 {
@@ -599,8 +628,14 @@ internal sealed partial class ShellService : IDisposable
                         AddLine("A plan is ready. Use [cyan]/plan[/] to review, type feedback to revise, or [cyan]/approve[/] to continue.");
                         break;
                     }
-                    var usingIterations = options.ContainsKey("max-iterations") ? int.Parse(options["max-iterations"][0]) : current.Runtime.DefaultMaxIterations;
                     var usingSubagents = options.ContainsKey("max-subagents") ? int.Parse(options["max-subagents"][0]) : current.Runtime.DefaultMaxSubagents;
+                    if (GetBoolOption(options, "dry-run", false))
+                    {
+                        AddSystem(RunPreviewPrinter.BuildPreviewMarkup(current, _runtime, usingSubagents), "preview");
+                        AddHint("Dry run only — nothing was executed. Use [cyan]/run[/] to start the loop.");
+                        break;
+                    }
+                    var usingIterations = options.ContainsKey("max-iterations") ? int.Parse(options["max-iterations"][0]) : current.Runtime.DefaultMaxIterations;
                     AddHint($"max-iterations: [bold]{usingIterations}[/] · max-subagents: [bold]{usingSubagents}[/] [dim](change with /max-iterations N or /max-subagents N)[/]");
                     StartLoopInBackground(current, options);
                     AddEvent("🚀", "Loop started — running in the background. You can type commands while work progresses.", "green");
@@ -924,14 +959,18 @@ internal sealed partial class ShellService : IDisposable
             AddHint("No plan has been written yet.");
 
         // Show open questions
-        var openQs = state.Questions.Where(q => q.Status == QuestionStatus.Open).OrderBy(q => q.Id).ToList();
+        var questionReport = _runtime.BuildStatusReport(state);
+        var openQs = questionReport.OpenQuestions.OrderBy(q => q.Id).ToList();
         if (openQs.Count > 0)
         {
             var sb = new StringBuilder($"[bold]─── {openQs.Count} open question{(openQs.Count == 1 ? "" : "s")} ───[/]\n");
+            if (questionReport.IsWaitingOnBlockingQuestion && questionReport.OldestBlockingQuestionAge is { } stallAge)
+            {
+                sb.AppendLine($"[yellow]Stalled on user input[/] [dim](oldest blocking question asked {Markup.Escape(WorkspaceStatusPrinter.FormatQuestionAge(stallAge))})[/]");
+            }
             foreach (var oq in openQs)
             {
-                var tag = oq.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
-                sb.AppendLine($"  [dim]#{oq.Id}[/] {tag} {Markup.Escape(oq.Text)}");
+                sb.AppendLine($"  {WorkspaceStatusPrinter.BuildQuestionLineMarkup(oq, questionReport.OpenQuestionAges)}");
             }
             sb.Append($"Answer with: [cyan]/answer[/] <id> <text>");
             AddSystem(sb.ToString(), "questions");
@@ -1187,17 +1226,21 @@ internal sealed partial class ShellService : IDisposable
 
     private void PrintQuestions(WorkspaceState state)
     {
-        var openQs = state.Questions.Where(q => q.Status == QuestionStatus.Open).OrderBy(q => q.Id).ToList();
+        var report = _runtime.BuildStatusReport(state);
+        var openQs = report.OpenQuestions.OrderBy(q => q.Id).ToList();
         if (openQs.Count == 0)
         {
             AddLine("No open questions.");
             return;
         }
         var sb = new StringBuilder();
+        if (report.IsWaitingOnBlockingQuestion && report.OldestBlockingQuestionAge is { } stallAge)
+        {
+            sb.AppendLine($"[yellow]Stalled on user input[/] [dim](oldest blocking question asked {Markup.Escape(WorkspaceStatusPrinter.FormatQuestionAge(stallAge))})[/]");
+        }
         foreach (var q in openQs)
         {
-            var tag = q.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
-            sb.AppendLine($"[dim]#{q.Id}[/] {tag} {Markup.Escape(q.Text)}");
+            sb.AppendLine(WorkspaceStatusPrinter.BuildQuestionLineMarkup(q, report.OpenQuestionAges));
         }
         AddSystem(sb.ToString().TrimEnd(), $"questions ({openQs.Count})");
     }

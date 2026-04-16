@@ -1,4 +1,5 @@
 using DevTeam.Core;
+using DevTeam.Cli.Shell;
 using Spectre.Console;
 
 namespace DevTeam.Cli;
@@ -8,11 +9,13 @@ internal static class WorkspaceStatusPrinter
     internal static void PrintStatus(WorkspaceState state, DevTeamRuntime runtime)
     {
         var report = runtime.BuildStatusReport(state);
+        var loopStateColor = GetLoopStateColor(report.LoopState);
 
         AnsiConsole.MarkupLine($"[bold]Phase:[/] [cyan]{Markup.Escape(state.Phase.ToString())}[/]  " +
             $"[bold]Mode:[/] [cyan]{Markup.Escape(state.Runtime.ActiveModeSlug)}[/]  " +
             $"[bold]Max-iter:[/] {state.Runtime.DefaultMaxIterations}  " +
             $"[bold]Max-sub:[/] {state.Runtime.DefaultMaxSubagents}");
+        AnsiConsole.MarkupLine($"[bold]State:[/] [{loopStateColor}]{Markup.Escape(DescribeLoopState(report.LoopState))}[/]");
 
         var issues = state.Issues.OrderBy(i => i.Id).ToList();
         if (issues.Count > 0)
@@ -60,10 +63,13 @@ internal static class WorkspaceStatusPrinter
         if (report.OpenQuestions.Count > 0)
         {
             AnsiConsole.MarkupLine($"\n[bold yellow]{report.OpenQuestions.Count} open question(s)[/]");
+            if (report.IsWaitingOnBlockingQuestion && report.OldestBlockingQuestionAge is { } stallAge)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Stalled on user input[/] [dim](oldest blocking question asked {Markup.Escape(FormatQuestionAge(stallAge))})[/]");
+            }
             foreach (var q in report.OpenQuestions)
             {
-                var tag = q.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
-                AnsiConsole.MarkupLine($"  [dim]#{q.Id}[/] [{tag}] {Markup.Escape(q.Text)}");
+                AnsiConsole.MarkupLine($"  {BuildQuestionLineMarkup(q, report.OpenQuestionAges)}");
             }
         }
 
@@ -164,8 +170,9 @@ internal static class WorkspaceStatusPrinter
         return true;
     }
 
-    internal static void PrintQuestions(WorkspaceState state, WorkspaceStore store)
+    internal static void PrintQuestions(WorkspaceState state, WorkspaceStore store, DevTeamRuntime runtime)
     {
+        var report = runtime.BuildStatusReport(state);
         var openQuestions = state.Questions
             .Where(item => item.Status == QuestionStatus.Open)
             .OrderBy(item => item.Id)
@@ -177,18 +184,21 @@ internal static class WorkspaceStatusPrinter
             return;
         }
 
+        if (report.IsWaitingOnBlockingQuestion && report.OldestBlockingQuestionAge is { } stallAge)
+        {
+            Console.WriteLine($"Stalled on user input (oldest blocking question asked {FormatQuestionAge(stallAge)}).");
+        }
+
         foreach (var question in openQuestions)
         {
-            Console.WriteLine($"#{question.Id} [{(question.IsBlocking ? "blocking" : "non-blocking")}] {question.Text}");
+            Console.WriteLine(NonInteractiveShellHost.StripMarkup(BuildQuestionLineMarkup(question, report.OpenQuestionAges)));
         }
     }
 
-    internal static void PrintOpenQuestions(WorkspaceState state, bool interactive)
+    internal static void PrintOpenQuestions(WorkspaceState state, bool interactive, DevTeamRuntime runtime)
     {
-        var openQuestions = state.Questions
-            .Where(item => item.Status == QuestionStatus.Open)
-            .OrderBy(item => item.Id)
-            .ToList();
+        var report = runtime.BuildStatusReport(state);
+        var openQuestions = report.OpenQuestions;
 
         if (openQuestions.Count == 0)
         {
@@ -197,15 +207,75 @@ internal static class WorkspaceStatusPrinter
 
         Console.WriteLine();
         Console.WriteLine(ConsoleTheme.Label($"─── {openQuestions.Count} open question{(openQuestions.Count == 1 ? "" : "s")} ───"));
+        if (report.IsWaitingOnBlockingQuestion && report.OldestBlockingQuestionAge is { } stallAge)
+        {
+            Console.WriteLine(ConsoleTheme.Warning($"Stalled on user input (oldest blocking question asked {FormatQuestionAge(stallAge)})."));
+        }
         foreach (var question in openQuestions)
         {
-            var tag = question.IsBlocking ? ConsoleTheme.Warning("blocking") : ConsoleTheme.Muted("non-blocking");
-            Console.WriteLine($"  #{ConsoleTheme.Number(question.Id.ToString())} [{tag}] {question.Text}");
+            Console.WriteLine($"  {NonInteractiveShellHost.StripMarkup(BuildQuestionLineMarkup(question, report.OpenQuestionAges))}");
         }
         Console.WriteLine(interactive
             ? $"Answer with: {ConsoleTheme.Command("/answer")} <id> <text>"
             : "Answer with: answer-question <id> <text>");
         Console.WriteLine();
+    }
+
+    internal static string DescribeLoopState(string loopState) =>
+        loopState.Trim().ToLowerInvariant() switch
+        {
+            "waiting-for-user" => "waiting for user input",
+            "awaiting-plan-approval" => "awaiting plan approval",
+            "awaiting-architect-approval" => "awaiting architect approval",
+            _ => loopState.Replace('-', ' ')
+        };
+
+    internal static string GetLoopStateColor(string loopState) =>
+        loopState.Trim().ToLowerInvariant() switch
+        {
+            "running" or "queued" => "cyan",
+            "waiting-for-user" or "awaiting-plan-approval" or "awaiting-architect-approval" => "yellow",
+            "idle" => "dim",
+            _ => "white"
+        };
+
+    internal static string FormatQuestionAge(TimeSpan age)
+    {
+        if (age < TimeSpan.Zero)
+        {
+            age = TimeSpan.Zero;
+        }
+
+        if (age.TotalMinutes < 1)
+        {
+            return "just now";
+        }
+
+        if (age.TotalHours < 1)
+        {
+            return $"{Math.Max(1, (int)Math.Floor(age.TotalMinutes))}m ago";
+        }
+
+        if (age.TotalDays < 1)
+        {
+            return $"{Math.Max(1, (int)Math.Floor(age.TotalHours))}h ago";
+        }
+
+        if (age.TotalDays < 7)
+        {
+            return $"{Math.Max(1, (int)Math.Floor(age.TotalDays))}d ago";
+        }
+
+        return $"{Math.Max(1, (int)Math.Floor(age.TotalDays / 7))}w ago";
+    }
+
+    internal static string BuildQuestionLineMarkup(QuestionItem question, IReadOnlyDictionary<int, TimeSpan> agesByQuestionId)
+    {
+        var tag = question.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
+        var ageText = agesByQuestionId.TryGetValue(question.Id, out var age)
+            ? $" [dim](asked {Markup.Escape(FormatQuestionAge(age))})[/]"
+            : "";
+        return $"[dim]#{question.Id}[/] {tag}{ageText} {Markup.Escape(question.Text)}";
     }
 
     internal static void PrintPlan(WorkspaceStore store)
@@ -241,6 +311,7 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("  start [--keep-awake true|false] [--no-tty] [--output-format plain|jsonl] [--workspace PATH]");
         Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false] [--recon true|false] [--backend sdk|cli] [--timeout-seconds N]");
         Console.WriteLine("  customize [--force]                Copy default roles, modes, and superpowers to .devteam-source/ for editing");
+        Console.WriteLine("  start-here [new|medior|expert] [--workspace PATH]  Show a persona-based onboarding guide");
         Console.WriteLine("  bug-report [--save PATH] [--redact-paths true|false] [--history-count N] [--error-count N] [--workspace PATH]");
         Console.WriteLine("  set-goal <TEXT> [--goal-file PATH] [--workspace PATH]");
         Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
@@ -254,13 +325,14 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("  answer-question <ID> <ANSWER> [--workspace PATH]");
         Console.WriteLine("  approve-plan [--note TEXT] [--workspace PATH]");
         Console.WriteLine("  feedback <TEXT> [--workspace PATH]");
+        Console.WriteLine("  preview [--max-subagents N] [--workspace PATH]");
         Console.WriteLine("  questions [--workspace PATH]");
         Console.WriteLine("  plan [--workspace PATH]");
         Console.WriteLine("  budget [--total N] [--premium N] [--workspace PATH]");
         Console.WriteLine("  check-update");
         Console.WriteLine("  update");
         Console.WriteLine("  run-once [--max-subagents N] [--workspace PATH]");
-        Console.WriteLine("  run-loop [--backend sdk|cli] [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--verbosity quiet|normal|detailed] [--keep-awake true|false] [--workspace PATH]");
+        Console.WriteLine("  run-loop [--backend sdk|cli] [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--verbosity quiet|normal|detailed] [--keep-awake true|false] [--dry-run] [--workspace PATH]");
         Console.WriteLine("  complete-run --run-id N --outcome completed|failed|blocked --summary TEXT [--workspace PATH]");
         Console.WriteLine("  status [--workspace PATH]");
         Console.WriteLine("  agent-invoke [--backend sdk|cli] [--prompt TEXT] [--model NAME] [--timeout-seconds N] [--working-directory PATH] [--extra-arg ARG ...]");
@@ -274,6 +346,7 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine();
         Console.WriteLine($"  {ConsoleTheme.Command("/init")} \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/customize")} [[--force]]    Copy default assets to .devteam-source/ for editing");
+        Console.WriteLine($"  {ConsoleTheme.Command("/start-here")} [[new|medior|expert]]    Show the guided onboarding flow for your persona");
         Console.WriteLine($"  {ConsoleTheme.Command("/bug")} [[--save PATH]] [[--redact-paths true|false]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/status")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/history")}              Show session command history (last 50)");
@@ -287,7 +360,8 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine($"  {ConsoleTheme.Command("/update")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/max-iterations")} <N>    Set workspace default max iterations (used by all future /run calls)");
         Console.WriteLine($"  {ConsoleTheme.Command("/max-subagents")} <N>     Set workspace default max subagents (1=sequential, 2–4=parallel)");
-        Console.WriteLine($"  {ConsoleTheme.Command("/run")} [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--keep-awake true|false]]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
+        Console.WriteLine($"  {ConsoleTheme.Command("/preview")} [[--max-subagents N]]  Preview the next batch without spending credits");
+        Console.WriteLine($"  {ConsoleTheme.Command("/run")} [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--keep-awake true|false]] [[--dry-run]]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/stop")}              Cancel the running loop (waits for current agent call to finish)");
         Console.WriteLine($"  {ConsoleTheme.Command("/wait")}              Re-attach to the running loop and wait for it to finish");
         Console.WriteLine($"  {ConsoleTheme.Command("/feedback")} <text>");
