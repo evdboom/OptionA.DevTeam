@@ -224,6 +224,18 @@ devteam> /questions
 devteam> /answer 1 Use keyboard controls only.
 ```
 
+When a blocking question is holding the loop, `/status` calls that out directly:
+
+```text
+devteam> /status
+Phase: Execution  Mode: develop  Max-iter: 5  Max-sub: 1
+State: waiting for user input
+
+1 open question(s)
+Stalled on user input (oldest blocking question asked 42m ago)
+  #1 blocking (asked 42m ago) Which auth provider should we target first?
+```
+
 **Safe first execution**
 
 If you are still learning the workflow, start sequentially and then increase concurrency later:
@@ -232,6 +244,19 @@ If you are still learning the workflow, start sequentially and then increase con
 devteam> /max-subagents 1
 devteam> /preview
 devteam> /run --max-iterations 3
+```
+
+`/preview` shows the next likely batch and its estimated cost without spending credits:
+
+```text
+devteam> /preview
+Run preview
+max-subagents: 1
+  #7 developer @ ui Implement board renderer
+    gpt-5.4 · est. 1 credit
+
+Estimated batch cost: 1 credits
+Budget after batch: 1/25 total
 ```
 
 **Adjust a queued issue without rerunning planning**
@@ -276,17 +301,53 @@ devteam> /set-provider ollama-local
 devteam> /set-provider default
 ```
 
+`/provider` shows both the active override and the provider profiles DevTeam discovered in `.devteam-source/PROVIDERS.json`:
+
+```text
+devteam> /provider
+Current provider
+ollama-local
+
+Configured providers
+ollama-local, azure-foundry
+```
+
+**Enable safer parallel isolation**
+
+When you want multiple agents to run in parallel without sharing the same working tree, turn on git worktree isolation in the shell:
+
+```text
+devteam> /worktrees on
+devteam> /worktrees
+Worktree mode: enabled
+No active worktrees.
+```
+
+Once a parallel batch is running, `/worktrees` lists the issue, run, status, branch, and worktree path for each active worktree.
+
+**Refresh brownfield context after a large refactor**
+
+```text
+devteam> /recon
+```
+
+This reruns the read-only reconnaissance pass and refreshes `.devteam/codebase-context.md`, which DevTeam injects into later planner and architect prompts.
+
 ## Interactive shell commands
 
 ```text
 /status                                   Show workspace state and stall status
+/history                                  Show session command history (last 50)
 /start-here [new|medior|expert]           Show the guided onboarding flow for your persona
 /export [--output PATH]                   Package the current workspace for handoff or backup
 /import --input PATH [--force]            Import a previously exported workspace archive
+/mode <SLUG>                              Switch the active run mode
 /pipeline                                 Show the current default role chain
 /set-pipeline <ROLE ...|default>          Customize or reset the default role chain
 /provider                                 Show the current BYOK provider override
 /set-provider <NAME|default>              Set or reset the default BYOK provider
+/worktrees [on|off]                       Show or toggle git worktree isolation for parallel runs
+/recon [--backend sdk|cli]                Refresh the stored brownfield/codebase context
 /plan [--provider NAME]                   Generate or show the plan
 /edit-issue <ID> [--title TEXT] [--detail TEXT] [--role ROLE] [--area AREA|--clear-area] [--priority N] [--status STATE] [--depends-on N ...|--clear-depends] [--note TEXT]  Edit a queued issue safely
 /diff-run <RUN-ID> [COMPARE-RUN-ID]       Show what a run changed, or compare two runs
@@ -296,11 +357,16 @@ devteam> /set-provider default
 /preview [--max-subagents N]             Preview the next batch without starting the loop
 /approve [note]                           Approve the plan and move to execution
 /run [--provider NAME] [--max-iterations N] [--max-subagents N] [--dry-run]  Run the execution loop
+/stop                                     Request a stop after the current agent call
+/wait                                     Re-attach to the running loop and wait for completion
 /questions                                List open questions with age and blocking state
-/answer-question <ID> <answer>            Answer a question
+/answer <ID> <answer>                     Answer a question
 /budget [--total N] [--premium N]         Show or adjust budget
 /bug [--save PATH] [--redact-paths true|false]  Generate a bug report draft
 /keep-awake on|off                        Prevent Windows sleep during runs
+/max-iterations <N>                       Set the default loop iteration cap
+/max-subagents <N>                        Set the default parallelism level
+/goal <TEXT> [--goal-file PATH]           Set or update the active goal
 /check-update                             Check for newer versions
 /update                                   Update the global tool
 /exit                                     Exit the shell
@@ -308,7 +374,7 @@ devteam> /set-provider default
 
 ## Non-interactive usage
 
-Every shell command also works as a standalone CLI invocation:
+Most core workspace commands also work as standalone CLI invocations:
 
 ```powershell
 devteam /init --workspace .devteam --goal "Build a CLI Tetris clone"
@@ -335,6 +401,13 @@ devteam /answer-question 1 "Use keyboard controls only." --workspace .devteam
 devteam bug-report --workspace .devteam --save .\bugreport.md
 ```
 
+The current shell-only workflow helpers are:
+
+- `/worktrees` — inspect or toggle git worktree isolation for parallel runs
+- `/recon` — rerun codebase reconnaissance after initialization
+
+Use the interactive shell when you need those controls today.
+
 Update the goal later:
 
 ```powershell
@@ -355,6 +428,41 @@ devteam bug-report --workspace .devteam --save .\bugreport.md
 ```
 
 By default the report redacts common local paths and includes the current DevTeam version, environment details, workspace phase, active goal, recent runs, and any recent interactive shell commands or errors captured in the current shell session.
+
+## Brownfield repos and reconnaissance
+
+On a non-empty repository, `devteam /init` runs a **read-only reconnaissance pass by default** unless you set `--recon false`.
+
+```powershell
+devteam /init --workspace .devteam --goal "Modernize the billing service"
+devteam /init --workspace .devteam --goal "Skip recon for now" --recon false
+```
+
+Recon writes `.devteam/codebase-context.md` and stores the same context in workspace state. DevTeam then injects that context into later planner and architect prompts so those roles can follow the existing codebase instead of starting from generic assumptions.
+
+Use `/recon` in the interactive shell whenever the repository has changed significantly and you want to refresh that context before planning more work.
+
+## Brownfield change delta log
+
+For brownfield work, DevTeam asks agents to describe **how** they changed the codebase, not just what they changed. Completed brownfield runs can record:
+
+- `APPROACH: extend|replace|workaround`
+- `RATIONALE:` why that approach fit the existing codebase
+
+Those entries accumulate in `.devteam/brownfield-delta.md` and can be reviewed with:
+
+```text
+devteam> /brownfield-log
+```
+
+Example:
+
+```text
+## Run #12 - developer - Extend authentication middleware
+APPROACH: extend
+RATIONALE:
+The repository already routes auth decisions through middleware, so extending that path was safer than introducing a second auth entry point.
+```
 
 ## Modes
 
@@ -386,6 +494,14 @@ devteam /init --workspace .devteam --mode github --goal "Work through labelled G
 devteam /github-sync --workspace .devteam
 ```
 
+Recommended daily flow:
+
+1. Triage work in GitHub using labels and optional frontmatter metadata.
+2. Run `devteam /github-sync --workspace .devteam` to import new issues and questions.
+3. Review the local board with `/status`, `/questions`, and `/preview`.
+4. Run the loop locally with `/run`.
+5. Use issue mirrors, decisions, and run artifacts to trace local execution back to the originating GitHub issue.
+
 Use labels to decide what syncs into the workspace:
 
 | GitHub label | Result |
@@ -398,6 +514,18 @@ Use labels to decide what syncs into the workspace:
 | `area:<name>` | Set the issue area, normalized to a slug |
 
 Issue bodies can also include frontmatter for `role`, `priority`, `area`, `depends`, and `blocking`. Synced items keep an external reference such as `github#123` in the workspace mirrors so runs and decisions stay traceable back to the originating issue.
+
+Example issue body:
+
+```markdown
+---
+role: reviewer
+priority: 90
+area: checkout
+depends: 14, 15
+---
+Validate the checkout changes before release.
+```
 
 **Current scope note:** this shipped GitHub mode is intentionally limited to **issue/question sync**. PR attachment, PR review automation, and merge flows are still future workflow discussion items rather than part of this first slice.
 
@@ -488,6 +616,14 @@ View or adjust the budget:
 
 The budget is displayed after each loop iteration so you can see spend in real time. `/status` also shows usage grouped by role so you can see which roles are consuming the budget. If a model entry in `MODELS.json` defines `InputCostPer1kTokens` and `OutputCostPer1kTokens`, DevTeam will also show token totals and estimated USD cost when the backend exposes token telemetry.
 
+Example `/status` telemetry section:
+
+```text
+Role usage:
+  architect: 3 credits, 1 run(s), 1 completed, 3 premium, 14200 tokens (11000 in / 3200 out), ~$0.19
+  developer: 2 credits, 2 run(s), 2 completed, 18600 tokens (12900 in / 5700 out), ~$0.11
+```
+
 ## Parallel subagents
 
 By default the loop runs four agent at a time (`--max-subagents 4`). Raising/Lowering this lets independent areas execute concurrently, which is the main lever for throughput.
@@ -525,6 +661,23 @@ Practical guidance:
 ### Conflict prevention
 
 The runtime automatically prevents same-area issues from running in parallel. If two issues share the same `area` value, only the higher-priority one is included in each batch — even if `max-subagents` capacity would allow more. This prevents merge conflicts on shared files.
+
+### Worktree isolation
+
+If you want **parallel runs with filesystem isolation**, enable worktree mode in the interactive shell:
+
+```text
+devteam> /worktrees on
+devteam> /worktrees
+```
+
+When worktree mode is enabled, each parallel agent run executes in its own git worktree branch under `.devteam/worktrees/`. This is most useful when:
+
+- `max-subagents` is greater than 1
+- multiple areas are moving in parallel
+- you want safer merge boundaries between agent runs
+
+`/worktrees` also shows any active or conflicted worktrees so you can see which run owns which branch and path.
 
 ### Reviewer vs auditor
 
@@ -606,7 +759,9 @@ This creates a `.devteam-source/` directory containing all packaged assets:
 │   └── ...
 ├── modes/              Mode-specific guardrails
 │   ├── develop.md
-│   └── creative-writing.md
+│   ├── creative-writing.md
+│   ├── github.md
+│   └── autopilot.md
 ├── superpowers/        Reusable skill prompts
 │   ├── tdd.md
 │   ├── review.md
@@ -638,6 +793,8 @@ The CLI writes its local runtime state under the workspace directory (typically 
 ├── workspace.json          Main manifest (phase, budget, runtime config)
 ├── plan.md                 Generated plan (readable, versioned)
 ├── questions.md            Open questions for the user
+├── codebase-context.md     Read-only recon summary for brownfield guidance
+├── brownfield-delta.md     Append-only log of brownfield approach/rationale
 ├── state/
 │   ├── issues.json         Issue board
 │   ├── runs.json           Agent run history
@@ -648,6 +805,7 @@ The CLI writes its local runtime state under the workspace directory (typically 
 ├── issues/                 Markdown mirrors of the issue board
 │   ├── _index.md
 │   └── ISS-*.md
+├── worktrees/              Per-run git worktrees when shell worktree mode is enabled
 ├── runs/                   Per-run artifacts
 └── decisions/              Per-decision artifacts
 ```
