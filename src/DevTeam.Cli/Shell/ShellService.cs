@@ -1038,6 +1038,9 @@ internal sealed partial class ShellService : IDisposable
     private void CheckAndUpdateContext(WorkspaceState state)
     {
         var openQuestions = state.Questions.Where(q => q.Status == QuestionStatus.Open).ToList();
+        var readyIssueCount = state.Phase == WorkflowPhase.Execution
+            ? _runtime.GetReadyIssuesPreview(state, Math.Max(1, state.Runtime.DefaultMaxSubagents)).Count
+            : 0;
         var planAwaiting = !IsLoopRunning
             && state.Phase == WorkflowPhase.Planning
             && state.Issues.Any(i => i.IsPlanningIssue && i.Status == ItemStatus.Done)
@@ -1046,7 +1049,7 @@ internal sealed partial class ShellService : IDisposable
             && PlanWorkflow.IsAwaitingArchitectApproval(state)
             && openQuestions.Count == 0;
 
-        var contextKey = $"{state.Phase}|q:{string.Join(",", openQuestions.Select(q => q.Id))}|pa:{planAwaiting}|arch:{archAwaiting}|loop:{IsLoopRunning}";
+        var contextKey = $"{state.Phase}|q:{string.Join(",", openQuestions.Select(q => q.Id))}|pa:{planAwaiting}|arch:{archAwaiting}|loop:{IsLoopRunning}|ready:{readyIssueCount}";
 
         if (contextKey == _lastContextKey) return;
         _lastContextKey = contextKey;
@@ -1063,13 +1066,13 @@ internal sealed partial class ShellService : IDisposable
         {
             AddWarning($"{openQuestions.Count} open question(s) — the loop may be paused. Use /answer <id> <text>.");
         }
-        else if (planAwaiting)
+        else
         {
-            AddSystem("A plan is ready. Type [bold]approve[/] to proceed into execution, or type feedback to revise it. Use [dim]/plan[/] to review.", "plan ready ✓");
-        }
-        else if (archAwaiting)
-        {
-            AddSystem("The architect plan is ready. Type [bold]approve[/] to begin execution, or share feedback to revise.", "architect plan ready ✓");
+            var workflowGuide = BuildWorkflowGuideMarkup(state, IsLoopRunning, readyIssueCount);
+            if (!string.IsNullOrWhiteSpace(workflowGuide))
+            {
+                AddSystem(workflowGuide, "workflow guide");
+            }
         }
     }
 

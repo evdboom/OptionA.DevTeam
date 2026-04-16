@@ -177,6 +177,43 @@ devteam> /run --max-iterations 5 --max-subagents 3
   Loop finished: waiting-for-input
 ```
 
+### Choose the workflow that fits you
+
+| User | Recommended workflow |
+|------|----------------------|
+| **New user / non-programmer** | Start in the interactive shell, keep `max-subagents` at **1**, use `/plan`, then respond in plain English with feedback or `/approve`. |
+| **Medior user** | Use `/status`, `/questions`, `/budget`, and `/run --max-subagents 2` or `3` to keep the loop understandable while still getting parallelism. |
+| **Expert user** | Use `/customize`, `@role`, and mode changes such as `autopilot` once you already understand the plan and recovery flow. |
+
+### Common interactive moments
+
+**Revising a plan**
+
+You do not need a special command while a plan is waiting for approval. Plain text is treated as planning feedback:
+
+```text
+devteam> /plan
+devteam> Focus on a local CLI first. Skip cloud deployment for now.
+```
+
+**Answering a blocking question**
+
+If exactly one question is open, you can answer it with plain text. Otherwise use `/answer <id> <text>`:
+
+```text
+devteam> /questions
+devteam> /answer 1 Use keyboard controls only.
+```
+
+**Safe first execution**
+
+If you are still learning the workflow, start sequentially and then increase concurrency later:
+
+```text
+devteam> /max-subagents 1
+devteam> /run --max-iterations 3
+```
+
 ## Interactive shell commands
 
 ```text

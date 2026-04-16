@@ -22,6 +22,8 @@ internal sealed partial class ShellService
     {
         var sb = new StringBuilder();
         sb.AppendLine("[bold]Interactive commands:[/]");
+        sb.AppendLine("[dim]Typical flow: /init -> /plan -> feedback or /approve -> /run[/]");
+        sb.AppendLine();
         sb.AppendLine("  [cyan]/init[/] \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]  [dim]Initialise workspace with a goal[/]");
         sb.AppendLine("  [cyan]/customize[/] [[--force]]    [dim]Copy default prompt assets to .devteam-source/ for editing[/]");
         sb.AppendLine("  [cyan]/bug[/] [[--save PATH]] [[--redact-paths true|false]]  [dim]Generate a sanitized bug report draft[/]");
@@ -48,12 +50,69 @@ internal sealed partial class ShellService
         sb.AppendLine("  [cyan]/goal[/] <text> [[--goal-file PATH]]  [dim]Set or update the active goal[/]");
         sb.AppendLine("  [cyan]/exit[/]                 [dim]Exit the shell[/]");
         sb.AppendLine();
-        sb.AppendLine("If exactly one question is open, you can type a plain answer without /answer.");
-        sb.AppendLine("While a plan is awaiting approval, plain text is treated as planning feedback.");
+        sb.AppendLine("[bold]Smart input:[/]");
+        sb.AppendLine("  If exactly one question is open, you can type a plain answer without /answer.");
+        sb.AppendLine("  While a plan is awaiting approval, plain text is treated as planning feedback.");
         sb.AppendLine();
         sb.AppendLine("[bold]Direct role invocation:[/]");
         sb.Append("  [cyan]@role[/] <message>    e.g. [dim]@architect can you review our API design?[/]");
         return sb.ToString();
+    }
+
+    internal static string? BuildWorkflowGuideMarkup(WorkspaceState state, bool isLoopRunning, int readyIssueCount)
+    {
+        var openQuestionCount = state.Questions.Count(q => q.Status == QuestionStatus.Open);
+        if (openQuestionCount > 0 && !isLoopRunning)
+        {
+            return null;
+        }
+
+        if (isLoopRunning)
+        {
+            return "[bold]Step 3 of 3 - execution in progress[/]\n" +
+                "Use [cyan]/status[/] to inspect progress, [cyan]/answer[/] to unblock questions, [cyan]/stop[/] to request a stop, or [cyan]/wait[/] to stay attached.";
+        }
+
+        var planGenerated = state.Issues.Any(i => i.IsPlanningIssue && i.Status == ItemStatus.Done);
+        var architectAwaitingApproval = PlanWorkflow.IsAwaitingArchitectApproval(state);
+
+        if (state.Phase == WorkflowPhase.Planning && !planGenerated)
+        {
+            return "[bold]Step 1 of 3 - planning[/]\n" +
+                "Run [cyan]/plan[/] to generate the first high-level plan. Then review it here and either type feedback as plain text or use [cyan]/approve[/].";
+        }
+
+        if (state.Phase == WorkflowPhase.Planning)
+        {
+            return "[bold]Step 1 of 3 - plan review[/]\n" +
+                "Your high-level plan is ready. Type feedback as plain text to revise it, or use [cyan]/approve[/] to move into architecture. Use [dim]/plan[/] to review it again.";
+        }
+
+        if (state.Phase == WorkflowPhase.ArchitectPlanning && !architectAwaitingApproval)
+        {
+            return "[bold]Step 2 of 3 - architecture[/]\n" +
+                "Run [cyan]/run[/] to let the architect turn the approved plan into concrete execution issues. Then review the result with [dim]/plan[/] and [cyan]/approve[/] again.";
+        }
+
+        if (architectAwaitingApproval)
+        {
+            return "[bold]Step 2 of 3 - architect review[/]\n" +
+                "The architect plan is ready. Type feedback as plain text to revise it, or use [cyan]/approve[/] to begin execution.";
+        }
+
+        if (state.Phase == WorkflowPhase.Execution)
+        {
+            if (readyIssueCount > 0)
+            {
+                return $"[bold]Step 3 of 3 - execution[/]\n" +
+                    $"[bold]{readyIssueCount}[/] issue(s) are ready. Use [cyan]/run[/] to start work. If you are learning the loop, [cyan]/max-subagents 1[/] is the safest default; [cyan]2-3[/] is a good standard setting.";
+            }
+
+            return "[bold]Step 3 of 3 - execution[/]\n" +
+                "There is no ready work right now. Use [cyan]/status[/] to inspect the board, [cyan]/questions[/] to review open questions, or [cyan]/add-issue[/] to queue work manually.";
+        }
+
+        return null;
     }
 
     // ── Banner ─────────────────────────────────────────────────────────────────

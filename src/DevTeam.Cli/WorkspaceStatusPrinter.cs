@@ -270,6 +270,8 @@ internal static class WorkspaceStatusPrinter
     internal static void PrintInteractiveHelp()
     {
         Console.WriteLine(ConsoleTheme.Label("Interactive commands:"));
+        Console.WriteLine(ConsoleTheme.Muted("  Typical flow: /init -> /plan -> feedback or /approve -> /run"));
+        Console.WriteLine();
         Console.WriteLine($"  {ConsoleTheme.Command("/init")} \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/customize")} [[--force]]    Copy default assets to .devteam-source/ for editing");
         Console.WriteLine($"  {ConsoleTheme.Command("/bug")} [[--save PATH]] [[--redact-paths true|false]]");
@@ -293,6 +295,8 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine($"  {ConsoleTheme.Command("/answer")} <id> <text>  {ConsoleTheme.Muted("works while the loop is running")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/goal")} <text> [[--goal-file PATH]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/exit")}");
+        Console.WriteLine();
+        Console.WriteLine(ConsoleTheme.Label("Smart input:"));
         Console.WriteLine("If exactly one question is open, you can type a plain answer without `/answer`.");
         Console.WriteLine("While a plan is awaiting approval, plain text is treated as planning feedback and re-runs planning.");
         Console.WriteLine($"{ConsoleTheme.Muted("/answer")}, {ConsoleTheme.Muted("/questions")}, {ConsoleTheme.Muted("/status")}, {ConsoleTheme.Muted("/budget")}, and {ConsoleTheme.Muted("@role")} messages are all safe to use while the loop runs.");
