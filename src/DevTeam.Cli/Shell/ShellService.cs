@@ -403,6 +403,21 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "diff-run":
+                {
+                    var current = _store.Load();
+                    var values = GetPositionalValues(options);
+                    if (values.Count is < 1 or > 2 || !int.TryParse(values[0], out var runId) || (values.Count == 2 && !int.TryParse(values[1], out _)))
+                    {
+                        throw new InvalidOperationException("Usage: /diff-run <run-id> [compare-run-id]");
+                    }
+
+                    var compareRunId = values.Count == 2 ? int.Parse(values[1]) : (int?)null;
+                    var report = _runtime.BuildRunDiff(current, runId, compareRunId);
+                    AddSystem(RunDiffPrinter.BuildMarkup(report), "run diff");
+                    break;
+                }
+
                 case "goal":
                 case "set-goal":
                 {

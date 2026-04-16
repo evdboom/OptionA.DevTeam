@@ -224,6 +224,63 @@ public class DevTeamRuntime
         return preview;
     }
 
+    public RunDiffReport BuildRunDiff(WorkspaceState state, int runId, int? compareToRunId = null)
+    {
+        var primaryRun = state.AgentRuns.FirstOrDefault(item => item.Id == runId)
+            ?? throw new InvalidOperationException($"Run #{runId} was not found.");
+        var primaryIssue = state.Issues.FirstOrDefault(item => item.Id == primaryRun.IssueId);
+        var primaryCreatedIssues = state.Issues
+            .Where(item => primaryRun.CreatedIssueIds.Contains(item.Id))
+            .OrderBy(item => item.Id)
+            .ToList();
+        var primaryCreatedQuestions = state.Questions
+            .Where(item => primaryRun.CreatedQuestionIds.Contains(item.Id))
+            .OrderBy(item => item.Id)
+            .ToList();
+
+        if (compareToRunId is null)
+        {
+            return new RunDiffReport
+            {
+                PrimaryRun = primaryRun,
+                PrimaryIssue = primaryIssue,
+                PrimaryCreatedIssues = primaryCreatedIssues,
+                PrimaryCreatedQuestions = primaryCreatedQuestions,
+                PrimaryOnlyChangedPaths = primaryRun.ChangedPaths
+            };
+        }
+
+        var compareRun = state.AgentRuns.FirstOrDefault(item => item.Id == compareToRunId.Value)
+            ?? throw new InvalidOperationException($"Run #{compareToRunId.Value} was not found.");
+        var compareIssue = state.Issues.FirstOrDefault(item => item.Id == compareRun.IssueId);
+        var compareCreatedIssues = state.Issues
+            .Where(item => compareRun.CreatedIssueIds.Contains(item.Id))
+            .OrderBy(item => item.Id)
+            .ToList();
+        var compareCreatedQuestions = state.Questions
+            .Where(item => compareRun.CreatedQuestionIds.Contains(item.Id))
+            .OrderBy(item => item.Id)
+            .ToList();
+
+        var primaryChanged = primaryRun.ChangedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var compareChanged = compareRun.ChangedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return new RunDiffReport
+        {
+            PrimaryRun = primaryRun,
+            PrimaryIssue = primaryIssue,
+            PrimaryCreatedIssues = primaryCreatedIssues,
+            PrimaryCreatedQuestions = primaryCreatedQuestions,
+            CompareRun = compareRun,
+            CompareIssue = compareIssue,
+            CompareCreatedIssues = compareCreatedIssues,
+            CompareCreatedQuestions = compareCreatedQuestions,
+            SharedChangedPaths = primaryChanged.Intersect(compareChanged, StringComparer.OrdinalIgnoreCase).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            PrimaryOnlyChangedPaths = primaryChanged.Except(compareChanged, StringComparer.OrdinalIgnoreCase).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            CompareOnlyChangedPaths = compareChanged.Except(primaryChanged, StringComparer.OrdinalIgnoreCase).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList()
+        };
+    }
+
     public IReadOnlyList<string> PrepareForLoop(WorkspaceState state)
     {
         _planningService.EnsureApprovedPlanningIssuesClosed(state);
@@ -546,7 +603,10 @@ public class DevTeamRuntime
         string summary,
         IEnumerable<string>? superpowersUsed = null,
         IEnumerable<string>? toolsUsed = null,
-        IEnumerable<string>? changedPaths = null)
+        IEnumerable<string>? changedPaths = null,
+        IEnumerable<int>? createdIssueIds = null,
+        IEnumerable<int>? createdQuestionIds = null,
+        ItemStatus? resultingIssueStatus = null)
     {
         var run = state.AgentRuns.FirstOrDefault(item => item.Id == runId)
             ?? throw new InvalidOperationException($"Run #{runId} was not found.");
@@ -554,6 +614,7 @@ public class DevTeamRuntime
             ?? throw new InvalidOperationException($"Issue #{run.IssueId} was not found.");
 
         run.Summary = summary.Trim();
+        run.ResultingIssueStatus = resultingIssueStatus;
         run.SuperpowersUsed = superpowersUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
         run.ToolsUsed = toolsUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
         run.ChangedPaths = changedPaths?
@@ -561,6 +622,14 @@ public class DevTeamRuntime
             .Select(item => item.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+        run.CreatedIssueIds = createdIssueIds?
+            .Distinct()
+            .OrderBy(item => item)
+            .ToList() ?? [];
+        run.CreatedQuestionIds = createdQuestionIds?
+            .Distinct()
+            .OrderBy(item => item)
             .ToList() ?? [];
         run.UpdatedAtUtc = _clock.UtcNow;
         switch (outcome.Trim().ToLowerInvariant())

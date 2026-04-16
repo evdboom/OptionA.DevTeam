@@ -12,8 +12,12 @@ public sealed class AgentRun
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public AgentRunStatus Status { get; set; } = AgentRunStatus.Queued;
     public string Summary { get; set; } = "";
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public ItemStatus? ResultingIssueStatus { get; set; }
     public List<string> SuperpowersUsed { get; set; } = [];
     public List<string> ToolsUsed { get; set; } = [];
     public List<string> ChangedPaths { get; set; } = [];
+    public List<int> CreatedIssueIds { get; set; } = [];
+    public List<int> CreatedQuestionIds { get; set; } = [];
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }

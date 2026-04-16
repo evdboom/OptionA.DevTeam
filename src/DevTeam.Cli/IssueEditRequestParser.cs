@@ -52,9 +52,13 @@ internal static class IssueEditRequestParser
         }
 
         var role = GetOption(options, "role");
-        if (!string.IsNullOrWhiteSpace(role) && !runtime.TryResolveRoleSlug(state, role, out _))
+        if (!string.IsNullOrWhiteSpace(role))
         {
-            throw new InvalidOperationException($"Unknown role '{role}'. Valid roles: {string.Join(", ", runtime.GetKnownRoleSlugs(state))}");
+            runtime.TryResolveRoleSlug(state, role, out var resolvedRole);
+            if (!runtime.GetKnownRoleSlugs(state).Contains(resolvedRole, StringComparer.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Unknown role '{role}'. Valid roles: {string.Join(", ", runtime.GetKnownRoleSlugs(state))}");
+            }
         }
 
         return new IssueEditRequest

@@ -76,6 +76,7 @@ var tests = new List<(string Name, Action Run)>
     ("Autopilot mode enables auto-approve", TestAutopilotModeEnablesAutoApprove),
     ("Design-only roles receive file boundary enforcement", TestDesignOnlyRolesReceiveFileBoundary),
     ("Edit-issue command updates queued issue fields", TestEditIssueCommandUpdatesQueuedIssue),
+    ("Diff-run command shows run delta", TestDiffRunCommandShowsRunDelta),
     ("Planner cannot create duplicate architect issues", TestPlannerCannotCreateDuplicateArchitectIssues),
     ("Init rejects misspelled goal option", TestInitRejectsMisspelledGoalOption),
     ("Architect run updates plan artifact with execution details", TestArchitectRunUpdatesPlanArtifact),

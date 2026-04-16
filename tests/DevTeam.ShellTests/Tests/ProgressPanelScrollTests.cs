@@ -501,7 +501,7 @@ internal static class ProgressPanelScrollTests
         [
             "/init", "/customize", "/start-here", "/bug", "/status", "/history",
             "/mode", "/keep-awake", "/add-issue", "/edit-issue", "/plan", "/questions",
-            "/budget", "/check-update", "/update", "/max-iterations",
+            "/diff-run", "/budget", "/check-update", "/update", "/max-iterations",
             "/max-subagents", "/run", "/stop", "/wait", "/feedback",
             "/preview", "/approve", "/answer", "/goal", "/exit", "@role",
         ];

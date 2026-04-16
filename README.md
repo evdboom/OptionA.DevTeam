@@ -239,6 +239,13 @@ devteam> /run --max-iterations 3
 devteam> /edit-issue 7 --priority 90 --area ui --note "Raise priority after user feedback."
 ```
 
+**Inspect what a run changed**
+
+```text
+devteam> /diff-run 12
+devteam> /diff-run 12 11
+```
+
 ## Interactive shell commands
 
 ```text
@@ -246,6 +253,7 @@ devteam> /edit-issue 7 --priority 90 --area ui --note "Raise priority after user
 /start-here [new|medior|expert]           Show the guided onboarding flow for your persona
 /plan                                     Generate or show the plan
 /edit-issue <ID> [--title TEXT] [--detail TEXT] [--role ROLE] [--area AREA|--clear-area] [--priority N] [--status STATE] [--depends-on N ...|--clear-depends] [--note TEXT]  Edit a queued issue safely
+/diff-run <RUN-ID> [COMPARE-RUN-ID]       Show what a run changed, or compare two runs
 /feedback <text>                          Revise the plan with feedback
 /preview [--max-subagents N]             Preview the next batch without starting the loop
 /approve [note]                           Approve the plan and move to execution
@@ -269,6 +277,8 @@ devteam /init --workspace .devteam --goal "Build a CLI Tetris clone"
 devteam /start-here expert --workspace .devteam
 devteam /plan --workspace .devteam
 devteam /edit-issue 7 --workspace .devteam --priority 90 --area ui --note "Raise priority after feedback."
+devteam /diff-run 12 --workspace .devteam
+devteam /diff-run 12 11 --workspace .devteam
 devteam /preview --workspace .devteam --max-subagents 2
 devteam /approve-plan --workspace .devteam --note "Looks good. Start building."
 devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3

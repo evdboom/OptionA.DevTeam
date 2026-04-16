@@ -1794,6 +1794,49 @@ internal static class SmokeTestFunctions
         }
     }
 
+    internal static void TestDiffRunCommandShowsRunDelta()
+    {
+        using var harness = new TestHarness();
+        harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+        var issue = harness.Runtime.AddIssue(harness.State, "Implement traceable UI", "Build the UI slice.", "developer", 90, null, [], "ui");
+        harness.State.Issues.Add(new IssueItem
+        {
+            Id = harness.State.NextIssueId++,
+            Title = "Test traceable UI",
+            RoleSlug = "tester",
+            Area = "ui",
+            Status = ItemStatus.Open
+        });
+        harness.State.Questions.Add(new QuestionItem
+        {
+            Id = harness.State.NextQuestionId++,
+            Text = "Use light or dark theme?",
+            IsBlocking = true,
+            Status = QuestionStatus.Open
+        });
+        harness.State.AgentRuns.Add(new AgentRun
+        {
+            Id = 12,
+            IssueId = issue.Id,
+            RoleSlug = "developer",
+            Status = AgentRunStatus.Completed,
+            Summary = "Implemented the UI slice.",
+            ResultingIssueStatus = ItemStatus.Done,
+            ChangedPaths = ["src/Ui.cs", "tests/UiTests.cs"],
+            CreatedIssueIds = [2],
+            CreatedQuestionIds = [1]
+        });
+        harness.Store.Save(harness.State);
+
+        var result = RunDevTeamCli(harness.RepoRoot, "diff-run", "12", "--workspace", harness.Store.WorkspacePath);
+
+        AssertEqual(0, result.ExitCode, "diff-run exit code");
+        AssertTrue(result.StdOut.Contains("Run #12 diff", StringComparison.Ordinal), "diff-run should identify the run.");
+        AssertTrue(result.StdOut.Contains("src/Ui.cs", StringComparison.Ordinal), "diff-run should list changed files.");
+        AssertTrue(result.StdOut.Contains("Test traceable UI", StringComparison.Ordinal), "diff-run should list created issues.");
+        AssertTrue(result.StdOut.Contains("Use light or dark theme?", StringComparison.Ordinal), "diff-run should list created questions.");
+    }
+
     internal static void TestArchitectRunUpdatesPlanArtifact()
     {
         using var harness = new TestHarness();

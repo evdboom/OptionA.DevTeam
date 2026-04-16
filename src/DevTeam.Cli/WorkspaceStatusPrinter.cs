@@ -322,6 +322,7 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("  add-roadmap <TITLE> [--detail TEXT] [--priority N] [--workspace PATH]");
         Console.WriteLine("  add-issue <TITLE> --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]] [--workspace PATH]");
         Console.WriteLine("  edit-issue <ID> [--title TEXT] [--detail TEXT] [--role ROLE] [--area AREA | --clear-area] [--priority N] [--status open|in-progress|done|blocked] [--depends-on N [N...]] [--clear-depends] [--note TEXT] [--workspace PATH]");
+        Console.WriteLine("  diff-run <RUN-ID> [COMPARE-RUN-ID] [--workspace PATH]");
         Console.WriteLine("  add-question <TEXT> [--blocking] [--workspace PATH]");
         Console.WriteLine("  answer-question <ID> <ANSWER> [--workspace PATH]");
         Console.WriteLine("  approve-plan [--note TEXT] [--workspace PATH]");
@@ -356,6 +357,7 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine($"  {ConsoleTheme.Command("/add-issue")} \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--roadmap-item-id N]] [[--depends-on N [[N...]]]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/edit-issue")} <id> [[--title TEXT]] [[--detail TEXT]] [[--role ROLE]] [[--area AREA|--clear-area]] [[--priority N]] [[--status STATE]] [[--depends-on N [[N...]]|--clear-depends]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/plan")}");
+        Console.WriteLine($"  {ConsoleTheme.Command("/diff-run")} <run-id> [[compare-run-id]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/questions")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/budget")} [[--total N]] [[--premium N]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/check-update")}");

@@ -150,21 +150,37 @@ public class LoopExecutor(
                 var pendingRun = pendingRuns.First(item => item.Run.RunId == completed.Run.RunId);
                 pendingRuns.RemoveAll(item => item.Run.RunId == completed.Run.RunId);
                 _runtime.MergeWorkspaceAdditions(state, _store.Load());
+                var createdQuestionIds = new List<int>();
                 if (completed.Questions.Count > 0)
                 {
-                    _runtime.AddQuestions(state, completed.Questions);
+                    createdQuestionIds = _runtime.AddQuestions(state, completed.Questions)
+                        .Select(item => item.Id)
+                        .ToList();
                 }
+                var createdIssueIds = new List<int>();
                 if (completed.Issues.Count > 0)
                 {
-                    _runtime.AddGeneratedIssues(state, completed.Run.IssueId, completed.Issues);
+                    createdIssueIds = _runtime.AddGeneratedIssues(state, completed.Run.IssueId, completed.Issues)
+                        .Select(item => item.Id)
+                        .ToList();
                 }
                 var changedPaths = _git.GetPathsChangedSince(pendingRun.WorkingDirectory, pendingRun.GitStatusBeforeRun);
-                _runtime.CompleteRun(state, completed.Run.RunId, completed.Outcome, completed.Summary, completed.SuperpowersUsed, completed.ToolsUsed, changedPaths);
+                var completedIssue = state.Issues.First(issue => issue.Id == completed.Run.IssueId);
+                _runtime.CompleteRun(
+                    state,
+                    completed.Run.RunId,
+                    completed.Outcome,
+                    completed.Summary,
+                    completed.SuperpowersUsed,
+                    completed.ToolsUsed,
+                    changedPaths,
+                    createdIssueIds,
+                    createdQuestionIds,
+                    completedIssue.Status);
                 var decision = state.Decisions.Last();
                 var persistedRun = state.AgentRuns.First(run => run.Id == completed.Run.RunId);
                 WriteRunArtifact(_store.WorkspacePath, completed.Run, persistedRun, completed.Response, completed.Outcome, completed.Summary);
                 WriteDecisionArtifact(_store.WorkspacePath, decision, persistedRun);
-                var completedIssue = state.Issues.First(issue => issue.Id == completed.Run.IssueId);
 
                 // Merge worktree branch back into the main repo (if worktree mode active for this run)
                 FinalizeWorktree(state, completed, log, options.Verbosity);
@@ -286,10 +302,25 @@ public class LoopExecutor(
         var result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, cancellationToken: cancellationToken);
 
         _runtime.MergeWorkspaceAdditions(state, _store.Load());
-        if (result.Questions.Count > 0) _runtime.AddQuestions(state, result.Questions);
-        if (result.Issues.Count > 0) _runtime.AddGeneratedIssues(state, result.Run.IssueId, result.Issues);
+        var createdQuestionIds = result.Questions.Count > 0
+            ? _runtime.AddQuestions(state, result.Questions).Select(item => item.Id).ToList()
+            : [];
+        var createdIssueIds = result.Issues.Count > 0
+            ? _runtime.AddGeneratedIssues(state, result.Run.IssueId, result.Issues).Select(item => item.Id).ToList()
+            : [];
         var changedPaths = _git.GetPathsChangedSince(state.RepoRoot, gitStatusBeforeRun);
-        _runtime.CompleteRun(state, result.Run.RunId, result.Outcome, result.Summary, result.SuperpowersUsed, result.ToolsUsed, changedPaths);
+        var completedIssue = state.Issues.First(issue => issue.Id == result.Run.IssueId);
+        _runtime.CompleteRun(
+            state,
+            result.Run.RunId,
+            result.Outcome,
+            result.Summary,
+            result.SuperpowersUsed,
+            result.ToolsUsed,
+            changedPaths,
+            createdIssueIds,
+            createdQuestionIds,
+            completedIssue.Status);
         var persistedRun = state.AgentRuns.First(r => r.Id == result.Run.RunId);
         WriteRunArtifact(_store.WorkspacePath, result.Run, persistedRun, result.Response, result.Outcome, result.Summary);
         WriteDecisionArtifact(_store.WorkspacePath, state.Decisions.Last(), persistedRun);
@@ -398,6 +429,7 @@ public class LoopExecutor(
         - Backend: {response.BackendName}
         - Session: {response.SessionId}
         - Outcome: {outcome}
+        - Resulting issue status: {(persistedRun.ResultingIssueStatus?.ToString() ?? "(none)")}
 
         ## Summary
 
@@ -414,6 +446,14 @@ public class LoopExecutor(
         ## Changed Files
 
         {(persistedRun.ChangedPaths.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.ChangedPaths.Select(item => $"- {item}")))}
+
+        ## Created Issues
+
+        {(persistedRun.CreatedIssueIds.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.CreatedIssueIds.Select(item => $"- #{item}")))}
+
+        ## Created Questions
+
+        {(persistedRun.CreatedQuestionIds.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.CreatedQuestionIds.Select(item => $"- #{item}")))}
 
         ## Output
 
