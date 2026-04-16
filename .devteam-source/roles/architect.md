@@ -60,6 +60,14 @@ Only use numeric ids in `depends=` and only for existing issues.
 Use `area=` to identify likely overlap in touched files or subsystems. Reuse the same area for conflicting work so the scheduler can avoid parallel collisions.
 If you discover additional work, blockers, or prerequisites while working, add them as new issues instead of broadening the current issue.
 
+## Testability-first design requirements
+- Treat testability as a first-class architecture concern, not a later implementation detail.
+- In every implementation issue, name the interfaces or abstractions that should be introduced for non-trivial collaborators so the developer can use constructor injection instead of hidden dependencies.
+- Call out every place where file system, process, clock, console, network, or git access must be wrapped behind an injected interface or service boundary.
+- Prefer seams that enable fast unit tests first, then layer integration or smoke coverage on top.
+- When describing tests, specify the values or state transitions that should be asserted — not just that "a test exists."
+- If a design would naturally create a large class or file, split responsibilities early so each implementation issue stays independently testable and maintainable.
+
 ## Suggested Model
 `claude-opus-4.6` (3 credits) — architecture decisions need the deepest reasoning and multi-file analysis. Worth the premium.
 
@@ -73,3 +81,5 @@ If you discover additional work, blockers, or prerequisites while working, add t
 - Write detailed issue descriptions so developers don't need to guess your intent
 - **Issue sizing:** Each issue you create should touch ≤ ~5 files and produce ≤ ~400 lines of new/changed code. If an issue would produce more, split it into sub-issues. Smaller issues mean cleaner diffs and less merge risk.
 - **Enforce hygiene in your designs:** Spec Blazor components with separate `.razor` (markup) and `.razor.cs` (logic) files. Spec `Program.cs` as a ≤ 30-line bootstrap. When designing a new class, keep it focused on one concern — flag any file that would naturally own multiple concerns as a split opportunity.
+- **Enforce constructor injection:** Name the injected collaborators and required interfaces in your issue details. Do not leave infrastructure access as implied static calls.
+- **Enforce observable boundaries:** If the design touches file system, process execution, git, console, clock, or external services, say which abstraction should own that dependency so the implementation can be audited and unit tested cleanly.

@@ -9,22 +9,15 @@ This file tracks the **active, open roadmap only**.
 
 | Priority | Item | Scope | Why now |
 |---|---|---|---|
-| 1 | **R11 - Testability-first architect prompting (ATM: Testable)** | Small | Improves quality of generated execution issues before they hit implementation. |
-| 2 | **R14 - Auditor role for AI drift and legacy drift** | Medium | Reviewer is feature-scoped. Auditor should catch broader codebase drift, especially recent AI-shaped shortcuts and maintainability erosion. |
-| 3 | **R2 - /edit-issue command** | Small-Medium | Gives medior and expert users more control without rerunning planning. |
-| 4 | **R4 - Run diff (/diff-run)** | Small | Helps users understand what each loop iteration actually accomplished. |
-| 5 | **R7 - Workspace export/import** | Medium | Important for handoff, sharing, and multi-machine usage after core UX is clearer. |
-| 6 | **R8 - Role chaining configuration** | Medium | Expert workflow improvement after the default workflow is easier to understand. |
-| 7 | **R6 - Per-role token and cost telemetry** | Small-Medium | Useful for tuning and optimization after the main UX pain is addressed. |
-| 8 | **R12 - Brownfield change delta** | Medium | Valuable audit layer, but should follow visibility basics and traceability. |
-| 9 | **#6 - GitHub mode** | Major | Major expansion feature; should come after the core interactive workflow is clearer. |
-| 10 | **R13 - BYOK / provider-agnostic auth** | Small-Medium | Broadens adoption, but is less urgent than making the current product easier to use. |
-
----
-
-## R11 - Testability-first architect prompting
-
-**Goal:** Ensure architect output explicitly encodes testability constraints, interfaces, and injectable boundaries.
+| 1 | **R14 - Auditor role for AI drift and legacy drift** | Medium | Reviewer is feature-scoped. Auditor should catch broader codebase drift, especially recent AI-shaped shortcuts and maintainability erosion. |
+| 2 | **R2 - /edit-issue command** | Small-Medium | Gives medior and expert users more control without rerunning planning. |
+| 3 | **R4 - Run diff (/diff-run)** | Small | Helps users understand what each loop iteration actually accomplished. |
+| 4 | **R7 - Workspace export/import** | Medium | Important for handoff, sharing, and multi-machine usage after core UX is clearer. |
+| 5 | **R8 - Role chaining configuration** | Medium | Expert workflow improvement after the default workflow is easier to understand. |
+| 6 | **R6 - Per-role token and cost telemetry** | Small-Medium | Useful for tuning and optimization after the main UX pain is addressed. |
+| 7 | **R12 - Brownfield change delta** | Medium | Valuable audit layer, but should follow visibility basics and traceability. |
+| 8 | **#6 - GitHub mode** | Major | Major expansion feature; should come after the core interactive workflow is clearer. |
+| 9 | **R13 - BYOK / provider-agnostic auth** | Small-Medium | Broadens adoption, but is less urgent than making the current product easier to use. |
 
 ---
 

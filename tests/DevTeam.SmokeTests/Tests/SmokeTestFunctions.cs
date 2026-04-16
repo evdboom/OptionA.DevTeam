@@ -1670,6 +1670,10 @@ internal static class SmokeTestFunctions
         var architectPrompt = agent.LastPrompt ?? throw new InvalidOperationException("Expected architect prompt.");
         AssertTrue(architectPrompt.Contains("FILE BOUNDARY", StringComparison.Ordinal), "Architect prompt should include FILE BOUNDARY enforcement.");
         AssertTrue(architectPrompt.Contains("design-only role", StringComparison.Ordinal), "Architect prompt should state it is a design-only role.");
+        AssertTrue(architectPrompt.Contains("constructor injection", StringComparison.OrdinalIgnoreCase), "Architect prompt should require constructor injection.");
+        AssertTrue(architectPrompt.Contains("file system", StringComparison.OrdinalIgnoreCase)
+            && architectPrompt.Contains("clock", StringComparison.OrdinalIgnoreCase),
+            "Architect prompt should call out explicit infrastructure abstractions for testability.");
     
         // Developer should NOT get file boundary enforcement
         var devIssue = harness.Runtime.AddIssue(harness.State, "Build the game loop", "Implement it.", "developer", 80, null, []);
