@@ -277,6 +277,22 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "export":
+                {
+                    var archivePath = WorkspaceArchiveService.Export(_store.WorkspacePath, GetOption(options, "output"));
+                    AddSuccess($"Exported workspace to {Markup.Escape(archivePath)}");
+                    break;
+                }
+
+                case "import":
+                {
+                    var inputPath = GetOption(options, "input") ?? GetPositionalValue(options)
+                        ?? throw new InvalidOperationException("Usage: /import --input PATH [--force]");
+                    var importedPath = WorkspaceArchiveService.Import(inputPath, _store.WorkspacePath, GetBoolOption(options, "force", false));
+                    AddSuccess($"Imported workspace into {Markup.Escape(importedPath)}");
+                    break;
+                }
+
                 case "start-here":
                 {
                     TryLoadState(out var current);

@@ -1837,6 +1837,38 @@ internal static class SmokeTestFunctions
         AssertTrue(result.StdOut.Contains("Use light or dark theme?", StringComparison.Ordinal), "diff-run should list created questions.");
     }
 
+    internal static void TestWorkspaceExportImportRoundTrip()
+    {
+        using var harness = new TestHarness();
+        harness.Runtime.SetGoal(harness.State, "Ship a portable workspace.");
+        harness.Runtime.AddIssue(harness.State, "Implement export", "Package the workspace.", "developer", 80, null, [], "cli");
+        harness.State.Questions.Add(new QuestionItem
+        {
+            Id = harness.State.NextQuestionId++,
+            Text = "Should import overwrite existing files?",
+            IsBlocking = true,
+            Status = QuestionStatus.Open
+        });
+        harness.Store.Save(harness.State);
+
+        var archivePath = Path.Combine(harness.TempRoot, "handoff.zip");
+        var importedWorkspace = Path.Combine(harness.TempRoot, ".devteam-imported");
+
+        var exportResult = RunDevTeamCli(harness.RepoRoot, "export", "--workspace", harness.Store.WorkspacePath, "--output", archivePath);
+        AssertEqual(0, exportResult.ExitCode, "Export exit code");
+        AssertTrue(File.Exists(archivePath), "Export should create the archive.");
+
+        var importResult = RunDevTeamCli(harness.RepoRoot, "import", "--workspace", importedWorkspace, "--input", archivePath);
+        AssertEqual(0, importResult.ExitCode, "Import exit code");
+
+        var importedStore = new WorkspaceStore(importedWorkspace);
+        var importedState = importedStore.Load();
+        AssertEqual(harness.State.ActiveGoal?.GoalText, importedState.ActiveGoal?.GoalText, "Imported goal");
+        AssertEqual(harness.State.Issues.Count, importedState.Issues.Count, "Imported issue count");
+        AssertEqual(harness.State.Questions.Count, importedState.Questions.Count, "Imported question count");
+        AssertTrue(importedState.Issues.Any(issue => issue.Title == "Implement export"), "Imported workspace should contain exported issue.");
+    }
+
     internal static void TestArchitectRunUpdatesPlanArtifact()
     {
         using var harness = new TestHarness();

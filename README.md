@@ -246,11 +246,20 @@ devteam> /diff-run 12
 devteam> /diff-run 12 11
 ```
 
+**Hand off a workspace to another machine**
+
+```text
+devteam> /export --output handoff.zip
+devteam> /import --input handoff.zip --force
+```
+
 ## Interactive shell commands
 
 ```text
 /status                                   Show workspace state and stall status
 /start-here [new|medior|expert]           Show the guided onboarding flow for your persona
+/export [--output PATH]                   Package the current workspace for handoff or backup
+/import --input PATH [--force]            Import a previously exported workspace archive
 /plan                                     Generate or show the plan
 /edit-issue <ID> [--title TEXT] [--detail TEXT] [--role ROLE] [--area AREA|--clear-area] [--priority N] [--status STATE] [--depends-on N ...|--clear-depends] [--note TEXT]  Edit a queued issue safely
 /diff-run <RUN-ID> [COMPARE-RUN-ID]       Show what a run changed, or compare two runs
@@ -275,6 +284,8 @@ Every shell command also works as a standalone CLI invocation:
 ```powershell
 devteam /init --workspace .devteam --goal "Build a CLI Tetris clone"
 devteam /start-here expert --workspace .devteam
+devteam /export --workspace .devteam --output .\handoff.zip
+devteam /import --workspace .devteam-imported --input .\handoff.zip --force
 devteam /plan --workspace .devteam
 devteam /edit-issue 7 --workspace .devteam --priority 90 --area ui --note "Raise priority after feedback."
 devteam /diff-run 12 --workspace .devteam

@@ -311,6 +311,8 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("  start [--keep-awake true|false] [--no-tty] [--output-format plain|jsonl] [--workspace PATH]");
         Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false] [--recon true|false] [--backend sdk|cli] [--timeout-seconds N]");
         Console.WriteLine("  customize [--force]                Copy default roles, modes, and superpowers to .devteam-source/ for editing");
+        Console.WriteLine("  export [--output PATH] [--workspace PATH]");
+        Console.WriteLine("  import --input PATH [--force] [--workspace PATH]");
         Console.WriteLine("  start-here [new|medior|expert] [--workspace PATH]  Show a persona-based onboarding guide");
         Console.WriteLine("  bug-report [--save PATH] [--redact-paths true|false] [--history-count N] [--error-count N] [--workspace PATH]");
         Console.WriteLine("  set-goal <TEXT> [--goal-file PATH] [--workspace PATH]");
@@ -348,6 +350,8 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine();
         Console.WriteLine($"  {ConsoleTheme.Command("/init")} \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/customize")} [[--force]]    Copy default assets to .devteam-source/ for editing");
+        Console.WriteLine($"  {ConsoleTheme.Command("/export")} [[--output PATH]]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/import")} --input PATH [[--force]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/start-here")} [[new|medior|expert]]    Show the guided onboarding flow for your persona");
         Console.WriteLine($"  {ConsoleTheme.Command("/bug")} [[--save PATH]] [[--redact-paths true|false]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/status")}");

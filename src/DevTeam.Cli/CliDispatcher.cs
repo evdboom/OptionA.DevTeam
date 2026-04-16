@@ -131,6 +131,23 @@ internal sealed class CliDispatcher
                 return 0;
             }
 
+            case "export":
+            {
+                var outputPath = GetOption(options, "output");
+                var archivePath = WorkspaceArchiveService.Export(_workspacePath, outputPath);
+                _output.WriteLine($"Exported workspace to {archivePath}");
+                return 0;
+            }
+
+            case "import":
+            {
+                var inputPath = GetOption(options, "input") ?? GetPositionalValue(options)
+                    ?? throw new InvalidOperationException("Usage: import --input PATH [--force] [--workspace PATH]");
+                var importedPath = WorkspaceArchiveService.Import(inputPath, _workspacePath, GetBoolOption(options, "force", false));
+                _output.WriteLine($"Imported workspace into {importedPath}");
+                return 0;
+            }
+
             case "start-here":
             {
                 var state = File.Exists(_store.StatePath) ? _store.Load() : null;

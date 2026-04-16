@@ -77,6 +77,7 @@ var tests = new List<(string Name, Action Run)>
     ("Design-only roles receive file boundary enforcement", TestDesignOnlyRolesReceiveFileBoundary),
     ("Edit-issue command updates queued issue fields", TestEditIssueCommandUpdatesQueuedIssue),
     ("Diff-run command shows run delta", TestDiffRunCommandShowsRunDelta),
+    ("Workspace export and import round trips state", TestWorkspaceExportImportRoundTrip),
     ("Planner cannot create duplicate architect issues", TestPlannerCannotCreateDuplicateArchitectIssues),
     ("Init rejects misspelled goal option", TestInitRejectsMisspelledGoalOption),
     ("Architect run updates plan artifact with execution details", TestArchitectRunUpdatesPlanArtifact),

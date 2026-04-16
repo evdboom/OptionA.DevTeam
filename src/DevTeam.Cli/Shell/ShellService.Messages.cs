@@ -26,6 +26,8 @@ internal sealed partial class ShellService
         sb.AppendLine();
         sb.AppendLine("  [cyan]/init[/] \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]  [dim]Initialise workspace with a goal[/]");
         sb.AppendLine("  [cyan]/customize[/] [[--force]]    [dim]Copy default prompt assets to .devteam-source/ for editing[/]");
+        sb.AppendLine("  [cyan]/export[/] [[--output PATH]]  [dim]Package the current workspace for handoff or backup[/]");
+        sb.AppendLine("  [cyan]/import[/] --input PATH [[--force]]  [dim]Import a previously exported workspace archive[/]");
         sb.AppendLine("  [cyan]/start-here[/] [[new|medior|expert]]  [dim]Show the guided onboarding flow for your persona[/]");
         sb.AppendLine("  [cyan]/bug[/] [[--save PATH]] [[--redact-paths true|false]]  [dim]Generate a sanitized bug report draft[/]");
         sb.AppendLine("  [cyan]/status[/]               [dim]Show workspace phase, open issues, and stall state[/]");

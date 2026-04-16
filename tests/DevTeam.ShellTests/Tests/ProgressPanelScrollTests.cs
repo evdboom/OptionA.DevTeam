@@ -499,7 +499,7 @@ internal static class ProgressPanelScrollTests
         var markup = ShellService.BuildInteractiveHelpMarkup();
         string[] requiredCommands =
         [
-            "/init", "/customize", "/start-here", "/bug", "/status", "/history",
+            "/init", "/customize", "/export", "/import", "/start-here", "/bug", "/status", "/history",
             "/mode", "/keep-awake", "/add-issue", "/edit-issue", "/plan", "/questions",
             "/diff-run", "/budget", "/check-update", "/update", "/max-iterations",
             "/max-subagents", "/run", "/stop", "/wait", "/feedback",
