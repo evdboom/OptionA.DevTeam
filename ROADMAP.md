@@ -9,16 +9,14 @@ This file tracks the **active, open roadmap only**.
 
 | Priority | Item | Scope | Why now |
 |---|---|---|---|
-| 1 | **R6 - Per-role token and cost telemetry** | Small-Medium | Useful for tuning and optimization after the main UX pain is addressed. |
-| 2 | **R12 - Brownfield change delta** | Medium | Valuable audit layer, but should follow visibility basics and traceability. |
-| 3 | **#6 - GitHub mode** | Major | Major expansion feature; should come after the core interactive workflow is clearer. |
-| 4 | **R13 - BYOK / provider-agnostic auth** | Small-Medium | Broadens adoption, but is less urgent than making the current product easier to use. |
+| 1 | **R12 - Brownfield change delta** | Medium | Valuable audit layer, but should follow visibility basics and traceability. |
+| 2 | **#6 - GitHub mode** | Major | Major expansion feature; should come after the core interactive workflow is clearer. |
+| 3 | **R13 - BYOK / provider-agnostic auth** | Small-Medium | Broadens adoption, but is less urgent than making the current product easier to use. |
 
 ---
 
 ## Remaining open items
 
-- **R6 - Per-role token and cost telemetry**
 - **R12 - Brownfield change delta**
 - **#6 - GitHub mode**
 - **R13 - BYOK / provider-agnostic auth**

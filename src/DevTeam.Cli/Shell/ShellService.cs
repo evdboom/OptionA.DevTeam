@@ -1266,6 +1266,13 @@ internal sealed partial class ShellService : IDisposable
             $"premium {report.Budget.PremiumCreditsCommitted:0.##}/{report.Budget.PremiumCreditCap} " +
             $"[dim]({report.Budget.PremiumCreditCap - report.Budget.PremiumCreditsCommitted:0.##} remaining)[/]");
 
+        if (report.RoleUsage.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.Append(WorkspaceStatusPrinter.BuildRoleUsageMarkup(report.RoleUsage));
+        }
+
         if (report.OpenQuestions.Count > 0)
         {
             sb.AppendLine();

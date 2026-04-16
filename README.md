@@ -385,7 +385,7 @@ View or adjust the budget:
 /budget --total 50 --premium 12
 ```
 
-The budget is displayed after each loop iteration so you can see spend in real time.
+The budget is displayed after each loop iteration so you can see spend in real time. `/status` also shows usage grouped by role so you can see which roles are consuming the budget. If a model entry in `MODELS.json` defines `InputCostPer1kTokens` and `OutputCostPer1kTokens`, DevTeam will also show token totals and estimated USD cost when the backend exposes token telemetry.
 
 ## Parallel subagents
 

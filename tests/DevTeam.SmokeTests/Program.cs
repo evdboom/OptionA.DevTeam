@@ -58,6 +58,7 @@ var tests = new List<(string Name, Action Run)>
     ("Pipeline handoff appears in agent prompt", TestPipelineHandoffAppearsInPrompt),
     ("Collapsed response headers still parse cleanly", TestCollapsedResponseHeadersParseCleanly),
     ("Run artifacts capture superpowers and tools used", TestRunArtifactsCaptureUsageMetadata),
+    ("Status command shows role usage telemetry", TestStatusCommandShowsRoleUsage),
     ("Legacy workspaces hydrate missing roles and superpowers", TestLegacyWorkspaceHydratesMetadata),
     ("Workspace loads legacy execution selection timestamps", TestWorkspaceLoadsLegacyExecutionSelectionTimestamp),
     ("Friendly role names resolve to canonical roles", TestFriendlyRoleNamesResolve),

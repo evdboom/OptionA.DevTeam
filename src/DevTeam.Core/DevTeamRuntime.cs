@@ -607,6 +607,8 @@ public class DevTeamRuntime
                 IssueId = issue.Id,
                 RoleSlug = issue.RoleSlug,
                 ModelName = model.Name,
+                CreditsUsed = model.Cost,
+                PremiumCreditsUsed = model.IsPremium ? model.Cost : 0,
                 Status = AgentRunStatus.Queued,
                 UpdatedAtUtc = _clock.UtcNow
             };
@@ -642,7 +644,10 @@ public class DevTeamRuntime
         IEnumerable<string>? changedPaths = null,
         IEnumerable<int>? createdIssueIds = null,
         IEnumerable<int>? createdQuestionIds = null,
-        ItemStatus? resultingIssueStatus = null)
+        ItemStatus? resultingIssueStatus = null,
+        int? inputTokens = null,
+        int? outputTokens = null,
+        double? estimatedCostUsd = null)
     {
         var run = state.AgentRuns.FirstOrDefault(item => item.Id == runId)
             ?? throw new InvalidOperationException($"Run #{runId} was not found.");
@@ -667,6 +672,9 @@ public class DevTeamRuntime
             .Distinct()
             .OrderBy(item => item)
             .ToList() ?? [];
+        run.InputTokens = inputTokens;
+        run.OutputTokens = outputTokens;
+        run.EstimatedCostUsd = estimatedCostUsd;
         run.UpdatedAtUtc = _clock.UtcNow;
         switch (outcome.Trim().ToLowerInvariant())
         {
@@ -748,6 +756,34 @@ public class DevTeamRuntime
             QueuedRuns = queuedRuns,
             OpenQuestions = openQuestions,
             OpenQuestionAges = openQuestionAges,
+            RoleUsage = state.AgentRuns
+                .GroupBy(run => run.RoleSlug, StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var inputTokens = group
+                        .Where(run => run.InputTokens.HasValue)
+                        .Sum(run => run.InputTokens ?? 0);
+                    var outputTokens = group
+                        .Where(run => run.OutputTokens.HasValue)
+                        .Sum(run => run.OutputTokens ?? 0);
+                    var estimatedUsd = group
+                        .Where(run => run.EstimatedCostUsd.HasValue)
+                        .Sum(run => run.EstimatedCostUsd ?? 0);
+                    return new RoleUsageSummary
+                    {
+                        RoleSlug = group.Key,
+                        RunCount = group.Count(),
+                        CompletedRunCount = group.Count(run => run.Status == AgentRunStatus.Completed),
+                        CreditsUsed = group.Sum(run => run.CreditsUsed),
+                        PremiumCreditsUsed = group.Sum(run => run.PremiumCreditsUsed),
+                        InputTokens = group.Any(run => run.InputTokens.HasValue) ? inputTokens : null,
+                        OutputTokens = group.Any(run => run.OutputTokens.HasValue) ? outputTokens : null,
+                        EstimatedCostUsd = group.Any(run => run.EstimatedCostUsd.HasValue) ? estimatedUsd : null
+                    };
+                })
+                .OrderByDescending(item => item.CreditsUsed)
+                .ThenBy(item => item.RoleSlug, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
             IsWaitingOnBlockingQuestion = isWaitingOnBlockingQuestion,
             OldestBlockingQuestionAge = isWaitingOnBlockingQuestion
                 ? openQuestionAges[blockingQuestions[0].Id]
@@ -788,6 +824,8 @@ public class DevTeamRuntime
                 IssueId = issue.Id,
                 RoleSlug = issue.RoleSlug,
                 ModelName = model.Name,
+                CreditsUsed = model.Cost,
+                PremiumCreditsUsed = model.IsPremium ? model.Cost : 0,
                 Status = AgentRunStatus.Queued,
                 UpdatedAtUtc = _clock.UtcNow
             };

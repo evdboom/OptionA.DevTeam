@@ -166,6 +166,8 @@ public class LoopExecutor(
                 }
                 var changedPaths = _git.GetPathsChangedSince(pendingRun.WorkingDirectory, pendingRun.GitStatusBeforeRun);
                 var completedIssue = state.Issues.First(issue => issue.Id == completed.Run.IssueId);
+                var model = state.Models.FirstOrDefault(item => string.Equals(item.Name, completed.Run.ModelName, StringComparison.OrdinalIgnoreCase));
+                var usageTelemetry = UsageTelemetryExtractor.Extract(model, completed.Response);
                 _runtime.CompleteRun(
                     state,
                     completed.Run.RunId,
@@ -176,7 +178,10 @@ public class LoopExecutor(
                     changedPaths,
                     createdIssueIds,
                     createdQuestionIds,
-                    completedIssue.Status);
+                    completedIssue.Status,
+                    usageTelemetry.InputTokens,
+                    usageTelemetry.OutputTokens,
+                    usageTelemetry.EstimatedCostUsd);
                 var decision = state.Decisions.Last();
                 var persistedRun = state.AgentRuns.First(run => run.Id == completed.Run.RunId);
                 WriteRunArtifact(_store.WorkspacePath, completed.Run, persistedRun, completed.Response, completed.Outcome, completed.Summary);
@@ -310,6 +315,8 @@ public class LoopExecutor(
             : [];
         var changedPaths = _git.GetPathsChangedSince(state.RepoRoot, gitStatusBeforeRun);
         var completedIssue = state.Issues.First(issue => issue.Id == result.Run.IssueId);
+        var model = state.Models.FirstOrDefault(item => string.Equals(item.Name, result.Run.ModelName, StringComparison.OrdinalIgnoreCase));
+        var usageTelemetry = UsageTelemetryExtractor.Extract(model, result.Response);
         _runtime.CompleteRun(
             state,
             result.Run.RunId,
@@ -320,7 +327,10 @@ public class LoopExecutor(
             changedPaths,
             createdIssueIds,
             createdQuestionIds,
-            completedIssue.Status);
+            completedIssue.Status,
+            usageTelemetry.InputTokens,
+            usageTelemetry.OutputTokens,
+            usageTelemetry.EstimatedCostUsd);
         var persistedRun = state.AgentRuns.First(r => r.Id == result.Run.RunId);
         WriteRunArtifact(_store.WorkspacePath, result.Run, persistedRun, result.Response, result.Outcome, result.Summary);
         WriteDecisionArtifact(_store.WorkspacePath, state.Decisions.Last(), persistedRun);
@@ -419,6 +429,27 @@ public class LoopExecutor(
         var runsDir = Path.Combine(workspacePath, "runs");
         _fileSystem.CreateDirectory(runsDir);
         var path = Path.Combine(runsDir, $"run-{queuedRun.RunId:000}.md");
+        var usageLines = new List<string>
+        {
+            $"- Committed credits: {persistedRun.CreditsUsed:0.##}",
+            $"- Premium credits: {persistedRun.PremiumCreditsUsed:0.##}"
+        };
+        if (persistedRun.InputTokens is int inputTokens || persistedRun.OutputTokens is int outputTokens)
+        {
+            var input = persistedRun.InputTokens ?? 0;
+            var output = persistedRun.OutputTokens ?? 0;
+            usageLines.Add($"- Tokens: {input + output} total ({input} input / {output} output)");
+        }
+        else
+        {
+            usageLines.Add("- Tokens: unavailable from backend");
+        }
+
+        if (persistedRun.EstimatedCostUsd is double estimatedCostUsd)
+        {
+            usageLines.Add($"- Estimated USD cost: ${estimatedCostUsd:0.####}");
+        }
+
         var content = $"""
         # Run {queuedRun.RunId}
 
@@ -442,6 +473,10 @@ public class LoopExecutor(
         ## Tools Used
 
         {(persistedRun.ToolsUsed.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.ToolsUsed.Select(item => $"- {item}")))}
+
+        ## Usage
+
+        {string.Join(Environment.NewLine, usageLines)}
 
         ## Changed Files
 

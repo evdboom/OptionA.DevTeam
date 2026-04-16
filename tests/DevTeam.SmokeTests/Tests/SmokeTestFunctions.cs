@@ -1194,8 +1194,36 @@ internal static class SmokeTestFunctions
         AssertTrue(runArtifact.Contains("## Superpowers Used", StringComparison.Ordinal), "Run artifact should include superpowers.");
         AssertTrue(runArtifact.Contains("- plan", StringComparison.Ordinal), "Run artifact should list used superpowers.");
         AssertTrue(runArtifact.Contains("## Tools Used", StringComparison.Ordinal), "Run artifact should include tools.");
+        AssertTrue(runArtifact.Contains("## Usage", StringComparison.Ordinal), "Run artifact should include usage telemetry.");
+        AssertTrue(runArtifact.Contains("Committed credits: 1", StringComparison.Ordinal), "Run artifact should include committed credits.");
+        AssertTrue(runArtifact.Contains("Tokens: unavailable from backend", StringComparison.Ordinal), "Run artifact should explain when token telemetry is unavailable.");
         AssertTrue(issueArtifact.Contains("Superpowers Used: plan, verify", StringComparison.Ordinal), "Issue mirror should include superpower usage.");
         AssertTrue(issueArtifact.Contains("Tools Used: dotnet, node", StringComparison.Ordinal), "Issue mirror should include tool usage.");
+    }
+
+    internal static void TestStatusCommandShowsRoleUsage()
+    {
+        using var harness = new TestHarness();
+        harness.State.AgentRuns.Add(new AgentRun
+        {
+            Id = 1,
+            IssueId = 7,
+            RoleSlug = "developer",
+            Status = AgentRunStatus.Completed,
+            CreditsUsed = 2,
+            InputTokens = 1200,
+            OutputTokens = 300,
+            EstimatedCostUsd = 0.12
+        });
+        harness.Store.Save(harness.State);
+
+        var result = RunDevTeamCli(harness.RepoRoot, "status", "--workspace", harness.Store.WorkspacePath);
+
+        AssertEqual(0, result.ExitCode, "status exit code");
+        AssertTrue(result.StdOut.Contains("Role usage:", StringComparison.Ordinal), "status should show the role usage section.");
+        AssertTrue(result.StdOut.Contains("developer", StringComparison.Ordinal), "status should include the role slug.");
+        AssertTrue(result.StdOut.Contains("2 credits", StringComparison.Ordinal), "status should include per-role credits.");
+        AssertTrue(result.StdOut.Contains("1500 tokens", StringComparison.Ordinal), "status should include per-role token totals when available.");
     }
     
     internal static void TestLegacyWorkspaceHydratesMetadata()

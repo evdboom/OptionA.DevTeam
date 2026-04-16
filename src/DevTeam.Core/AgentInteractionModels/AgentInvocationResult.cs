@@ -7,5 +7,7 @@ public sealed class AgentInvocationResult
     public int ExitCode { get; init; }
     public string StdOut { get; init; } = "";
     public string StdErr { get; init; } = "";
+    public int? InputTokens { get; init; }
+    public int? OutputTokens { get; init; }
     public bool Success => ExitCode == 0;
 }

@@ -60,6 +60,11 @@ internal static class WorkspaceStatusPrinter
             $"premium {report.Budget.PremiumCreditsCommitted:0.##}/{report.Budget.PremiumCreditCap} " +
             $"[dim]({report.Budget.PremiumCreditCap - report.Budget.PremiumCreditsCommitted:0.##} remaining)[/]");
 
+        if (report.RoleUsage.Count > 0)
+        {
+            AnsiConsole.MarkupLine($"\n{BuildRoleUsageMarkup(report.RoleUsage)}");
+        }
+
         if (report.OpenQuestions.Count > 0)
         {
             AnsiConsole.MarkupLine($"\n[bold yellow]{report.OpenQuestions.Count} open question(s)[/]");
@@ -117,6 +122,44 @@ internal static class WorkspaceStatusPrinter
             $"({ConsoleTheme.Number($"{budget.TotalCreditCap - budget.CreditsCommitted:0.##}")} remaining), " +
             $"premium {ConsoleTheme.BudgetUsage(budget.PremiumCreditsCommitted, budget.PremiumCreditCap)} " +
             $"({ConsoleTheme.Number($"{budget.PremiumCreditCap - budget.PremiumCreditsCommitted:0.##}")} remaining)");
+    }
+
+    internal static string BuildRoleUsageMarkup(IReadOnlyList<RoleUsageSummary> roleUsage)
+    {
+        var lines = roleUsage
+            .Select(item =>
+            {
+                var details = new List<string>
+                {
+                    $"{item.CreditsUsed:0.##} credits",
+                    $"{item.RunCount} run(s)",
+                    $"{item.CompletedRunCount} completed"
+                };
+                if (item.PremiumCreditsUsed > 0)
+                {
+                    details.Add($"{item.PremiumCreditsUsed:0.##} premium");
+                }
+
+                if (item.InputTokens is int inputTokens || item.OutputTokens is int outputTokens)
+                {
+                    var input = item.InputTokens ?? 0;
+                    var output = item.OutputTokens ?? 0;
+                    details.Add($"{input + output} tokens ({input} in / {output} out)");
+                }
+                else
+                {
+                    details.Add("tokens unavailable");
+                }
+
+                if (item.EstimatedCostUsd is double estimatedCostUsd)
+                {
+                    details.Add($"~${estimatedCostUsd:0.####}");
+                }
+
+                return $"  [cyan]{Markup.Escape(item.RoleSlug)}[/]: {string.Join(", ", details)}";
+            });
+
+        return $"[bold]Role usage:[/]\n{string.Join("\n", lines)}";
     }
 
     internal static bool PrintArchitectSummary(WorkspaceState state)

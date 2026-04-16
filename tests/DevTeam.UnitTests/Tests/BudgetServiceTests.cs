@@ -18,6 +18,7 @@ internal static class BudgetServiceTests
         new("InferFamily_FallsBackToOther", InferFamily_FallsBackToOther),
         new("SelectModel_PrefersOtherFamily_WhenExcludeFamilySet", SelectModel_PrefersOtherFamily_WhenExcludeFamilySet),
         new("SelectModel_FallsBackToSameFamily_WhenNoCrossOption", SelectModel_FallsBackToSameFamily_WhenNoCrossOption),
+        new("EstimateCostUsd_UsesConfiguredTokenRates", EstimateCostUsd_UsesConfiguredTokenRates),
     ];
 
     // "user" role policy has no model pool, primary="gpt-5-mini", fallback="gpt-5-mini"
@@ -229,6 +230,21 @@ internal static class BudgetServiceTests
 
         Assert.That(model is not null, "Expected a model even when no cross-family option exists");
         Assert.That(!string.IsNullOrEmpty(model!.Name), "Expected a non-empty model name when falling back");
+        return Task.CompletedTask;
+    }
+
+    private static Task EstimateCostUsd_UsesConfiguredTokenRates()
+    {
+        var model = new ModelDefinition
+        {
+            Name = "gpt-5.4",
+            InputCostPer1kTokens = 0.01,
+            OutputCostPer1kTokens = 0.03
+        };
+
+        var estimated = model.EstimateCostUsd(inputTokens: 1500, outputTokens: 500);
+
+        Assert.That(estimated == 0.03, $"Expected USD estimate 0.03 but got {estimated}");
         return Task.CompletedTask;
     }
 }
