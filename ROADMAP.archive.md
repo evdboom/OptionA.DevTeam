@@ -723,4 +723,4 @@ When an issue with role `trigger` completes successfully, `LoopExecutor` auto-qu
 
 **Current state:** Does not exist.
 
-**Why this matters:** The reviewer role focuses on reviewing changing, but longer running loops can have caveats, file size creep, short cuts. The auditor is to identify and provide remediations to keep the codebase clean.
+**Why this matters:** The reviewer role focuses on reviewing changes, but longer running loops can have caveats, file size creep, short cuts. The auditor is to identify and provide remediations to keep the codebase clean.
