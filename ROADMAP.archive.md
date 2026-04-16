@@ -721,6 +721,6 @@ When an issue with role `trigger` completes successfully, `LoopExecutor` auto-qu
 
 **Goal:** Create a role that will run every now and then inspecting the codebase and changes adhere to the ATM (Auditable, Testable, Maintainable) directive.
 
-**Current state:** Not existant
+**Current state:** Does not exist.
 
 **Why this matters:** The reviewer role focuses on reviewing changing, but longer running loops can have caveats, file size creep, short cuts. The auditor is to identify and provide remediations to keep the codebase clean.
