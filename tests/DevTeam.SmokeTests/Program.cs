@@ -30,6 +30,7 @@ var tests = new List<(string Name, Action Run)>
     ("Plan workflow blocks run before planning", TestPlanWorkflowBlocksRunBeforePlanning),
     ("Workspace loads default modes", TestWorkspaceLoadsModes),
     ("Set mode updates active mode and pipeline defaults", TestSetModeUpdatesRuntimeConfiguration),
+    ("GitHub mode sync imports labelled issues", TestGitHubModeSyncImportsQueue),
     ("Custom pipeline survives mode changes", TestCustomizedPipelineSurvivesModeSwitch),
     ("Set keep-awake updates runtime configuration", TestSetKeepAwakeUpdatesRuntimeConfiguration),
     ("Goal input resolver loads markdown from file", TestGoalInputResolverLoadsMarkdownFromFile),

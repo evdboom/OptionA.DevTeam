@@ -134,6 +134,7 @@ internal static class FileSystemConfigurationLoaderTests
         // Returns built-in defaults when directory missing
         Assert.That(modes.Count > 0, "Expected default modes to be returned");
         Assert.That(modes.Any(m => m.Slug == "develop"), "Expected 'develop' default mode");
+        Assert.That(modes.Any(m => m.Slug == "github"), "Expected 'github' default mode");
         return Task.CompletedTask;
     }
 

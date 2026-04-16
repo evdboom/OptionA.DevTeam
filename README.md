@@ -280,6 +280,7 @@ devteam> /set-pipeline default
 /edit-issue <ID> [--title TEXT] [--detail TEXT] [--role ROLE] [--area AREA|--clear-area] [--priority N] [--status STATE] [--depends-on N ...|--clear-depends] [--note TEXT]  Edit a queued issue safely
 /diff-run <RUN-ID> [COMPARE-RUN-ID]       Show what a run changed, or compare two runs
 /brownfield-log                           Show the brownfield before/after audit log
+/sync                                     Pull GitHub-labelled issues into the local workspace
 /feedback <text>                          Revise the plan with feedback
 /preview [--max-subagents N]             Preview the next batch without starting the loop
 /approve [note]                           Approve the plan and move to execution
@@ -310,6 +311,7 @@ devteam /edit-issue 7 --workspace .devteam --priority 90 --area ui --note "Raise
 devteam /diff-run 12 --workspace .devteam
 devteam /diff-run 12 11 --workspace .devteam
 devteam /brownfield-log --workspace .devteam
+devteam /github-sync --workspace .devteam
 devteam /preview --workspace .devteam --max-subagents 2
 devteam /approve-plan --workspace .devteam --note "Looks good. Start building."
 devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3
@@ -357,9 +359,34 @@ Packaged modes:
 |------|-------------|
 | `develop` (default) | Build working software, add tests, validate builds |
 | `creative-writing` | Preserve voice, revise in passes, surface narrative gaps |
+| `github` | Use GitHub Issues as the shared queue and keep execution review-friendly |
 | `autopilot` | Full autonomy — agents decide everything without approval gates |
 
 Mode guardrails are injected into every agent prompt so all roles follow the active mode's rules.
+
+### GitHub mode
+
+GitHub mode is the first shipped team-workflow slice. It focuses on **GitHub Issues as the intake queue** and keeps the rest of the runtime local and reviewable.
+
+```powershell
+devteam /init --workspace .devteam --mode github --goal "Work through labelled GitHub issues" --recon false
+devteam /github-sync --workspace .devteam
+```
+
+Use labels to decide what syncs into the workspace:
+
+| GitHub label | Result |
+|---|---|
+| `devteam:ready` | Import as a local execution issue |
+| `devteam:question` | Import as a local workspace question |
+| `devteam:blocking` | Mark a synced question as blocking |
+| `role:<slug>` | Override the local role, for example `role:reviewer` |
+| `priority:<n>` | Override priority, for example `priority:90` |
+| `area:<name>` | Set the issue area, normalized to a slug |
+
+Issue bodies can also include frontmatter for `role`, `priority`, `area`, `depends`, and `blocking`. Synced items keep an external reference such as `github#123` in the workspace mirrors so runs and decisions stay traceable back to the originating issue.
+
+**Current scope note:** this shipped GitHub mode is intentionally limited to **issue/question sync**. PR attachment, PR review automation, and merge flows are still future workflow discussion items rather than part of this first slice.
 
 Autopilot mode automatically approves both the plan and architect plan, so the loop runs end-to-end without pausing for human input. Enable it at init time or switch later:
 

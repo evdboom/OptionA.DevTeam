@@ -878,6 +878,7 @@ public class DevTeamRuntime
         modeSlug.Trim().ToLowerInvariant() switch
         {
             "creative-writing" => ["architect", "developer", "reviewer"],
+            "github" => ["developer", "reviewer"],
             _ => ["architect", "developer", "tester"]
         };
 

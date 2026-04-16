@@ -161,6 +161,15 @@ internal sealed class CliDispatcher
                 return 0;
             }
 
+            case "github-sync":
+            {
+                var state = _store.Load();
+                var report = await new GitHubIssueSyncService().SyncAsync(state, _runtime, Environment.CurrentDirectory, CancellationToken.None);
+                _store.Save(state);
+                _output.WriteLine($"GitHub sync complete: {report.ImportedIssueCount} issue(s) imported, {report.UpdatedIssueCount} updated, {report.ImportedQuestionCount} question(s) imported, {report.UpdatedQuestionCount} updated, {report.SkippedCount} skipped.");
+                return 0;
+            }
+
             case "start-here":
             {
                 var state = File.Exists(_store.StatePath) ? _store.Load() : null;

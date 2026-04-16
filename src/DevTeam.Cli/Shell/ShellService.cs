@@ -447,6 +447,16 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "sync":
+                case "github-sync":
+                {
+                    var current = _store.Load();
+                    var report = await new GitHubIssueSyncService().SyncAsync(current, _runtime, Environment.CurrentDirectory, CancellationToken.None);
+                    _store.Save(current);
+                    AddSuccess($"GitHub sync complete: {report.ImportedIssueCount} issue(s) imported, {report.UpdatedIssueCount} updated, {report.ImportedQuestionCount} question(s) imported, {report.UpdatedQuestionCount} updated, {report.SkippedCount} skipped.");
+                    break;
+                }
+
                 case "goal":
                 case "set-goal":
                 {

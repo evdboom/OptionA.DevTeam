@@ -9,12 +9,10 @@ This file tracks the **active, open roadmap only**.
 
 | Priority | Item | Scope | Why now |
 |---|---|---|---|
-| 1 | **#6 - GitHub mode** | Major | Major expansion feature; should come after the core interactive workflow is clearer. |
-| 2 | **R13 - BYOK / provider-agnostic auth** | Small-Medium | Broadens adoption, but is less urgent than making the current product easier to use. |
+| 1 | **R13 - BYOK / provider-agnostic auth** | Small-Medium | Broadens adoption after the core local and GitHub-backed workflows are in place. |
 
 ---
 
 ## Remaining open items
 
-- **#6 - GitHub mode**
 - **R13 - BYOK / provider-agnostic auth**

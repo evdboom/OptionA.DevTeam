@@ -16,6 +16,7 @@ internal static class WorkspaceStoreTests
         new("Constructor_ThrowsArgumentException_WhenPathIsEmpty", Constructor_ThrowsArgumentException_WhenPathIsEmpty),
         new("Save_ThenLoad_RoundTrips_IssueList", Save_ThenLoad_RoundTrips_IssueList),
         new("Save_ThenLoad_RoundTrips_Questions", Save_ThenLoad_RoundTrips_Questions),
+        new("Save_WritesExternalReferences_ToMirrors", Save_WritesExternalReferences_ToMirrors),
         new("Save_ThenLoad_RoundTrips_Budget", Save_ThenLoad_RoundTrips_Budget),
         new("Load_ThrowsInvalidOperation_WhenNoFile", Load_ThrowsInvalidOperation_WhenNoFile),
         new("Initialize_CreatesWorkspaceJson", Initialize_CreatesWorkspaceJson),
@@ -96,6 +97,42 @@ internal static class WorkspaceStoreTests
         Assert.That(loaded.Budget.TotalCreditCap == 50.0, $"Expected TotalCreditCap=50 but got {loaded.Budget.TotalCreditCap}");
         Assert.That(loaded.Budget.PremiumCreditCap == 10.0, $"Expected PremiumCreditCap=10 but got {loaded.Budget.PremiumCreditCap}");
         Assert.That(loaded.Budget.CreditsCommitted == 3.5, $"Expected CreditsCommitted=3.5 but got {loaded.Budget.CreditsCommitted}");
+        return Task.CompletedTask;
+    }
+
+    private static Task Save_WritesExternalReferences_ToMirrors()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = CreateStore(fs);
+        var state = new WorkspaceState
+        {
+            RepoRoot = "C:\\test-repo",
+            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+        };
+        state.Issues.Add(new IssueItem
+        {
+            Id = state.NextIssueId++,
+            Title = "Issue Alpha",
+            RoleSlug = "developer",
+            ExternalReference = "github#101"
+        });
+        state.Questions.Add(new QuestionItem
+        {
+            Id = state.NextQuestionId++,
+            Text = "Question Alpha?",
+            IsBlocking = true,
+            ExternalReference = "github#202"
+        });
+
+        store.Save(state);
+
+        var issueMirror = fs.Files.Values.FirstOrDefault(content => content.Contains("# Issue 0001: Issue Alpha", StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("Expected issue mirror content to be written.");
+        var questionsMirror = fs.Files.Values.FirstOrDefault(content => content.Contains("# Open questions", StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("Expected questions mirror content to be written.");
+
+        Assert.Contains("- External: github#101", issueMirror);
+        Assert.Contains("- External: github#202", questionsMirror);
         return Task.CompletedTask;
     }
 

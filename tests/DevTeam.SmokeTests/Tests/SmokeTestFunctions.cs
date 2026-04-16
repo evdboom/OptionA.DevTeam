@@ -340,9 +340,10 @@ internal static class SmokeTestFunctions
     {
         using var harness = new TestHarness();
     
-        AssertTrue(harness.State.Modes.Count >= 2, "Workspace should load at least the default modes.");
+        AssertTrue(harness.State.Modes.Count >= 3, "Workspace should load at least the packaged modes.");
         AssertTrue(harness.State.Modes.Any(mode => mode.Slug == "develop"), "Develop mode should be available.");
         AssertTrue(harness.State.Modes.Any(mode => mode.Slug == "creative-writing"), "Creative writing mode should be available.");
+        AssertTrue(harness.State.Modes.Any(mode => mode.Slug == "github"), "GitHub mode should be available.");
         AssertEqual("develop", harness.State.Runtime.ActiveModeSlug, "Develop should be the default active mode.");
     }
     
@@ -490,6 +491,61 @@ internal static class SmokeTestFunctions
         AssertEqual("creative-writing", harness.State.Runtime.ActiveModeSlug, "Mode should update.");
         AssertTrue(harness.State.Runtime.DefaultPipelineRoles.SequenceEqual(["architect", "developer", "reviewer"]),
             "Creative writing mode should swap the default pipeline roles.");
+    }
+
+    internal static void TestGitHubModeSyncImportsQueue()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-github-sync-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        var workspacePath = Path.Combine(tempRoot, ".devteam");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        var originalGitHubCliPath = Environment.GetEnvironmentVariable("DEVTEAM_GH_PATH");
+        try
+        {
+            var ghScriptPath = Path.Combine(tempRoot, "gh.cmd");
+            File.WriteAllText(ghScriptPath, """
+@echo off
+if "%1 %2"=="auth status" exit /b 0
+if "%1 %2"=="issue list" (
+  echo [{"number":101,"title":"Review queue import","body":"---\nrole: reviewer\npriority: 90\narea: repo sync\n---\nReview the imported GitHub issue.","labels":[{"name":"devteam:ready"}]},{"number":102,"title":"Clarify the release workflow","body":"Please confirm the release checklist.","labels":[{"name":"devteam:question"},{"name":"devteam:blocking"}]}]
+  exit /b 0
+)
+echo Unexpected gh arguments 1>&2
+exit /b 1
+""");
+            Environment.SetEnvironmentVariable("PATH", tempRoot + ";" + originalPath);
+            Environment.SetEnvironmentVariable("DEVTEAM_GH_PATH", ghScriptPath);
+
+            var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--mode", "github", "--recon", "false");
+            AssertEqual(0, initResult.ExitCode, "GitHub mode init exit code");
+
+            var syncResult = RunDevTeamCli(tempRoot, "github-sync", "--workspace", workspacePath);
+            AssertEqual(0, syncResult.ExitCode, "GitHub sync exit code");
+            AssertTrue(syncResult.StdOut.Contains("GitHub sync complete:", StringComparison.Ordinal), "GitHub sync should print a summary.");
+
+            var store = new WorkspaceStore(workspacePath);
+            var state = store.Load();
+            AssertEqual("github", state.Runtime.ActiveModeSlug, "GitHub mode should be active.");
+            AssertTrue(state.Runtime.DefaultPipelineRoles.SequenceEqual(["developer", "reviewer"]),
+                "GitHub mode should prefer the developer -> reviewer pipeline.");
+            AssertTrue(state.Issues.Any(issue =>
+                    issue.ExternalReference == "github#101"
+                    && issue.RoleSlug == "reviewer"
+                    && issue.Priority == 90
+                    && issue.Area == "repo-sync"),
+                "Ready GitHub issues should import into the local issue queue.");
+            AssertTrue(state.Questions.Any(question =>
+                    question.ExternalReference == "github#102"
+                    && question.IsBlocking
+                    && question.Text.Contains("Clarify the release workflow", StringComparison.Ordinal)),
+                "Question-labelled GitHub issues should import as local questions.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DEVTEAM_GH_PATH", originalGitHubCliPath);
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            TryCleanupTempRepo(tempRoot);
+        }
     }
 
     internal static void TestCustomizedPipelineSurvivesModeSwitch()

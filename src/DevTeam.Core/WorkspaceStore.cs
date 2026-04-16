@@ -263,6 +263,10 @@ public class WorkspaceStore
             lines.Add("");
             lines.Add($"- Type: {(question.IsBlocking ? "blocking" : "non-blocking")}");
             lines.Add($"- Status: {question.Status}");
+            if (!string.IsNullOrWhiteSpace(question.ExternalReference))
+            {
+                lines.Add($"- External: {question.ExternalReference}");
+            }
             if (question.CreatedAtUtc != default)
             {
                 lines.Add($"- Asked: {question.CreatedAtUtc:O}");
@@ -329,6 +333,7 @@ public class WorkspaceStore
             : string.Join(", ", issue.DependsOnIssueIds.Select(FormatIssueId));
         var roadmap = issue.RoadmapItemId is null ? "none" : issue.RoadmapItemId.Value.ToString();
         var pipeline = issue.PipelineId is null ? "none" : issue.PipelineId.Value.ToString();
+        var externalReference = string.IsNullOrWhiteSpace(issue.ExternalReference) ? "none" : issue.ExternalReference;
         var latestRunBlock = latestRun is null
             ? "(none)"
             : $"""
@@ -358,6 +363,7 @@ public class WorkspaceStore
         - Depends On: {dependsOn}
         - Roadmap Item: {roadmap}
         - Family: {(string.IsNullOrWhiteSpace(issue.FamilyKey) ? "none" : issue.FamilyKey)}
+        - External: {externalReference}
         - Pipeline: {pipeline}
         - Pipeline Stage: {(issue.PipelineStageIndex?.ToString() ?? "none")}
         - Planning Issue: {(issue.IsPlanningIssue ? "yes" : "no")}
