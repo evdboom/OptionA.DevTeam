@@ -69,7 +69,15 @@ internal sealed partial class ShellService
 
         if (isLoopRunning)
         {
-            return "[bold]Step 3 of 3 - execution in progress[/]\n" +
+            var loopHeader = state.Phase switch
+            {
+                WorkflowPhase.Planning => "[bold]Step 1 of 3 - planning in progress[/]",
+                WorkflowPhase.ArchitectPlanning => "[bold]Step 2 of 3 - architecture in progress[/]",
+                WorkflowPhase.Execution => "[bold]Step 3 of 3 - execution in progress[/]",
+                _ => "[bold]Loop in progress[/]"
+            };
+
+            return loopHeader + "\n" +
                 "Use [cyan]/status[/] to inspect progress, [cyan]/answer[/] to unblock questions, [cyan]/stop[/] to request a stop, or [cyan]/wait[/] to stay attached.";
         }
 
