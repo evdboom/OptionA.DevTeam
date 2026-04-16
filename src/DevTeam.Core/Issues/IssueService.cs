@@ -1,6 +1,6 @@
 namespace DevTeam.Core;
 
-public sealed class IssueService : IIssueService
+public sealed partial class IssueService : IIssueService
 {
     private static readonly Dictionary<string, string> RoleAliases = new(StringComparer.OrdinalIgnoreCase)
     {

@@ -151,6 +151,13 @@ public class DevTeamRuntime
         return issue;
     }
 
+    public IssueItem EditIssue(WorkspaceState state, IssueEditRequest request)
+    {
+        var issue = _issueService.EditIssue(state, request);
+        RememberDecision(state, $"Edited issue #{issue.Id}", BuildIssueEditDecisionDetail(request, issue), "issue-edit", issueId: issue.Id);
+        return issue;
+    }
+
     public WorkspaceSnapshot BuildWorkspaceSnapshot(WorkspaceState state)
     {
         _issueService.EnsurePipelineAssignments(state);
@@ -722,6 +729,56 @@ public class DevTeamRuntime
     {
         var normalized = roleSlug.Trim().ToLowerInvariant();
         return normalized is "reviewer" or "review" or "security" or "tester";
+    }
+
+    private static string BuildIssueEditDecisionDetail(IssueEditRequest request, IssueItem issue)
+    {
+        var changes = new List<string>();
+        if (request.Title is not null)
+        {
+            changes.Add($"title=\"{issue.Title}\"");
+        }
+
+        if (request.Detail is not null)
+        {
+            changes.Add("detail updated");
+        }
+
+        if (request.RoleSlug is not null)
+        {
+            changes.Add($"role={issue.RoleSlug}");
+        }
+
+        if (request.Area is not null || request.ClearArea)
+        {
+            changes.Add($"area={(string.IsNullOrWhiteSpace(issue.Area) ? "(none)" : issue.Area)}");
+        }
+
+        if (request.Priority is not null)
+        {
+            changes.Add($"priority={issue.Priority}");
+        }
+
+        if (request.Status is not null)
+        {
+            changes.Add($"status={issue.Status}");
+        }
+
+        if (request.DependsOnIssueIds is not null || request.ClearDependencies)
+        {
+            changes.Add(issue.DependsOnIssueIds.Count == 0
+                ? "dependencies cleared"
+                : $"depends-on={string.Join(", ", issue.DependsOnIssueIds.OrderBy(id => id))}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.NotesToAppend))
+        {
+            changes.Add("note appended");
+        }
+
+        return changes.Count == 0
+            ? "No user-visible fields changed."
+            : string.Join("; ", changes);
     }
 
     private DecisionRecord RememberDecision(

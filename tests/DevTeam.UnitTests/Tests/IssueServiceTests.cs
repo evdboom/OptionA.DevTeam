@@ -7,6 +7,9 @@ internal static class IssueServiceTests
         new("AddIssue_AssignsIncrementingId", AddIssue_AssignsIncrementingId),
         new("AddIssue_NormalizesRoleAlias", AddIssue_NormalizesRoleAlias),
         new("AddIssue_WithDependsOn_StoresDependencies", AddIssue_WithDependsOn_StoresDependencies),
+        new("EditIssue_UpdatesEditableFields", EditIssue_UpdatesEditableFields),
+        new("EditIssue_RejectsPipelineTopologyChanges", EditIssue_RejectsPipelineTopologyChanges),
+        new("EditIssue_RejectsQueuedOrRunningIssue", EditIssue_RejectsQueuedOrRunningIssue),
         new("AdvancePipeline_SetsTimestamp_FromClock", AdvancePipeline_SetsTimestamp_FromClock),
         new("AdvancePipeline_CreatesNextStageIssue_AndAdvancesActive", AdvancePipeline_CreatesNextStageIssue_AndAdvancesActive),
         new("AdvancePipeline_CompletesLastStage_MarksPipelineDone", AdvancePipeline_CompletesLastStage_MarksPipelineDone),
@@ -54,6 +57,94 @@ internal static class IssueServiceTests
 
         Assert.That(issue.DependsOnIssueIds.Contains(dep.Id),
             $"Expected DependsOnIssueIds to contain {dep.Id}");
+        return Task.CompletedTask;
+    }
+
+    private static Task EditIssue_UpdatesEditableFields()
+    {
+        var svc = new IssueService(new FakeSystemClock());
+        var state = new WorkspaceState
+        {
+            Roles =
+            [
+                new RoleDefinition { Slug = "developer", Name = "Developer" },
+                new RoleDefinition { Slug = "tester", Name = "Tester" }
+            ],
+            Phase = WorkflowPhase.Execution
+        };
+
+        var dep = svc.AddIssue(state, "Dependency", "detail", "developer", 40, null, []);
+        var issue = svc.AddIssue(state, "Original title", "Original detail", "developer", 50, null, []);
+
+        var edited = svc.EditIssue(state, new IssueEditRequest
+        {
+            IssueId = issue.Id,
+            Title = "Updated title",
+            Detail = "Updated detail",
+            RoleSlug = "tester",
+            Area = "UI Layer",
+            Priority = 90,
+            Status = "blocked",
+            DependsOnIssueIds = [dep.Id],
+            NotesToAppend = "Need design input."
+        });
+
+        Assert.That(edited.Title == "Updated title", $"Expected updated title but got '{edited.Title}'");
+        Assert.That(edited.Detail == "Updated detail", $"Expected updated detail but got '{edited.Detail}'");
+        Assert.That(edited.RoleSlug == "tester", $"Expected role 'tester' but got '{edited.RoleSlug}'");
+        Assert.That(edited.Area == "ui-layer", $"Expected normalized area 'ui-layer' but got '{edited.Area}'");
+        Assert.That(edited.Priority == 90, $"Expected priority 90 but got {edited.Priority}");
+        Assert.That(edited.Status == ItemStatus.Blocked, $"Expected Blocked but got {edited.Status}");
+        Assert.That(edited.DependsOnIssueIds.SequenceEqual([dep.Id]), "Expected dependency replacement.");
+        Assert.That(edited.Notes.Contains("Need design input.", StringComparison.Ordinal), "Expected appended note.");
+        return Task.CompletedTask;
+    }
+
+    private static Task EditIssue_RejectsPipelineTopologyChanges()
+    {
+        var svc = new IssueService(new FakeSystemClock());
+        var state = new WorkspaceState
+        {
+            Roles =
+            [
+                new RoleDefinition { Slug = "developer", Name = "Developer" },
+                new RoleDefinition { Slug = "tester", Name = "Tester" }
+            ],
+            Phase = WorkflowPhase.Execution
+        };
+
+        var issue = svc.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
+        svc.EnsurePipelineAssignments(state);
+
+        Assert.Throws<InvalidOperationException>(
+            () => svc.EditIssue(state, new IssueEditRequest
+            {
+                IssueId = issue.Id,
+                RoleSlug = "tester"
+            }),
+            "Expected pipeline role edits to be rejected.");
+        return Task.CompletedTask;
+    }
+
+    private static Task EditIssue_RejectsQueuedOrRunningIssue()
+    {
+        var svc = new IssueService(new FakeSystemClock());
+        var state = new WorkspaceState { Phase = WorkflowPhase.Execution };
+        var issue = svc.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
+        state.AgentRuns.Add(new AgentRun
+        {
+            Id = 1,
+            IssueId = issue.Id,
+            Status = AgentRunStatus.Running
+        });
+
+        Assert.Throws<InvalidOperationException>(
+            () => svc.EditIssue(state, new IssueEditRequest
+            {
+                IssueId = issue.Id,
+                Priority = 80
+            }),
+            "Expected active-run edits to be rejected.");
         return Task.CompletedTask;
     }
 

@@ -215,6 +215,16 @@ internal sealed class CliDispatcher
                 return 0;
             }
 
+            case "edit-issue":
+            {
+                var state = _store.Load();
+                var request = IssueEditRequestParser.Parse(_runtime, state, options);
+                var issue = _runtime.EditIssue(state, request);
+                _store.Save(state);
+                _output.WriteLine($"Updated issue #{issue.Id}: {issue.Title} ({issue.RoleSlug}{(string.IsNullOrWhiteSpace(issue.Area) ? "" : $", area {issue.Area}")}, priority {issue.Priority}, status {issue.Status.ToString().ToLowerInvariant()})");
+                return 0;
+            }
+
             case "add-question":
             {
                 var state = _store.Load();

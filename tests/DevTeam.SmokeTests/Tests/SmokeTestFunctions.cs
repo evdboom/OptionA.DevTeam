@@ -1747,7 +1747,53 @@ internal static class SmokeTestFunctions
             TryCleanupTempRepo(tempRoot);
         }
     }
-    
+
+    internal static void TestEditIssueCommandUpdatesQueuedIssue()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-cli-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var workspacePath = Path.Combine(tempRoot, ".devteam");
+            var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath);
+            AssertEqual(0, initResult.ExitCode, "Init exit code");
+
+            var addResult = RunDevTeamCli(
+                tempRoot,
+                "add-issue",
+                "Draft UI flow",
+                "--workspace", workspacePath,
+                "--role", "developer",
+                "--detail", "Initial scope.",
+                "--priority", "40");
+            AssertEqual(0, addResult.ExitCode, "Add issue exit code");
+
+            var editResult = RunDevTeamCli(
+                tempRoot,
+                "edit-issue",
+                "1",
+                "--workspace", workspacePath,
+                "--priority", "90",
+                "--area", "UI Layer",
+                "--status", "blocked",
+                "--note", "Waiting on UX copy.");
+            AssertEqual(0, editResult.ExitCode, "Edit issue exit code");
+
+            var store = new WorkspaceStore(workspacePath);
+            var state = store.Load();
+            var issue = state.Issues.Single(item => item.Id == 1);
+            AssertEqual(90, issue.Priority, "Edited issue priority");
+            AssertEqual("ui-layer", issue.Area, "Edited issue area");
+            AssertEqual(ItemStatus.Blocked, issue.Status, "Edited issue status");
+            AssertTrue(issue.Notes.Contains("Waiting on UX copy.", StringComparison.Ordinal), "Edited issue should append notes.");
+        }
+        finally
+        {
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
     internal static void TestArchitectRunUpdatesPlanArtifact()
     {
         using var harness = new TestHarness();

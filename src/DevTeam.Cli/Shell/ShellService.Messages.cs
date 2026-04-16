@@ -33,6 +33,7 @@ internal sealed partial class ShellService
         sb.AppendLine("  [cyan]/mode[/] <slug>          [dim]Switch the active run mode[/]");
         sb.AppendLine("  [cyan]/keep-awake[/] <on|off>  [dim]Prevent system sleep during long runs[/]");
         sb.AppendLine("  [cyan]/add-issue[/] \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--depends-on N ...]]  [dim]Queue a new issue[/]");
+        sb.AppendLine("  [cyan]/edit-issue[/] <id> [[--title TEXT]] [[--detail TEXT]] [[--role ROLE]] [[--area AREA|--clear-area]] [[--priority N]] [[--status STATE]] [[--depends-on N ...|--clear-depends]]  [dim]Edit a queued issue safely[/]");
         sb.AppendLine("  [cyan]/plan[/]                 [dim]Show or generate the current plan[/]");
         sb.AppendLine("  [cyan]/questions[/]            [dim]List open questions with age and blocking state[/]");
         sb.AppendLine("  [cyan]/budget[/] [[--total N]] [[--premium N]]  [dim]View or adjust the credit budget[/]");

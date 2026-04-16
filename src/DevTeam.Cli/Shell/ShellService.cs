@@ -382,6 +382,16 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "edit-issue":
+                {
+                    var current = _store.Load();
+                    var request = IssueEditRequestParser.Parse(_runtime, current, options);
+                    var issue = _runtime.EditIssue(current, request);
+                    _store.Save(current);
+                    AddSuccess($"Updated issue #{issue.Id}: {Markup.Escape(issue.Title)} ({Markup.Escape(issue.RoleSlug)}, priority {issue.Priority}, status {Markup.Escape(issue.Status.ToString().ToLowerInvariant())})");
+                    break;
+                }
+
                 case "questions":
                     PrintQuestions(_store.Load());
                     break;

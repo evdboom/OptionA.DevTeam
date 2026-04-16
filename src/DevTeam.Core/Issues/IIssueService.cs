@@ -6,6 +6,7 @@ public interface IIssueService
         int priority, int? roadmapItemId, IEnumerable<int> dependsOn, string? area = null,
         string? familyKey = null, int? parentIssueId = null, int? pipelineId = null,
         int? pipelineStageIndex = null, int? complexityHint = null);
+    IssueItem EditIssue(WorkspaceState state, IssueEditRequest request);
     IssueItem? FindIssue(WorkspaceState state, int issueId);
     IReadOnlyList<IssueItem> GetReadyIssues(WorkspaceState state, int maxCount);
     IReadOnlyList<IssueItem> GetReadyIssueCandidates(WorkspaceState state);

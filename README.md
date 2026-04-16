@@ -233,12 +233,19 @@ devteam> /preview
 devteam> /run --max-iterations 3
 ```
 
+**Adjust a queued issue without rerunning planning**
+
+```text
+devteam> /edit-issue 7 --priority 90 --area ui --note "Raise priority after user feedback."
+```
+
 ## Interactive shell commands
 
 ```text
 /status                                   Show workspace state and stall status
 /start-here [new|medior|expert]           Show the guided onboarding flow for your persona
 /plan                                     Generate or show the plan
+/edit-issue <ID> [--title TEXT] [--detail TEXT] [--role ROLE] [--area AREA|--clear-area] [--priority N] [--status STATE] [--depends-on N ...|--clear-depends] [--note TEXT]  Edit a queued issue safely
 /feedback <text>                          Revise the plan with feedback
 /preview [--max-subagents N]             Preview the next batch without starting the loop
 /approve [note]                           Approve the plan and move to execution
@@ -261,6 +268,7 @@ Every shell command also works as a standalone CLI invocation:
 devteam /init --workspace .devteam --goal "Build a CLI Tetris clone"
 devteam /start-here expert --workspace .devteam
 devteam /plan --workspace .devteam
+devteam /edit-issue 7 --workspace .devteam --priority 90 --area ui --note "Raise priority after feedback."
 devteam /preview --workspace .devteam --max-subagents 2
 devteam /approve-plan --workspace .devteam --note "Looks good. Start building."
 devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3
