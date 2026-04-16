@@ -148,6 +148,19 @@ internal sealed class CliDispatcher
                 return 0;
             }
 
+            case "brownfield-log":
+            {
+                var path = Path.Combine(_workspacePath, "brownfield-delta.md");
+                if (!File.Exists(path))
+                {
+                    _output.WriteLine("No brownfield delta log yet.");
+                    return 0;
+                }
+
+                _output.WriteLine(File.ReadAllText(path));
+                return 0;
+            }
+
             case "start-here":
             {
                 var state = File.Exists(_store.StatePath) ? _store.Load() : null;

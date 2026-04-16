@@ -40,6 +40,7 @@ internal sealed partial class ShellService
         sb.AppendLine("  [cyan]/edit-issue[/] <id> [[--title TEXT]] [[--detail TEXT]] [[--role ROLE]] [[--area AREA|--clear-area]] [[--priority N]] [[--status STATE]] [[--depends-on N ...|--clear-depends]]  [dim]Edit a queued issue safely[/]");
         sb.AppendLine("  [cyan]/plan[/]                 [dim]Show or generate the current plan[/]");
         sb.AppendLine("  [cyan]/diff-run[/] <run-id> [[compare-run-id]]  [dim]Show what a run changed, or compare two runs[/]");
+        sb.AppendLine("  [cyan]/brownfield-log[/]       [dim]Show the brownfield before/after audit log[/]");
         sb.AppendLine("  [cyan]/questions[/]            [dim]List open questions with age and blocking state[/]");
         sb.AppendLine("  [cyan]/budget[/] [[--total N]] [[--premium N]]  [dim]View or adjust the credit budget[/]");
         sb.AppendLine("  [cyan]/check-update[/]         [dim]Check for a newer version of DevTeam[/]");

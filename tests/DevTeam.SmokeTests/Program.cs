@@ -59,6 +59,7 @@ var tests = new List<(string Name, Action Run)>
     ("Collapsed response headers still parse cleanly", TestCollapsedResponseHeadersParseCleanly),
     ("Run artifacts capture superpowers and tools used", TestRunArtifactsCaptureUsageMetadata),
     ("Status command shows role usage telemetry", TestStatusCommandShowsRoleUsage),
+    ("Brownfield log captures approach and rationale", TestBrownfieldLogCapturesApproachAndRationale),
     ("Legacy workspaces hydrate missing roles and superpowers", TestLegacyWorkspaceHydratesMetadata),
     ("Workspace loads legacy execution selection timestamps", TestWorkspaceLoadsLegacyExecutionSelectionTimestamp),
     ("Friendly role names resolve to canonical roles", TestFriendlyRoleNamesResolve),

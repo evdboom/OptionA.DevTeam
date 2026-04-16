@@ -186,6 +186,10 @@ public class LoopExecutor(
                 var persistedRun = state.AgentRuns.First(run => run.Id == completed.Run.RunId);
                 WriteRunArtifact(_store.WorkspacePath, completed.Run, persistedRun, completed.Response, completed.Outcome, completed.Summary);
                 WriteDecisionArtifact(_store.WorkspacePath, decision, persistedRun);
+                if (!string.IsNullOrWhiteSpace(state.CodebaseContext) && string.Equals(completed.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteBrownfieldDeltaLog(_store.WorkspacePath, completedIssue, persistedRun, completed.Approach, completed.Rationale);
+                }
 
                 // Merge worktree branch back into the main repo (if worktree mode active for this run)
                 FinalizeWorktree(state, completed, log, options.Verbosity);
@@ -334,6 +338,10 @@ public class LoopExecutor(
         var persistedRun = state.AgentRuns.First(r => r.Id == result.Run.RunId);
         WriteRunArtifact(_store.WorkspacePath, result.Run, persistedRun, result.Response, result.Outcome, result.Summary);
         WriteDecisionArtifact(_store.WorkspacePath, state.Decisions.Last(), persistedRun);
+        if (!string.IsNullOrWhiteSpace(state.CodebaseContext) && string.Equals(result.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            WriteBrownfieldDeltaLog(_store.WorkspacePath, completedIssue, persistedRun, result.Approach, result.Rationale);
+        }
         _store.Save(state);
 
         return $"Issue #{issueId} completed with outcome: {result.Outcome}. Summary: {result.Summary}";
@@ -501,6 +509,39 @@ public class LoopExecutor(
         _fileSystem.WriteAllText(path, content);
     }
 
+    private void WriteBrownfieldDeltaLog(
+        string workspacePath,
+        IssueItem issue,
+        AgentRun persistedRun,
+        string approach,
+        string rationale)
+    {
+        var path = Path.Combine(workspacePath, "brownfield-delta.md");
+        var existing = _fileSystem.FileExists(path)
+            ? _fileSystem.ReadAllText(path).TrimEnd()
+            : "# Brownfield Change Delta\n\nAppend-only log of how runs handled existing code patterns.\n";
+        var changedFiles = persistedRun.ChangedPaths.Count == 0
+            ? "- (none)"
+            : string.Join(Environment.NewLine, persistedRun.ChangedPaths.Select(item => $"- {item}"));
+        var entry = $"""
+
+        ## Run #{persistedRun.Id} — issue #{issue.Id} [{issue.RoleSlug}] {issue.Title}
+
+        - Outcome: {persistedRun.Status}
+        - Approach: {(string.IsNullOrWhiteSpace(approach) ? "(not specified)" : approach)}
+        - Created: {persistedRun.UpdatedAtUtc:O}
+
+        ### Rationale
+
+        {(string.IsNullOrWhiteSpace(rationale) ? "(not specified)" : rationale.Trim())}
+
+        ### Changed Files
+
+        {changedFiles}
+        """;
+        _fileSystem.WriteAllText(path, $"{existing}{entry}{Environment.NewLine}");
+    }
+
     private void WriteDecisionArtifact(string workspacePath, DecisionRecord decision, AgentRun? relatedRun = null)
     {
         var decisionsDir = Path.Combine(workspacePath, "decisions");
@@ -632,7 +673,7 @@ public class LoopExecutor(
                 ExternalMcpServers = state.McpServers
             }, cancellationToken);
             var parsed = AgentPromptBuilder.ParseResponse(response);
-            return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Issues, parsed.SuperpowersUsed, parsed.ToolsUsed, parsed.Questions);
+            return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Approach, parsed.Rationale, parsed.Issues, parsed.SuperpowersUsed, parsed.ToolsUsed, parsed.Questions);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -648,6 +689,8 @@ public class LoopExecutor(
                 response,
                 "failed",
                 response.StdErr,
+                "",
+                "",
                 [],
                 [],
                 [],
@@ -667,6 +710,8 @@ public class LoopExecutor(
                 response,
                 "failed",
                 response.StdErr,
+                "",
+                "",
                 [],
                 [],
                 [],

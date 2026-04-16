@@ -5,6 +5,8 @@ internal sealed record AgentExecutionResult(
     AgentInvocationResult Response,
     string Outcome,
     string Summary,
+    string Approach,
+    string Rationale,
     IReadOnlyList<GeneratedIssueProposal> Issues,
     IReadOnlyList<string> SuperpowersUsed,
     IReadOnlyList<string> ToolsUsed,

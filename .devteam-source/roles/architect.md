@@ -83,3 +83,7 @@ If you discover additional work, blockers, or prerequisites while working, add t
 - **Enforce hygiene in your designs:** Spec Blazor components with separate `.razor` (markup) and `.razor.cs` (logic) files. Spec `Program.cs` as a ≤ 30-line bootstrap. When designing a new class, keep it focused on one concern — flag any file that would naturally own multiple concerns as a split opportunity.
 - **Enforce constructor injection:** Name the injected collaborators and required interfaces in your issue details. Do not leave infrastructure access as implied static calls.
 - **Enforce observable boundaries:** If the design touches file system, process execution, git, console, clock, or external services, say which abstraction should own that dependency so the implementation can be audited and unit tested cleanly.
+
+## Brownfield delta
+- When brownfield context is present, make the architecture decision explicit: are you asking the team to **extend**, **replace**, or **work around** the existing pattern?
+- Include that decision in `APPROACH:` and explain the tradeoff in `RATIONALE:` so the runtime can capture a semantic before/after record.

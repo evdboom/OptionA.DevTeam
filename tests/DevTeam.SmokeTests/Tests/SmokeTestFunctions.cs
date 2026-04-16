@@ -1225,6 +1225,54 @@ internal static class SmokeTestFunctions
         AssertTrue(result.StdOut.Contains("2 credits", StringComparison.Ordinal), "status should include per-role credits.");
         AssertTrue(result.StdOut.Contains("1500 tokens", StringComparison.Ordinal), "status should include per-role token totals when available.");
     }
+
+    internal static void TestBrownfieldLogCapturesApproachAndRationale()
+    {
+        using var harness = new TestHarness();
+        harness.State.CodebaseContext = "## Existing patterns\n- MVC controllers";
+        harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+        harness.Runtime.AddIssue(harness.State, "Extend billing controller", "Add a new endpoint.", "developer", 90, null, []);
+        harness.Store.Save(harness.State);
+        var executor = new LoopExecutor(
+            harness.Runtime,
+            harness.Store,
+            new FuncAgentClientFactory(_ => new FakeAgentClient("""
+    OUTCOME: completed
+    SUMMARY:
+    Added the endpoint without changing the overall controller structure.
+    APPROACH: extend
+    RATIONALE:
+    The current MVC controller pattern already matches the billing area and keeps the change local.
+    ISSUES:
+    (none)
+    SUPERPOWERS_USED:
+    (none)
+    TOOLS_USED:
+    - dotnet
+    QUESTIONS:
+    (none)
+    """)));
+
+        executor.RunAsync(
+            harness.State,
+            new LoopExecutionOptions
+            {
+                Backend = "sdk",
+                MaxIterations = 1,
+                MaxSubagents = 1,
+                Verbosity = LoopVerbosity.Normal
+            }).GetAwaiter().GetResult();
+
+        var logPath = Path.Combine(harness.Store.WorkspacePath, "brownfield-delta.md");
+        var logText = File.ReadAllText(logPath);
+        var commandResult = RunDevTeamCli(harness.RepoRoot, "brownfield-log", "--workspace", harness.Store.WorkspacePath);
+
+        AssertTrue(File.Exists(logPath), "Brownfield runs should write the brownfield delta log.");
+        AssertTrue(logText.Contains("Approach: extend", StringComparison.Ordinal), "Brownfield log should capture the chosen approach.");
+        AssertTrue(logText.Contains("controller pattern", StringComparison.Ordinal), "Brownfield log should capture the rationale.");
+        AssertEqual(0, commandResult.ExitCode, "brownfield-log exit code");
+        AssertTrue(commandResult.StdOut.Contains("Brownfield Change Delta", StringComparison.Ordinal), "brownfield-log should print the audit log.");
+    }
     
     internal static void TestLegacyWorkspaceHydratesMetadata()
     {

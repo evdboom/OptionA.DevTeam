@@ -434,6 +434,19 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "brownfield-log":
+                {
+                    var path = Path.Combine(_store.WorkspacePath, "brownfield-delta.md");
+                    if (!File.Exists(path))
+                    {
+                        AddLine("No brownfield delta log yet.");
+                        break;
+                    }
+
+                    AddSystem(Markup.Escape(File.ReadAllText(path)).TrimEnd(), "brownfield log");
+                    break;
+                }
+
                 case "goal":
                 case "set-goal":
                 {

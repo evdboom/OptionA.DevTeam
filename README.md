@@ -246,6 +246,12 @@ devteam> /diff-run 12
 devteam> /diff-run 12 11
 ```
 
+**Review the brownfield audit trail**
+
+```text
+devteam> /brownfield-log
+```
+
 **Hand off a workspace to another machine**
 
 ```text
@@ -273,6 +279,7 @@ devteam> /set-pipeline default
 /plan                                     Generate or show the plan
 /edit-issue <ID> [--title TEXT] [--detail TEXT] [--role ROLE] [--area AREA|--clear-area] [--priority N] [--status STATE] [--depends-on N ...|--clear-depends] [--note TEXT]  Edit a queued issue safely
 /diff-run <RUN-ID> [COMPARE-RUN-ID]       Show what a run changed, or compare two runs
+/brownfield-log                           Show the brownfield before/after audit log
 /feedback <text>                          Revise the plan with feedback
 /preview [--max-subagents N]             Preview the next batch without starting the loop
 /approve [note]                           Approve the plan and move to execution
@@ -302,6 +309,7 @@ devteam /plan --workspace .devteam
 devteam /edit-issue 7 --workspace .devteam --priority 90 --area ui --note "Raise priority after feedback."
 devteam /diff-run 12 --workspace .devteam
 devteam /diff-run 12 11 --workspace .devteam
+devteam /brownfield-log --workspace .devteam
 devteam /preview --workspace .devteam --max-subagents 2
 devteam /approve-plan --workspace .devteam --note "Looks good. Start building."
 devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3
