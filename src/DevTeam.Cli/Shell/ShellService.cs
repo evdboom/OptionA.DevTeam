@@ -449,6 +449,37 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "pipeline":
+                {
+                    var current = _store.Load();
+                    var source = current.Runtime.PipelineRolesCustomized ? "custom" : $"mode default ({current.Runtime.ActiveModeSlug})";
+                    AddSystem($"[bold]Current pipeline[/]\n{Markup.Escape(string.Join(" -> ", current.Runtime.DefaultPipelineRoles))}\n[dim]{Markup.Escape(source)}[/]", "pipeline");
+                    break;
+                }
+
+                case "set-pipeline":
+                {
+                    var current = _store.Load();
+                    var values = GetPositionalValues(options);
+                    if (values.Count == 0)
+                    {
+                        throw new InvalidOperationException("Usage: /set-pipeline <role...|default>");
+                    }
+
+                    if (values.Count == 1 && string.Equals(values[0], "default", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _runtime.ResetDefaultPipelineRoles(current);
+                        _store.Save(current);
+                        AddSuccess($"Reset pipeline to mode default: {Markup.Escape(string.Join(" -> ", current.Runtime.DefaultPipelineRoles))}");
+                        break;
+                    }
+
+                    _runtime.SetDefaultPipelineRoles(current, values);
+                    _store.Save(current);
+                    AddSuccess($"Updated pipeline: {Markup.Escape(string.Join(" -> ", current.Runtime.DefaultPipelineRoles))}");
+                    break;
+                }
+
                 case "mode":
                 case "set-mode":
                 {

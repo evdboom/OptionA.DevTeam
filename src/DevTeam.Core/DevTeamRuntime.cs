@@ -46,11 +46,10 @@ public class DevTeamRuntime
         var mode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, normalized, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException($"Unknown mode '{modeSlug}'. Valid modes: {string.Join(", ", state.Modes.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase))}");
         state.Runtime.ActiveModeSlug = mode.Slug;
-        state.Runtime.DefaultPipelineRoles = mode.Slug.Trim().ToLowerInvariant() switch
+        if (!state.Runtime.PipelineRolesCustomized)
         {
-            "creative-writing" => ["architect", "developer", "reviewer"],
-            _ => ["architect", "developer", "tester"]
-        };
+            state.Runtime.DefaultPipelineRoles = GetModeDefaultPipelineRoles(mode.Slug);
+        }
         state.Runtime.AutoApproveEnabled = string.Equals(mode.Slug, "autopilot", StringComparison.OrdinalIgnoreCase);
         RememberDecision(state, "Updated active mode", mode.Slug, "mode");
     }
@@ -102,6 +101,43 @@ public class DevTeamRuntime
         if (value < 1) throw new InvalidOperationException("max-subagents must be at least 1.");
         state.Runtime.DefaultMaxSubagents = value;
         RememberDecision(state, "Updated default max-subagents", value.ToString(), "runtime");
+    }
+
+    public void SetDefaultPipelineRoles(WorkspaceState state, IEnumerable<string> roleSlugs)
+    {
+        var requestedRoles = roleSlugs
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .ToList();
+        if (requestedRoles.Count == 0)
+        {
+            throw new InvalidOperationException("Provide at least one role for the pipeline.");
+        }
+
+        var normalizedRoles = new List<string>();
+        foreach (var requestedRole in requestedRoles)
+        {
+            _issueService.TryResolveRoleSlug(state, requestedRole, out var resolvedRole);
+            if (!state.Roles.Any(role => string.Equals(role.Slug, resolvedRole, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Unknown role '{requestedRole}'. Valid roles: {string.Join(", ", GetKnownRoleSlugs(state))}");
+            }
+
+            if (!normalizedRoles.Contains(resolvedRole, StringComparer.OrdinalIgnoreCase))
+            {
+                normalizedRoles.Add(resolvedRole);
+            }
+        }
+
+        state.Runtime.DefaultPipelineRoles = normalizedRoles;
+        state.Runtime.PipelineRolesCustomized = true;
+        RememberDecision(state, "Updated default pipeline roles", string.Join(" -> ", normalizedRoles), "pipeline");
+    }
+
+    public void ResetDefaultPipelineRoles(WorkspaceState state)
+    {
+        state.Runtime.DefaultPipelineRoles = GetModeDefaultPipelineRoles(state.Runtime.ActiveModeSlug);
+        state.Runtime.PipelineRolesCustomized = false;
+        RememberDecision(state, "Reset default pipeline roles", string.Join(" -> ", state.Runtime.DefaultPipelineRoles), "pipeline");
     }
 
     public void RecordPlanningFeedback(WorkspaceState state, string feedback) =>
@@ -799,6 +835,13 @@ public class DevTeamRuntime
         var normalized = roleSlug.Trim().ToLowerInvariant();
         return normalized is "reviewer" or "review" or "security" or "tester";
     }
+
+    private static List<string> GetModeDefaultPipelineRoles(string modeSlug) =>
+        modeSlug.Trim().ToLowerInvariant() switch
+        {
+            "creative-writing" => ["architect", "developer", "reviewer"],
+            _ => ["architect", "developer", "tester"]
+        };
 
     private static string BuildIssueEditDecisionDetail(IssueEditRequest request, IssueItem issue)
     {

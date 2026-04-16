@@ -179,6 +179,37 @@ internal sealed class CliDispatcher
                 return 0;
             }
 
+            case "pipeline":
+            {
+                var state = _store.Load();
+                var source = state.Runtime.PipelineRolesCustomized ? "custom" : $"mode default ({state.Runtime.ActiveModeSlug})";
+                _output.WriteLine($"Current pipeline: {string.Join(" -> ", state.Runtime.DefaultPipelineRoles)} [{source}]");
+                return 0;
+            }
+
+            case "set-pipeline":
+            {
+                var state = _store.Load();
+                var values = GetPositionalValues(options);
+                if (values.Count == 0)
+                {
+                    throw new InvalidOperationException("Usage: set-pipeline <role...|default>");
+                }
+
+                if (values.Count == 1 && string.Equals(values[0], "default", StringComparison.OrdinalIgnoreCase))
+                {
+                    _runtime.ResetDefaultPipelineRoles(state);
+                    _store.Save(state);
+                    _output.WriteLine($"Reset pipeline to mode default: {string.Join(" -> ", state.Runtime.DefaultPipelineRoles)}");
+                    return 0;
+                }
+
+                _runtime.SetDefaultPipelineRoles(state, values);
+                _store.Save(state);
+                _output.WriteLine($"Updated pipeline: {string.Join(" -> ", state.Runtime.DefaultPipelineRoles)}");
+                return 0;
+            }
+
             case "set-mode":
             case "mode":
             {

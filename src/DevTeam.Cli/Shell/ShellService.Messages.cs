@@ -33,6 +33,8 @@ internal sealed partial class ShellService
         sb.AppendLine("  [cyan]/status[/]               [dim]Show workspace phase, open issues, and stall state[/]");
         sb.AppendLine("  [cyan]/history[/]              [dim]Show session command history (last 50)[/]");
         sb.AppendLine("  [cyan]/mode[/] <slug>          [dim]Switch the active run mode[/]");
+        sb.AppendLine("  [cyan]/pipeline[/]             [dim]Show the current default role chain[/]");
+        sb.AppendLine("  [cyan]/set-pipeline[/] <role ...|default>  [dim]Customize or reset the default role chain[/]");
         sb.AppendLine("  [cyan]/keep-awake[/] <on|off>  [dim]Prevent system sleep during long runs[/]");
         sb.AppendLine("  [cyan]/add-issue[/] \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--depends-on N ...]]  [dim]Queue a new issue[/]");
         sb.AppendLine("  [cyan]/edit-issue[/] <id> [[--title TEXT]] [[--detail TEXT]] [[--role ROLE]] [[--area AREA|--clear-area]] [[--priority N]] [[--status STATE]] [[--depends-on N ...|--clear-depends]]  [dim]Edit a queued issue safely[/]");

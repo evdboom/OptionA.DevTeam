@@ -491,6 +491,20 @@ internal static class SmokeTestFunctions
         AssertTrue(harness.State.Runtime.DefaultPipelineRoles.SequenceEqual(["architect", "developer", "reviewer"]),
             "Creative writing mode should swap the default pipeline roles.");
     }
+
+    internal static void TestCustomizedPipelineSurvivesModeSwitch()
+    {
+        using var harness = new TestHarness();
+
+        harness.Runtime.SetDefaultPipelineRoles(harness.State, ["architect", "developer", "reviewer"]);
+        harness.Runtime.SetMode(harness.State, "autopilot");
+
+        AssertEqual("autopilot", harness.State.Runtime.ActiveModeSlug, "Mode should still update.");
+        AssertTrue(harness.State.Runtime.AutoApproveEnabled, "Autopilot should still enable auto-approve.");
+        AssertTrue(harness.State.Runtime.PipelineRolesCustomized, "Custom pipeline flag should remain set.");
+        AssertTrue(harness.State.Runtime.DefaultPipelineRoles.SequenceEqual(["architect", "developer", "reviewer"]),
+            "Mode changes should not overwrite customized pipeline roles.");
+    }
     
     internal static void TestSetKeepAwakeUpdatesRuntimeConfiguration()
     {
@@ -1787,6 +1801,45 @@ internal static class SmokeTestFunctions
             AssertEqual("ui-layer", issue.Area, "Edited issue area");
             AssertEqual(ItemStatus.Blocked, issue.Status, "Edited issue status");
             AssertTrue(issue.Notes.Contains("Waiting on UX copy.", StringComparison.Ordinal), "Edited issue should append notes.");
+        }
+        finally
+        {
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
+    internal static void TestSetPipelineCommandUpdatesDefaultRoles()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-set-pipeline-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var workspacePath = Path.Combine(tempRoot, ".devteam");
+            var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--goal", "Build an expert workflow.");
+            AssertEqual(0, initResult.ExitCode, "Init exit code");
+
+            var setResult = RunDevTeamCli(
+                tempRoot,
+                "set-pipeline",
+                "architect",
+                "developer",
+                "reviewer",
+                "--workspace", workspacePath);
+            AssertEqual(0, setResult.ExitCode, "set-pipeline exit code");
+
+            var pipelineResult = RunDevTeamCli(tempRoot, "pipeline", "--workspace", workspacePath);
+            AssertEqual(0, pipelineResult.ExitCode, "pipeline exit code");
+            AssertTrue(pipelineResult.StdOut.Contains("architect -> developer -> reviewer", StringComparison.Ordinal),
+                "pipeline should print the customized role chain.");
+            AssertTrue(pipelineResult.StdOut.Contains("[custom]", StringComparison.Ordinal),
+                "pipeline should identify a customized role chain.");
+
+            var store = new WorkspaceStore(workspacePath);
+            var state = store.Load();
+            AssertTrue(state.Runtime.PipelineRolesCustomized, "Custom pipeline flag should be saved.");
+            AssertTrue(state.Runtime.DefaultPipelineRoles.SequenceEqual(["architect", "developer", "reviewer"]),
+                "set-pipeline should persist the requested role chain.");
         }
         finally
         {

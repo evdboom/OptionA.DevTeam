@@ -316,6 +316,8 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("  start-here [new|medior|expert] [--workspace PATH]  Show a persona-based onboarding guide");
         Console.WriteLine("  bug-report [--save PATH] [--redact-paths true|false] [--history-count N] [--error-count N] [--workspace PATH]");
         Console.WriteLine("  set-goal <TEXT> [--goal-file PATH] [--workspace PATH]");
+        Console.WriteLine("  pipeline [--workspace PATH]");
+        Console.WriteLine("  set-pipeline <ROLE...|default> [--workspace PATH]");
         Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
         Console.WriteLine("  set-keep-awake <true|false> [--workspace PATH]");
         Console.WriteLine("  set-auto-approve <true|false> [--workspace PATH]");
@@ -356,6 +358,8 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine($"  {ConsoleTheme.Command("/bug")} [[--save PATH]] [[--redact-paths true|false]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/status")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/history")}              Show session command history (last 50)");
+        Console.WriteLine($"  {ConsoleTheme.Command("/pipeline")}             Show the current default role chain");
+        Console.WriteLine($"  {ConsoleTheme.Command("/set-pipeline")} <role...|default>");
         Console.WriteLine($"  {ConsoleTheme.Command("/mode")} <slug>");
         Console.WriteLine($"  {ConsoleTheme.Command("/keep-awake")} <on|off>");
         Console.WriteLine($"  {ConsoleTheme.Command("/add-issue")} \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--roadmap-item-id N]] [[--depends-on N [[N...]]]]");
