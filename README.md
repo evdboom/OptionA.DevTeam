@@ -35,7 +35,7 @@ The workflow has three phases with two approval gates:
 2. **Review plan** — you read the plan and either give feedback (which revises it) or approve.
 3. **Architecture** — architect issues run and produce technology decisions, concrete execution issues, and ADRs.
 4. **Review architect plan** — you review the architect output and approve to move to execution.
-5. **Execution** — worker roles (navigator, developer, security, tester, docs, etc.) run the selected issues. Each completed issue can propose follow-on issues, creating multi-role pipelines.
+5. **Execution** — worker roles (navigator, developer, security, tester, auditor, docs, etc.) run the selected issues. Each completed issue can propose follow-on issues, creating multi-role pipelines.
 6. **Loop** — the runtime reevaluates dependencies, advances pipelines, and repeats until done or budget is exhausted.
 
 In **autopilot** mode both approval gates are skipped automatically — agents decide everything.
@@ -384,6 +384,13 @@ Practical guidance:
 
 The runtime automatically prevents same-area issues from running in parallel. If two issues share the same `area` value, only the higher-priority one is included in each batch — even if `max-subagents` capacity would allow more. This prevents merge conflicts on shared files.
 
+### Reviewer vs auditor
+
+- **Reviewer** checks a specific change, feature, or milestone before sign-off.
+- **Auditor** checks the **codebase as a whole** for accumulated ATM drift, especially recent shortcut-heavy erosion that is spreading across multiple areas.
+
+Use reviewer when you want a gate on a concrete change. Use auditor when you want remediation issues for broader maintainability or testability drift.
+
 ## Pipelines
 
 When work is approved, the runtime automatically creates multi-role pipelines. For example, a feature issue assigned to `architect` will, on completion, generate a follow-up for `developer`, and then `tester`. Each stage must complete before the next starts.
@@ -445,6 +452,7 @@ This creates a `.devteam-source/` directory containing all packaged assets:
 .devteam-source/
 ├── roles/              Agent personas
 │   ├── architect.md
+│   ├── auditor.md
 │   ├── developer.md
 │   ├── tester.md
 │   ├── navigator.md

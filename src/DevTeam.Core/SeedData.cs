@@ -13,6 +13,7 @@ internal static class SeedData
         ["fullstack-developer"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["claude-sonnet-4.6", "gpt-5.4"] },
         ["tester"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gemini-3.1-pro-preview", "gpt-5.4", "claude-sonnet-4.6"] },
         ["reviewer"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
+        ["auditor"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
         ["ux"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["user"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
         ["game-designer"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },

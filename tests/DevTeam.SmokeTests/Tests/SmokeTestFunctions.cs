@@ -1674,6 +1674,18 @@ internal static class SmokeTestFunctions
         AssertTrue(architectPrompt.Contains("file system", StringComparison.OrdinalIgnoreCase)
             && architectPrompt.Contains("clock", StringComparison.OrdinalIgnoreCase),
             "Architect prompt should call out explicit infrastructure abstractions for testability.");
+
+        var auditorIssue = harness.Runtime.AddIssue(harness.State, "Audit recent codebase drift", "Inspect recent maintainability erosion.", "auditor", 90, null, []);
+        var auditorPrompt = AgentPromptBuilder.BuildPrompt(harness.State, auditorIssue);
+        AssertTrue(auditorPrompt.Contains("FILE BOUNDARY", StringComparison.Ordinal), "Auditor prompt should include FILE BOUNDARY enforcement.");
+        AssertTrue(auditorPrompt.Contains("legacy drift", StringComparison.OrdinalIgnoreCase)
+            && auditorPrompt.Contains("recent drift", StringComparison.OrdinalIgnoreCase)
+            && auditorPrompt.Contains("active regression risk", StringComparison.OrdinalIgnoreCase),
+            "Auditor prompt should classify drift findings explicitly.");
+        AssertTrue(auditorPrompt.Contains("Reviewer", StringComparison.Ordinal)
+            && auditorPrompt.Contains("Navigator", StringComparison.Ordinal)
+            && auditorPrompt.Contains("Security", StringComparison.Ordinal),
+            "Auditor prompt should define boundaries against reviewer, navigator, and security.");
     
         // Developer should NOT get file boundary enforcement
         var devIssue = harness.Runtime.AddIssue(harness.State, "Build the game loop", "Implement it.", "developer", 80, null, []);

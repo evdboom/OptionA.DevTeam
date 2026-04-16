@@ -15,6 +15,7 @@ public static class AgentPromptBuilder
         ["fullstack-developer"] = ["plan", "tdd", "verify"],
         ["tester"] = ["tdd", "debug", "verify"],
         ["reviewer"] = ["review", "verify"],
+        ["auditor"] = ["scout", "review", "verify", "hygiene"],
         ["ux"] = ["verify"],
         ["user"] = ["verify"],
         ["game-designer"] = ["brainstorm", "review", "verify"],
@@ -23,7 +24,7 @@ public static class AgentPromptBuilder
 
     private static readonly HashSet<string> DesignOnlyRoles = new(StringComparer.OrdinalIgnoreCase)
     {
-        "planner", "orchestrator", "architect", "navigator", "analyst", "security", "reviewer"
+        "planner", "orchestrator", "architect", "navigator", "analyst", "security", "reviewer", "auditor"
     };
 
     private static string BuildFileBoundaryBlock(string roleSlug)
