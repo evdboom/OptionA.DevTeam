@@ -538,7 +538,8 @@ public class DevTeamRuntime
         string outcome,
         string summary,
         IEnumerable<string>? superpowersUsed = null,
-        IEnumerable<string>? toolsUsed = null)
+        IEnumerable<string>? toolsUsed = null,
+        IEnumerable<string>? changedPaths = null)
     {
         var run = state.AgentRuns.FirstOrDefault(item => item.Id == runId)
             ?? throw new InvalidOperationException($"Run #{runId} was not found.");
@@ -548,6 +549,12 @@ public class DevTeamRuntime
         run.Summary = summary.Trim();
         run.SuperpowersUsed = superpowersUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
         run.ToolsUsed = toolsUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+        run.ChangedPaths = changedPaths?
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
         run.UpdatedAtUtc = _clock.UtcNow;
         switch (outcome.Trim().ToLowerInvariant())
         {

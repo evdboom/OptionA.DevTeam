@@ -340,6 +340,7 @@ public class WorkspaceStore
             - Summary: {latestRun.Summary}
             - Superpowers Used: {(latestRun.SuperpowersUsed.Count == 0 ? "none" : string.Join(", ", latestRun.SuperpowersUsed))}
             - Tools Used: {(latestRun.ToolsUsed.Count == 0 ? "none" : string.Join(", ", latestRun.ToolsUsed))}
+            - Changed Files: {(latestRun.ChangedPaths.Count == 0 ? "none" : string.Join(", ", latestRun.ChangedPaths))}
             """;
         var decisionBlock = relatedDecisions.Count == 0
             ? "(none)"

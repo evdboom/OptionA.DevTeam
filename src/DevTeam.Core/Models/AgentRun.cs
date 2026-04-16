@@ -14,5 +14,6 @@ public sealed class AgentRun
     public string Summary { get; set; } = "";
     public List<string> SuperpowersUsed { get; set; } = [];
     public List<string> ToolsUsed { get; set; } = [];
+    public List<string> ChangedPaths { get; set; } = [];
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }

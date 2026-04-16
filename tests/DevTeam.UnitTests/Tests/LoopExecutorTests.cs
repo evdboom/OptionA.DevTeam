@@ -5,6 +5,7 @@ internal static class LoopExecutorTests
     public static IEnumerable<TestCase> GetTests() =>
     [
         new("SpawnIssueAsync_CompletesIssue_AndPersistsToStore", SpawnIssueAsync_CompletesIssue_AndPersistsToStore),
+        new("SpawnIssueAsync_PersistsChangedPathsToArtifacts", SpawnIssueAsync_PersistsChangedPathsToArtifacts),
         new("SpawnIssueAsync_ThrowsForUnknownIssue", SpawnIssueAsync_ThrowsForUnknownIssue),
         new("SpawnIssueAsync_ReturnsOutcomeSummary", SpawnIssueAsync_ReturnsOutcomeSummary),
         new("QueueIssues_SkipsAlreadyDoneIssue", QueueIssues_SkipsAlreadyDoneIssue),
@@ -42,6 +43,37 @@ internal static class LoopExecutorTests
         var reloaded = store.Load();
         var issue = reloaded.Issues.First(i => i.Id == issueId);
         Assert.That(issue.Status == ItemStatus.Done, $"Expected issue to be Done but was {issue.Status}");
+    }
+
+    private static async Task SpawnIssueAsync_PersistsChangedPathsToArtifacts()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Implement traceability");
+        var issueId = state.Issues[^1].Id;
+
+        var git = new FakeGitRepository
+        {
+            PathsChangedSinceResult = ["src/Feature.cs", "tests/FeatureTests.cs"]
+        };
+        var agentOutput = "OUTCOME: completed\nSUMMARY:\nTraceability added.";
+        var factory = new FuncAgentClientFactory(_ => new FakeAgentClient(agentOutput));
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, gitRepository: git, fileSystem: fs);
+
+        await executor.SpawnIssueAsync(issueId, null, "fake", TimeSpan.FromSeconds(30), CancellationToken.None);
+
+        var reloaded = store.Load();
+        var run = reloaded.AgentRuns.Single(run => run.IssueId == issueId);
+        Assert.That(run.ChangedPaths.SequenceEqual(["src/Feature.cs", "tests/FeatureTests.cs"]),
+            $"Expected changed paths to persist on the run but got: {string.Join(", ", run.ChangedPaths)}");
+
+        var runArtifact = fs.ReadAllText(Path.Combine(store.WorkspacePath, "runs", "run-001.md"));
+        Assert.That(runArtifact.Contains("src/Feature.cs", StringComparison.Ordinal),
+            $"Expected run artifact to mention changed file, got: {runArtifact}");
+
+        var decisionArtifact = fs.ReadAllText(Path.Combine(store.WorkspacePath, "decisions", "decision-001.md"));
+        Assert.That(decisionArtifact.Contains("tests/FeatureTests.cs", StringComparison.Ordinal),
+            $"Expected decision artifact to mention changed file, got: {decisionArtifact}");
     }
 
     private static async Task SpawnIssueAsync_ThrowsForUnknownIssue()

@@ -4,4 +4,6 @@ internal sealed record PendingAgentRun(
     QueuedRunInfo Run,
     string SessionId,
     Task<AgentExecutionResult> Task,
-    DateTimeOffset StartedAtUtc);
+    DateTimeOffset StartedAtUtc,
+    string WorkingDirectory,
+    GitStatusSnapshot? GitStatusBeforeRun);

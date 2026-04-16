@@ -8,6 +8,7 @@ public sealed class FakeGitRepository : IGitRepository
     public bool IsGitRepositoryResult { get; set; } = true;
     public bool TryCreateWorktreeResult { get; set; } = true;
     public WorktreeMergeResult MergeResult { get; set; } = new(false);
+    public IReadOnlyList<string> PathsChangedSinceResult { get; set; } = [];
 
     public List<string> CreatedWorktreePaths { get; } = [];
     public List<string> RemovedWorktreePaths { get; } = [];
@@ -18,6 +19,9 @@ public sealed class FakeGitRepository : IGitRepository
 
     public GitStatusSnapshot? TryCaptureStatus(string workingDirectory) =>
         new() { RepositoryRoot = workingDirectory };
+
+    public IReadOnlyList<string> GetPathsChangedSince(string workingDirectory, GitStatusSnapshot? beforeSnapshot) =>
+        PathsChangedSinceResult;
 
     public IReadOnlyList<string> StagePathsChangedSince(string workingDirectory, GitStatusSnapshot? beforeSnapshot) => [];
 

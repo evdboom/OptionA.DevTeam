@@ -501,7 +501,7 @@ The CLI writes its local runtime state under the workspace directory (typically 
 └── decisions/              Per-decision artifacts
 ```
 
-You do not need to edit these files manually. They are there for visibility and version control.
+You do not need to edit these files manually. They are there for visibility and version control. Run artifacts, decision artifacts, and issue mirrors now include the latest changed-file trace so you can see what changed and why from any of those entry points.
 
 ## Packaging and local development
 
