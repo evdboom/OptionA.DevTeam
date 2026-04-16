@@ -51,6 +51,7 @@ In **autopilot** mode both approval gates are skipped automatically — agents d
 - Expose a workspace MCP server so agents can read and write project state
 - Connect external MCP servers (e.g., Context7 for library docs) to every spawned agent
 - Switch between modes such as `develop` and `creative-writing`
+- Override the default Copilot auth with named BYOK provider profiles for SDK-backed runs
 - Generate a sanitized bug report draft with version, workspace state, and recent shell diagnostics
 
 ## Installation
@@ -267,6 +268,14 @@ devteam> /set-pipeline architect developer reviewer
 devteam> /set-pipeline default
 ```
 
+**Switch the default BYOK provider**
+
+```text
+devteam> /provider
+devteam> /set-provider ollama-local
+devteam> /set-provider default
+```
+
 ## Interactive shell commands
 
 ```text
@@ -276,7 +285,9 @@ devteam> /set-pipeline default
 /import --input PATH [--force]            Import a previously exported workspace archive
 /pipeline                                 Show the current default role chain
 /set-pipeline <ROLE ...|default>          Customize or reset the default role chain
-/plan                                     Generate or show the plan
+/provider                                 Show the current BYOK provider override
+/set-provider <NAME|default>              Set or reset the default BYOK provider
+/plan [--provider NAME]                   Generate or show the plan
 /edit-issue <ID> [--title TEXT] [--detail TEXT] [--role ROLE] [--area AREA|--clear-area] [--priority N] [--status STATE] [--depends-on N ...|--clear-depends] [--note TEXT]  Edit a queued issue safely
 /diff-run <RUN-ID> [COMPARE-RUN-ID]       Show what a run changed, or compare two runs
 /brownfield-log                           Show the brownfield before/after audit log
@@ -284,7 +295,7 @@ devteam> /set-pipeline default
 /feedback <text>                          Revise the plan with feedback
 /preview [--max-subagents N]             Preview the next batch without starting the loop
 /approve [note]                           Approve the plan and move to execution
-/run [--max-iterations N] [--max-subagents N] [--dry-run]  Run the execution loop
+/run [--provider NAME] [--max-iterations N] [--max-subagents N] [--dry-run]  Run the execution loop
 /questions                                List open questions with age and blocking state
 /answer-question <ID> <answer>            Answer a question
 /budget [--total N] [--premium N]         Show or adjust budget
@@ -306,7 +317,9 @@ devteam /export --workspace .devteam --output .\handoff.zip
 devteam /import --workspace .devteam-imported --input .\handoff.zip --force
 devteam /pipeline --workspace .devteam
 devteam /set-pipeline architect developer reviewer --workspace .devteam
-devteam /plan --workspace .devteam
+devteam /provider --workspace .devteam
+devteam /set-provider ollama-local --workspace .devteam
+devteam /plan --workspace .devteam --provider ollama-local
 devteam /edit-issue 7 --workspace .devteam --priority 90 --area ui --note "Raise priority after feedback."
 devteam /diff-run 12 --workspace .devteam
 devteam /diff-run 12 11 --workspace .devteam
@@ -314,7 +327,7 @@ devteam /brownfield-log --workspace .devteam
 devteam /github-sync --workspace .devteam
 devteam /preview --workspace .devteam --max-subagents 2
 devteam /approve-plan --workspace .devteam --note "Looks good. Start building."
-devteam /run --workspace .devteam --max-iterations 5 --max-subagents 3
+devteam /run --workspace .devteam --provider ollama-local --max-iterations 5 --max-subagents 3
 devteam /run --workspace .devteam --max-subagents 3 --dry-run
 devteam /status --workspace .devteam
 devteam /questions --workspace .devteam
@@ -387,6 +400,59 @@ Use labels to decide what syncs into the workspace:
 Issue bodies can also include frontmatter for `role`, `priority`, `area`, `depends`, and `blocking`. Synced items keep an external reference such as `github#123` in the workspace mirrors so runs and decisions stay traceable back to the originating issue.
 
 **Current scope note:** this shipped GitHub mode is intentionally limited to **issue/question sync**. PR attachment, PR review automation, and merge flows are still future workflow discussion items rather than part of this first slice.
+
+## BYOK / provider overrides
+
+DevTeam can optionally attach a named provider profile to **Copilot SDK-backed** runs. This lets you keep the same workflow while pointing a model at a specific OpenAI-compatible or Azure provider.
+
+Provider profiles live in `.devteam-source/PROVIDERS.json`:
+
+```json
+[
+  {
+    "Name": "ollama-local",
+    "Type": "openai",
+    "BaseUrl": "http://localhost:11434/v1",
+    "ApiKeyEnvVar": "OLLAMA_API_KEY"
+  },
+  {
+    "Name": "azure-foundry",
+    "Type": "azure",
+    "BaseUrl": "https://example.openai.azure.com/openai",
+    "ApiKeyEnvVar": "AZURE_OPENAI_KEY",
+    "AzureApiVersion": "2024-10-21"
+  }
+]
+```
+
+Available fields:
+
+| Field | Required | Description |
+|---|---|---|
+| `Name` | yes | Provider slug used by `/set-provider` and `--provider` |
+| `Type` | yes | Provider type such as `openai` or `azure` |
+| `BaseUrl` | yes | Base endpoint for the provider |
+| `ApiKeyEnvVar` | no | Environment variable containing an API key |
+| `BearerTokenEnvVar` | no | Environment variable containing a bearer token |
+| `WireApi` | no | Optional SDK wire API override such as `responses` |
+| `AzureApiVersion` | no | Azure OpenAI API version when `Type` is `azure` |
+
+Use a workspace default when you want the same provider on every SDK-backed run:
+
+```powershell
+devteam /set-provider ollama-local --workspace .devteam
+devteam /provider --workspace .devteam
+```
+
+Or override it for a single command:
+
+```powershell
+devteam /plan --workspace .devteam --provider azure-foundry
+devteam /run --workspace .devteam --provider azure-foundry --max-iterations 3
+devteam agent-invoke --provider azure-foundry --prompt "Reply with READY and nothing else."
+```
+
+If no provider override is set, DevTeam keeps using the default GitHub Copilot authentication flow. Provider overrides are not supported on the legacy CLI backend; use the default `sdk` backend for BYOK sessions.
 
 Autopilot mode automatically approves both the plan and architect plan, so the loop runs end-to-end without pausing for human input. Enable it at init time or switch later:
 
@@ -547,6 +613,7 @@ This creates a `.devteam-source/` directory containing all packaged assets:
 │   ├── debug.md
 │   └── ...
 ├── MODELS.json         Model selection per role
+├── PROVIDERS.json      Optional BYOK provider profiles for SDK sessions
 └── MCP_SERVERS.json    External MCP servers for agents
 ```
 

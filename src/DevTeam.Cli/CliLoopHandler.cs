@@ -81,6 +81,7 @@ internal static class CliLoopHandler
 
         var prompt = AgentPromptBuilder.BuildAdHocPrompt(state, roleSlug, userMessage);
         var sessionId = $"devteam-adhoc-{roleSlug}";
+        var provider = ProviderSelectionService.ResolveProvider(state, model);
         ChatConsole.WriteEvent("→", $"Asking {roleSlug} via {model}...", "dim cyan");
 
         var client = new DefaultAgentClientFactory().Create("sdk");
@@ -93,6 +94,7 @@ internal static class CliLoopHandler
                 SessionId = sessionId,
                 WorkingDirectory = state.RepoRoot,
                 WorkspacePath = store.WorkspacePath,
+                Provider = provider,
                 Timeout = TimeSpan.FromMinutes(10),
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
@@ -145,10 +147,15 @@ internal static class CliLoopHandler
         Action<string>? overrideLogger = null)
     {
         var backend = CliOptionParser.GetOption(options, "backend") ?? "sdk";
+        var providerName = CliOptionParser.GetOption(options, "provider");
         var maxSubagents = CliOptionParser.GetIntOption(options, "max-subagents", state.Runtime.DefaultMaxSubagents);
         var maxIterations = CliOptionParser.GetIntOption(options, "max-iterations", state.Runtime.DefaultMaxIterations);
         var timeoutSeconds = CliOptionParser.GetIntOption(options, "timeout-seconds", 600);
         var verbosity = CliOptionParser.ParseVerbosity(CliOptionParser.GetOption(options, "verbosity"));
+        if (!string.IsNullOrWhiteSpace(providerName))
+        {
+            ProviderSelectionService.GetRequiredProvider(state, providerName);
+        }
         using var keepAwakeController = new KeepAwakeController();
         using var renderer = interactiveShell && !Console.IsOutputRedirected
             ? new LoopConsoleRenderer()
@@ -166,6 +173,7 @@ internal static class CliLoopHandler
         var executionOptions = new LoopExecutionOptions
         {
             Backend = backend,
+            ProviderName = providerName,
             MaxSubagents = maxSubagents,
             MaxIterations = maxIterations,
             AgentTimeout = TimeSpan.FromSeconds(timeoutSeconds),

@@ -89,6 +89,11 @@ internal sealed class CliDispatcher
                 {
                     _runtime.SetMode(state, mode);
                 }
+                var provider = GetOption(options, "provider");
+                if (!string.IsNullOrWhiteSpace(provider))
+                {
+                    ProviderSelectionService.SetDefaultProvider(state, provider);
+                }
                 if (!string.IsNullOrWhiteSpace(goal))
                 {
                     _runtime.SetGoal(state, goal);
@@ -229,6 +234,32 @@ internal sealed class CliDispatcher
                 _runtime.SetDefaultPipelineRoles(state, values);
                 _store.Save(state);
                 _output.WriteLine($"Updated pipeline: {string.Join(" -> ", state.Runtime.DefaultPipelineRoles)}");
+                return 0;
+            }
+
+            case "provider":
+            {
+                var state = _store.Load();
+                var currentProvider = string.IsNullOrWhiteSpace(state.Runtime.DefaultProviderName) ? "(default Copilot auth)" : state.Runtime.DefaultProviderName;
+                var knownProviders = ProviderSelectionService.GetConfiguredProviderNames(state);
+                _output.WriteLine($"Current provider: {currentProvider}");
+                _output.WriteLine(knownProviders.Count == 0
+                    ? "Configured providers: none (.devteam-source\\PROVIDERS.json is empty or missing)"
+                    : $"Configured providers: {string.Join(", ", knownProviders)}");
+                return 0;
+            }
+
+            case "set-provider":
+            {
+                var state = _store.Load();
+                var providerName = GetPositionalValue(options) ?? throw new InvalidOperationException("Usage: set-provider <name|default>");
+                ProviderSelectionService.SetDefaultProvider(
+                    state,
+                    string.Equals(providerName, "default", StringComparison.OrdinalIgnoreCase) ? null : providerName);
+                _store.Save(state);
+                _output.WriteLine(string.IsNullOrWhiteSpace(state.Runtime.DefaultProviderName)
+                    ? "Reset provider override to default Copilot auth."
+                    : $"Updated default provider to {state.Runtime.DefaultProviderName}.");
                 return 0;
             }
 
@@ -496,11 +527,22 @@ internal sealed class CliDispatcher
                 var prompt = GetOption(options, "prompt") ?? GetPositionalValue(options)
                     ?? throw new InvalidOperationException("Missing prompt text.");
                 var model = GetOption(options, "model");
+                var providerName = GetOption(options, "provider");
                 var timeoutSeconds = GetIntOption(options, "timeout-seconds", 1200);
                 var workingDirectory = GetOption(options, "working-directory") ?? Environment.CurrentDirectory;
                 var extraArgs = options.TryGetValue("extra-arg", out var values)
                     ? values
                     : [];
+                var providerState = File.Exists(_store.StatePath)
+                    ? _store.Load()
+                    : new WorkspaceState
+                    {
+                        RepoRoot = Environment.CurrentDirectory,
+                        Runtime = RuntimeConfiguration.CreateDefault(),
+                        Models = new FileSystemConfigurationLoader().LoadModels(Environment.CurrentDirectory),
+                        Providers = new FileSystemConfigurationLoader().LoadProviders(Environment.CurrentDirectory)
+                    };
+                var provider = ProviderSelectionService.ResolveProvider(providerState, model, providerName);
 
                 var client = new DefaultAgentClientFactory().Create(backend);
                 var result = await client.InvokeAsync(new AgentInvocationRequest
@@ -511,6 +553,7 @@ internal sealed class CliDispatcher
                     Timeout = TimeSpan.FromSeconds(timeoutSeconds),
                     ExtraArguments = extraArgs,
                     WorkspacePath = Path.GetFullPath(_workspacePath),
+                    Provider = provider,
                     EnableWorkspaceMcp = GetBoolOption(options, "workspace-mcp", false),
                     ToolHostPath = System.Reflection.Assembly.GetEntryAssembly()?.Location
                 });

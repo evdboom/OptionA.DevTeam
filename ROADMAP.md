@@ -7,12 +7,10 @@ This file tracks the **active, open roadmap only**.
 
 ## Priority order
 
-| Priority | Item | Scope | Why now |
-|---|---|---|---|
-| 1 | **R13 - BYOK / provider-agnostic auth** | Small-Medium | Broadens adoption after the core local and GitHub-backed workflows are in place. |
+No active roadmap items remain.
 
 ---
 
 ## Remaining open items
 
-- **R13 - BYOK / provider-agnostic auth**
+- None. The active roadmap is currently clear.

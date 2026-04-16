@@ -9,6 +9,7 @@ public sealed class RuntimeConfiguration
     public bool AutoApproveEnabled { get; set; }
     public bool WorktreeMode { get; set; }
     public string WorkspaceMcpServerName { get; set; } = "devteam-workspace";
+    public string DefaultProviderName { get; set; } = "";
     public List<string> DefaultPipelineRoles { get; set; } = ["architect", "developer", "tester"];
     public bool PipelineRolesCustomized { get; set; }
     public int DefaultMaxIterations { get; set; } = 15;

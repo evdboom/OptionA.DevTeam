@@ -24,7 +24,7 @@ internal sealed partial class ShellService
         sb.AppendLine("[bold]Interactive commands:[/]");
         sb.AppendLine("[dim]Typical flow: /init -> /plan -> feedback or /approve -> /run[/]");
         sb.AppendLine();
-        sb.AppendLine("  [cyan]/init[/] \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]  [dim]Initialise workspace with a goal[/]");
+        sb.AppendLine("  [cyan]/init[/] \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--provider NAME]] [[--keep-awake true|false]]  [dim]Initialise workspace with a goal[/]");
         sb.AppendLine("  [cyan]/customize[/] [[--force]]    [dim]Copy default prompt assets to .devteam-source/ for editing[/]");
         sb.AppendLine("  [cyan]/export[/] [[--output PATH]]  [dim]Package the current workspace for handoff or backup[/]");
         sb.AppendLine("  [cyan]/import[/] --input PATH [[--force]]  [dim]Import a previously exported workspace archive[/]");
@@ -35,10 +35,12 @@ internal sealed partial class ShellService
         sb.AppendLine("  [cyan]/mode[/] <slug>          [dim]Switch the active run mode[/]");
         sb.AppendLine("  [cyan]/pipeline[/]             [dim]Show the current default role chain[/]");
         sb.AppendLine("  [cyan]/set-pipeline[/] <role ...|default>  [dim]Customize or reset the default role chain[/]");
+        sb.AppendLine("  [cyan]/provider[/]             [dim]Show the current BYOK provider override[/]");
+        sb.AppendLine("  [cyan]/set-provider[/] <name|default>  [dim]Set or reset the default BYOK provider[/]");
         sb.AppendLine("  [cyan]/keep-awake[/] <on|off>  [dim]Prevent system sleep during long runs[/]");
         sb.AppendLine("  [cyan]/add-issue[/] \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--depends-on N ...]]  [dim]Queue a new issue[/]");
         sb.AppendLine("  [cyan]/edit-issue[/] <id> [[--title TEXT]] [[--detail TEXT]] [[--role ROLE]] [[--area AREA|--clear-area]] [[--priority N]] [[--status STATE]] [[--depends-on N ...|--clear-depends]]  [dim]Edit a queued issue safely[/]");
-        sb.AppendLine("  [cyan]/plan[/]                 [dim]Show or generate the current plan[/]");
+        sb.AppendLine("  [cyan]/plan[/] [[--provider NAME]]  [dim]Show or generate the current plan[/]");
         sb.AppendLine("  [cyan]/diff-run[/] <run-id> [[compare-run-id]]  [dim]Show what a run changed, or compare two runs[/]");
         sb.AppendLine("  [cyan]/brownfield-log[/]       [dim]Show the brownfield before/after audit log[/]");
         sb.AppendLine("  [cyan]/sync[/]                 [dim]Pull GitHub-labelled issues into the local workspace[/]");
@@ -51,7 +53,7 @@ internal sealed partial class ShellService
         sb.AppendLine("  [cyan]/worktrees[/] <on|off>   [dim]Enable/disable git worktree isolation for parallel runs[/]");
         sb.AppendLine("  [cyan]/recon[/] [[--backend B]] [[--timeout-seconds N]]  [dim]Re-run codebase reconnaissance and update context[/]");
         sb.AppendLine("  [cyan]/preview[/] [[--max-subagents N]]  [dim]Preview the next batch without spending credits[/]");
-        sb.AppendLine("  [cyan]/run[/] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--dry-run]]  [dim]Start the loop in the background[/]");
+        sb.AppendLine("  [cyan]/run[/] [[--provider NAME]] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--dry-run]]  [dim]Start the loop in the background[/]");
         sb.AppendLine("  [cyan]/stop[/]                 [dim]Cancel the running loop[/]");
         sb.AppendLine("  [cyan]/wait[/]                 [dim]Re-attach to the running loop and wait for it to finish[/]");
         sb.AppendLine("  [cyan]/feedback[/] <text>      [dim]Add planning feedback[/]");

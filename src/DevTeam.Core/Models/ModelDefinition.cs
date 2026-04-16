@@ -3,6 +3,7 @@ namespace DevTeam.Core;
 public sealed class ModelDefinition
 {
     public string Name { get; set; } = "";
+    public string ProviderName { get; set; } = "";
     public double Cost { get; set; }
     public double? InputCostPer1kTokens { get; set; }
     public double? OutputCostPer1kTokens { get; set; }

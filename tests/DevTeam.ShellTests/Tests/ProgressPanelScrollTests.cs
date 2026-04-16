@@ -500,7 +500,7 @@ internal static class ProgressPanelScrollTests
         string[] requiredCommands =
         [
             "/init", "/customize", "/export", "/import", "/start-here", "/bug", "/status", "/history",
-            "/mode", "/pipeline", "/set-pipeline", "/keep-awake", "/add-issue", "/edit-issue", "/plan", "/questions",
+            "/mode", "/pipeline", "/set-pipeline", "/provider", "/set-provider", "/keep-awake", "/add-issue", "/edit-issue", "/plan", "/questions",
             "/diff-run", "/brownfield-log", "/sync", "/budget", "/check-update", "/update", "/max-iterations",
             "/max-subagents", "/run", "/stop", "/wait", "/feedback",
             "/preview", "/approve", "/answer", "/goal", "/exit", "@role",

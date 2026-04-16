@@ -324,6 +324,47 @@ internal static class SmokeTestFunctions
         AssertEqual("npx", context7!.Command, "Context7 should launch via npx.");
         AssertTrue(context7.Args.Contains("@upstash/context7-mcp@latest"), "Context7 should reference the correct package.");
     }
+
+    internal static void TestSdkSessionConfigWiresByokProvider()
+    {
+        using var harness = new TestHarness();
+        const string providerEnvVar = "DEVTEAM_TEST_PROVIDER_KEY";
+        var originalValue = Environment.GetEnvironmentVariable(providerEnvVar);
+        try
+        {
+            Environment.SetEnvironmentVariable(providerEnvVar, "test-key");
+            var request = new AgentInvocationRequest
+            {
+                Prompt = "Summarize the work.",
+                Model = "gpt-5.4",
+                SessionId = "provider-run-001",
+                WorkingDirectory = harness.RepoRoot,
+                Provider = new ProviderDefinition
+                {
+                    Name = "azure-foundry",
+                    Type = "azure",
+                    BaseUrl = "https://example.openai.azure.com/openai",
+                    ApiKeyEnvVar = providerEnvVar,
+                    WireApi = "responses",
+                    AzureApiVersion = "2024-10-21"
+                }
+            };
+
+            var sessionConfig = WorkspaceMcpSessionConfigFactory.BuildSessionConfig(request);
+            var provider = sessionConfig.Provider ?? throw new InvalidOperationException("Session config should include a provider.");
+
+            AssertEqual("azure", provider.Type, "Provider type should map into the SDK session config.");
+            AssertEqual("https://example.openai.azure.com/openai", provider.BaseUrl, "Provider base URL should be preserved.");
+            AssertEqual("test-key", provider.ApiKey, "Provider API key should be resolved from the environment.");
+            AssertEqual("responses", provider.WireApi, "Provider wire API should be preserved.");
+            AssertEqual("2024-10-21", provider.Azure?.ApiVersion, "Azure provider should carry its API version.");
+            AssertEqual(false, sessionConfig.EnableConfigDiscovery, "BYOK session config should disable config discovery.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(providerEnvVar, originalValue);
+        }
+    }
     
     internal static void TestWorkspaceLoadsMcpServers()
     {
@@ -544,6 +585,45 @@ exit /b 1
         {
             Environment.SetEnvironmentVariable("DEVTEAM_GH_PATH", originalGitHubCliPath);
             Environment.SetEnvironmentVariable("PATH", originalPath);
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
+    internal static void TestSetProviderCommandUpdatesRuntimeConfiguration()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-provider-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            var workspacePath = Path.Combine(tempRoot, ".devteam");
+            var assetDir = Path.Combine(tempRoot, ".devteam-source");
+            Directory.CreateDirectory(assetDir);
+            File.WriteAllText(Path.Combine(assetDir, "PROVIDERS.json"), """
+                [
+                  {
+                    "Name": "ollama-local",
+                    "Type": "openai",
+                    "BaseUrl": "http://localhost:11434/v1",
+                    "ApiKeyEnvVar": "OLLAMA_API_KEY"
+                  }
+                ]
+                """);
+
+            var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--goal", "Test provider defaults.", "--recon", "false");
+            AssertEqual(0, initResult.ExitCode, "Provider init exit code");
+
+            var setResult = RunDevTeamCli(tempRoot, "set-provider", "ollama-local", "--workspace", workspacePath);
+            AssertEqual(0, setResult.ExitCode, "Set provider exit code");
+
+            var providerResult = RunDevTeamCli(tempRoot, "provider", "--workspace", workspacePath);
+            AssertEqual(0, providerResult.ExitCode, "Provider status exit code");
+            AssertTrue(providerResult.StdOut.Contains("ollama-local", StringComparison.Ordinal), "Provider command should show the configured provider.");
+
+            var state = new WorkspaceStore(workspacePath).Load();
+            AssertEqual("ollama-local", state.Runtime.DefaultProviderName, "Workspace should persist the default provider override.");
+        }
+        finally
+        {
             TryCleanupTempRepo(tempRoot);
         }
     }

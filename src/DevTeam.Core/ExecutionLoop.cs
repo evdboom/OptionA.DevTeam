@@ -660,6 +660,7 @@ public class LoopExecutor(
         var workingDirectory = overrideWorkingDirectory ?? state.RepoRoot;
         try
         {
+            var provider = ProviderSelectionService.ResolveProvider(state, queuedRun.ModelName, options.ProviderName);
             var response = await client.InvokeAsync(new AgentInvocationRequest
             {
                 Prompt = prompt,
@@ -667,6 +668,7 @@ public class LoopExecutor(
                 SessionId = sessionId,
                 WorkingDirectory = workingDirectory,
                 WorkspacePath = _store.WorkspacePath,
+                Provider = provider,
                 Timeout = options.AgentTimeout,
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
@@ -738,16 +740,19 @@ public class LoopExecutor(
         var orchestratorSession = _runtime.GetOrCreateExecutionOrchestratorSession(state);
         var prompt = AgentPromptBuilder.BuildOrchestratorPrompt(state, candidates, options.MaxSubagents);
         var client = _agentClientFactory.Create(options.Backend);
+        var orchestratorModel = SeedData.GetPolicy(state, "orchestrator").PrimaryModel;
+        var provider = ProviderSelectionService.ResolveProvider(state, orchestratorModel, options.ProviderName);
         Log(log, options.Verbosity, $"  Running execution orchestrator via {options.Backend} (session {orchestratorSession.SessionId}, candidates {candidates.Count}, max {options.MaxSubagents})");
         var startedAtUtc = _clock.UtcNow;
         var response = await AwaitInvocationWithHeartbeatAsync(
             client.InvokeAsync(new AgentInvocationRequest
             {
                 Prompt = prompt,
-                Model = SeedData.GetPolicy(state, "orchestrator").PrimaryModel,
+                Model = orchestratorModel,
                 SessionId = orchestratorSession.SessionId,
                 WorkingDirectory = state.RepoRoot,
                 WorkspacePath = _store.WorkspacePath,
+                Provider = provider,
                 Timeout = options.AgentTimeout,
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,

@@ -15,6 +15,10 @@ internal static class WorkspaceStatusPrinter
             $"[bold]Mode:[/] [cyan]{Markup.Escape(state.Runtime.ActiveModeSlug)}[/]  " +
             $"[bold]Max-iter:[/] {state.Runtime.DefaultMaxIterations}  " +
             $"[bold]Max-sub:[/] {state.Runtime.DefaultMaxSubagents}");
+        if (!string.IsNullOrWhiteSpace(state.Runtime.DefaultProviderName))
+        {
+            AnsiConsole.MarkupLine($"[bold]Provider:[/] [cyan]{Markup.Escape(state.Runtime.DefaultProviderName)}[/]");
+        }
         AnsiConsole.MarkupLine($"[bold]State:[/] [{loopStateColor}]{Markup.Escape(DescribeLoopState(report.LoopState))}[/]");
 
         var issues = state.Issues.OrderBy(i => i.Id).ToList();
@@ -352,7 +356,7 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("DevTeam CLI");
         Console.WriteLine("Commands (plain or slash-prefixed, for example `/init`):");
         Console.WriteLine("  start [--keep-awake true|false] [--no-tty] [--output-format plain|jsonl] [--workspace PATH]");
-        Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false] [--recon true|false] [--backend sdk|cli] [--timeout-seconds N]");
+        Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--provider NAME] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false] [--recon true|false] [--backend sdk|cli] [--timeout-seconds N]");
         Console.WriteLine("  customize [--force]                Copy default roles, modes, and superpowers to .devteam-source/ for editing");
         Console.WriteLine("  export [--output PATH] [--workspace PATH]");
         Console.WriteLine("  import --input PATH [--force] [--workspace PATH]");
@@ -361,6 +365,8 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("  set-goal <TEXT> [--goal-file PATH] [--workspace PATH]");
         Console.WriteLine("  pipeline [--workspace PATH]");
         Console.WriteLine("  set-pipeline <ROLE...|default> [--workspace PATH]");
+        Console.WriteLine("  provider [--workspace PATH]");
+        Console.WriteLine("  set-provider <NAME|default> [--workspace PATH]");
         Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
         Console.WriteLine("  set-keep-awake <true|false> [--workspace PATH]");
         Console.WriteLine("  set-auto-approve <true|false> [--workspace PATH]");
@@ -383,10 +389,10 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("  check-update");
         Console.WriteLine("  update");
         Console.WriteLine("  run-once [--max-subagents N] [--workspace PATH]");
-        Console.WriteLine("  run-loop [--backend sdk|cli] [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--verbosity quiet|normal|detailed] [--keep-awake true|false] [--dry-run] [--workspace PATH]");
+        Console.WriteLine("  run-loop [--backend sdk|cli] [--provider NAME] [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--verbosity quiet|normal|detailed] [--keep-awake true|false] [--dry-run] [--workspace PATH]");
         Console.WriteLine("  complete-run --run-id N --outcome completed|failed|blocked --summary TEXT [--workspace PATH]");
         Console.WriteLine("  status [--workspace PATH]");
-        Console.WriteLine("  agent-invoke [--backend sdk|cli] [--prompt TEXT] [--model NAME] [--timeout-seconds N] [--working-directory PATH] [--extra-arg ARG ...]");
+        Console.WriteLine("  agent-invoke [--backend sdk|cli] [--provider NAME] [--prompt TEXT] [--model NAME] [--timeout-seconds N] [--working-directory PATH] [--extra-arg ARG ...]");
         Console.WriteLine("  workspace-mcp --workspace PATH");
     }
 
@@ -405,11 +411,13 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine($"  {ConsoleTheme.Command("/history")}              Show session command history (last 50)");
         Console.WriteLine($"  {ConsoleTheme.Command("/pipeline")}             Show the current default role chain");
         Console.WriteLine($"  {ConsoleTheme.Command("/set-pipeline")} <role...|default>");
+        Console.WriteLine($"  {ConsoleTheme.Command("/provider")}             Show the current BYOK provider override");
+        Console.WriteLine($"  {ConsoleTheme.Command("/set-provider")} <name|default>");
         Console.WriteLine($"  {ConsoleTheme.Command("/mode")} <slug>");
         Console.WriteLine($"  {ConsoleTheme.Command("/keep-awake")} <on|off>");
         Console.WriteLine($"  {ConsoleTheme.Command("/add-issue")} \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--roadmap-item-id N]] [[--depends-on N [[N...]]]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/edit-issue")} <id> [[--title TEXT]] [[--detail TEXT]] [[--role ROLE]] [[--area AREA|--clear-area]] [[--priority N]] [[--status STATE]] [[--depends-on N [[N...]]|--clear-depends]]");
-        Console.WriteLine($"  {ConsoleTheme.Command("/plan")}");
+        Console.WriteLine($"  {ConsoleTheme.Command("/plan")} [[--provider NAME]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/diff-run")} <run-id> [[compare-run-id]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/brownfield-log")}      Show the brownfield before/after audit log");
         Console.WriteLine($"  {ConsoleTheme.Command("/sync")}                Pull GitHub-labelled issues into the local workspace");
@@ -420,7 +428,7 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine($"  {ConsoleTheme.Command("/max-iterations")} <N>    Set workspace default max iterations (used by all future /run calls)");
         Console.WriteLine($"  {ConsoleTheme.Command("/max-subagents")} <N>     Set workspace default max subagents (1=sequential, 2–4=parallel)");
         Console.WriteLine($"  {ConsoleTheme.Command("/preview")} [[--max-subagents N]]  Preview the next batch without spending credits");
-        Console.WriteLine($"  {ConsoleTheme.Command("/run")} [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--keep-awake true|false]] [[--dry-run]]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
+        Console.WriteLine($"  {ConsoleTheme.Command("/run")} [[--provider NAME]] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--keep-awake true|false]] [[--dry-run]]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/stop")}              Cancel the running loop (waits for current agent call to finish)");
         Console.WriteLine($"  {ConsoleTheme.Command("/wait")}              Re-attach to the running loop and wait for it to finish");
         Console.WriteLine($"  {ConsoleTheme.Command("/feedback")} <text>");

@@ -19,6 +19,7 @@ public sealed class WorkspaceState
     public List<DecisionRecord> Decisions { get; set; } = [];
     public List<PipelineState> Pipelines { get; set; } = [];
     public List<ModelDefinition> Models { get; set; } = [];
+    public List<ProviderDefinition> Providers { get; set; } = [];
     public List<ModeDefinition> Modes { get; set; } = [];
     public List<RoleDefinition> Roles { get; set; } = [];
     public List<SuperpowerDefinition> Superpowers { get; set; } = [];

@@ -207,6 +207,7 @@ public class WorkspaceStore
         WriteCollection("decisions.json", state.Decisions);
         WriteCollection("pipelines.json", state.Pipelines);
         DeleteCollection("models.json");
+        DeleteCollection("providers.json");
         DeleteCollection("roles.json");
         DeleteCollection("superpowers.json");
     }

@@ -5,6 +5,7 @@ internal static class WorkspaceStoreTests
     private sealed class EmptyConfigurationLoader : IConfigurationLoader
     {
         public List<ModelDefinition> LoadModels(string r) => [];
+        public List<ProviderDefinition> LoadProviders(string r) => [];
         public List<RoleDefinition> LoadRoles(string r) => [];
         public List<ModeDefinition> LoadModes(string r) => [];
         public List<SuperpowerDefinition> LoadSuperpowers(string r) => [];

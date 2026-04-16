@@ -42,6 +42,7 @@ internal static class SeedData
         };
 
         state.Models = loader.LoadModels(repoRoot);
+        state.Providers = loader.LoadProviders(repoRoot);
         state.Modes = loader.LoadModes(repoRoot);
         state.Roles = loader.LoadRoles(repoRoot);
         state.Superpowers = loader.LoadSuperpowers(repoRoot);
@@ -66,6 +67,12 @@ internal static class SeedData
         if (state.Roles.Count == 0)
         {
             state.Roles = loader.LoadRoles(repoRoot);
+            changed = true;
+        }
+
+        if (state.Providers.Count == 0)
+        {
+            state.Providers = loader.LoadProviders(repoRoot);
             changed = true;
         }
 

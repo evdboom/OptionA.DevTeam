@@ -345,10 +345,12 @@ internal sealed partial class ShellService : IDisposable
                     var gitInit = GitWorkspace.EnsureRepository(Environment.CurrentDirectory);
                     var initialized = _store.Initialize(Environment.CurrentDirectory, totalCap, premiumCap);
                     var modeName = GetOption(options, "mode");
+                    var providerName = GetOption(options, "provider");
                     initialized.Runtime.KeepAwakeEnabled = GetBoolOption(options, "keep-awake", initialized.Runtime.KeepAwakeEnabled);
                     initialized.Runtime.WorkspaceMcpEnabled = GetBoolOption(options, "workspace-mcp", true);
                     initialized.Runtime.PipelineSchedulingEnabled = GetBoolOption(options, "pipeline-scheduling", true);
                     if (!string.IsNullOrWhiteSpace(modeName)) _runtime.SetMode(initialized, modeName);
+                    if (!string.IsNullOrWhiteSpace(providerName)) ProviderSelectionService.SetDefaultProvider(initialized, providerName);
                     if (!string.IsNullOrWhiteSpace(goal)) _runtime.SetGoal(initialized, goal);
                     _store.Save(initialized);
                     AddSuccess($"Initialized workspace at {Markup.Escape(_store.WorkspacePath)}");
@@ -500,6 +502,39 @@ internal sealed partial class ShellService : IDisposable
                     _runtime.SetDefaultPipelineRoles(current, values);
                     _store.Save(current);
                     AddSuccess($"Updated pipeline: {Markup.Escape(string.Join(" -> ", current.Runtime.DefaultPipelineRoles))}");
+                    break;
+                }
+
+                case "provider":
+                {
+                    var current = _store.Load();
+                    var currentProvider = string.IsNullOrWhiteSpace(current.Runtime.DefaultProviderName) ? "(default Copilot auth)" : current.Runtime.DefaultProviderName;
+                    var knownProviders = ProviderSelectionService.GetConfiguredProviderNames(current);
+                    var body = new StringBuilder()
+                        .AppendLine("[bold]Current provider[/]")
+                        .AppendLine(Markup.Escape(currentProvider))
+                        .AppendLine()
+                        .AppendLine("[bold]Configured providers[/]")
+                        .AppendLine(knownProviders.Count == 0
+                            ? "[dim](none — add .devteam-source/PROVIDERS.json to enable BYOK providers)[/]"
+                            : Markup.Escape(string.Join(", ", knownProviders)))
+                        .ToString()
+                        .TrimEnd();
+                    AddSystem(body, "provider");
+                    break;
+                }
+
+                case "set-provider":
+                {
+                    var current = _store.Load();
+                    var providerArg = GetPositionalValue(options) ?? throw new InvalidOperationException("Usage: /set-provider <name|default>");
+                    ProviderSelectionService.SetDefaultProvider(
+                        current,
+                        string.Equals(providerArg, "default", StringComparison.OrdinalIgnoreCase) ? null : providerArg);
+                    _store.Save(current);
+                    AddSuccess(string.IsNullOrWhiteSpace(current.Runtime.DefaultProviderName)
+                        ? "Reset provider override to default Copilot auth."
+                        : $"Updated default provider to {Markup.Escape(current.Runtime.DefaultProviderName)}.");
                     break;
                 }
 
@@ -972,16 +1007,22 @@ internal sealed partial class ShellService : IDisposable
         Action<string>? logger = null)
     {
         var backend = GetOption(options, "backend") ?? "sdk";
+        var providerName = GetOption(options, "provider");
         var maxSubagents = GetIntOption(options, "max-subagents", state.Runtime.DefaultMaxSubagents);
         var maxIterations = GetIntOption(options, "max-iterations", state.Runtime.DefaultMaxIterations);
         var timeoutSeconds = GetIntOption(options, "timeout-seconds", 600);
         var verbosity = ParseVerbosity(GetOption(options, "verbosity"));
+        if (!string.IsNullOrWhiteSpace(providerName))
+        {
+            ProviderSelectionService.GetRequiredProvider(state, providerName);
+        }
 
         Action<string> log = logger ?? MakeBackgroundLogger();
 
         var executionOptions = new LoopExecutionOptions
         {
             Backend = backend,
+            ProviderName = providerName,
             MaxSubagents = maxSubagents,
             MaxIterations = maxIterations,
             AgentTimeout = TimeSpan.FromSeconds(timeoutSeconds),
@@ -1119,6 +1160,7 @@ internal sealed partial class ShellService : IDisposable
 
         var prompt = AgentPromptBuilder.BuildAdHocPrompt(state, roleSlug, userMessage);
         var sessionId = $"devteam-adhoc-{roleSlug}";
+        var provider = ProviderSelectionService.ResolveProvider(state, model);
         AddEvent("→", $"Asking {Markup.Escape(roleSlug)} via {Markup.Escape(model)}...", "dim cyan");
 
         var client = new DefaultAgentClientFactory().Create("sdk");
@@ -1131,6 +1173,7 @@ internal sealed partial class ShellService : IDisposable
                 SessionId = sessionId,
                 WorkingDirectory = state.RepoRoot,
                 WorkspacePath = _store.WorkspacePath,
+                Provider = provider,
                 Timeout = TimeSpan.FromMinutes(10),
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
