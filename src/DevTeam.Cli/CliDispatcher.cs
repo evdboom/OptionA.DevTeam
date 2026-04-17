@@ -39,6 +39,10 @@ internal sealed class CliDispatcher
             case "start":
                 return await RunShellAsync(_store, _runtime, _loopExecutor, _toolUpdateService, options);
 
+            case "help":
+                PrintHelp(GetBoolOption(options, "all", false));
+                return 0;
+
             case "check-update":
                 return await CheckForToolUpdatesAsync(_toolUpdateService);
 

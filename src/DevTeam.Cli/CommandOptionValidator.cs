@@ -126,7 +126,8 @@ internal static class CommandOptionValidator
 
         return new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
         {
-            ["start"] = CreateOptionSet(sharedOptions: globalOptions, "keep-awake", "no-tty", "output-format"),
+            ["start"] = CreateOptionSet(sharedOptions: globalOptions, "keep-awake", "no-tty", "output-format", "adventure"),
+            ["help"] = CreateOptionSet(sharedOptions: globalOptions, "all"),
             ["check-update"] = CreateOptionSet(sharedOptions: globalOptions),
             ["update"] = CreateOptionSet(sharedOptions: globalOptions),
             ["workspace-mcp"] = CreateOptionSet(sharedOptions: globalOptions),
@@ -179,7 +180,7 @@ internal static class CommandOptionValidator
         {
             ["exit"] = CreateOptionSet(),
             ["quit"] = CreateOptionSet(),
-            ["help"] = CreateOptionSet(),
+            ["help"] = CreateOptionSet("all"),
             ["check-update"] = CreateOptionSet(),
             ["update"] = CreateOptionSet(),
             ["customize"] = CreateOptionSet("force"),
@@ -223,7 +224,8 @@ internal static class CommandOptionValidator
             ["wait"] = CreateOptionSet(),
             ["budget"] = CreateOptionSet("total", "premium"),
             ["recon"] = CreateOptionSet("backend", "timeout-seconds"),
-            ["worktrees"] = CreateOptionSet()
+            ["worktrees"] = CreateOptionSet(),
+            ["adventure"] = CreateOptionSet("enabled")
         };
 
     private static HashSet<string> CreateOptionSet(params string[] commandOptions) =>
