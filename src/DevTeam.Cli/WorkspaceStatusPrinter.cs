@@ -351,7 +351,7 @@ internal static class WorkspaceStatusPrinter
         }
     }
 
-    internal static void PrintHelp()
+    internal static void PrintHelp(bool showAll = false)
     {
         Console.WriteLine("DevTeam CLI");
         Console.WriteLine("Commands (plain or slash-prefixed, for example `/init`):");
@@ -394,6 +394,14 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("  status [--workspace PATH]");
         Console.WriteLine("  agent-invoke [--backend sdk|cli] [--provider NAME] [--prompt TEXT] [--model NAME] [--timeout-seconds N] [--working-directory PATH] [--extra-arg ARG ...]");
         Console.WriteLine("  workspace-mcp --workspace PATH");
+        if (showAll)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Hidden extras:");
+            Console.WriteLine("  help [--all]                            Show hidden easter eggs and experimental switches");
+            Console.WriteLine("  start [--adventure] [--workspace PATH]  Start the interactive shell in ASCII office mode");
+            Console.WriteLine("  /adventure [on|off]                     Toggle the hidden ASCII office explorer from inside the shell");
+        }
     }
 
     internal static void PrintInteractiveHelp()

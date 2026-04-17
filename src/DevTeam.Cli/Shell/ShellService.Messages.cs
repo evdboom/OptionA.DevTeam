@@ -9,16 +9,16 @@ internal sealed partial class ShellService
 {
     // ── Help text ──────────────────────────────────────────────────────────────
 
-    private void AddInteractiveHelp()
+    private void AddInteractiveHelp(bool showAll = false)
     {
-        var markup = BuildInteractiveHelpMarkup();
+        var markup = BuildInteractiveHelpMarkup(showAll);
         AddSystem(markup, "help");
     }
 
     /// <summary>
     /// Builds the interactive help markup string. Extracted for testability.
     /// </summary>
-    internal static string BuildInteractiveHelpMarkup()
+    internal static string BuildInteractiveHelpMarkup(bool showAll = false)
     {
         var sb = new StringBuilder();
         sb.AppendLine("[bold]Interactive commands:[/]");
@@ -68,6 +68,15 @@ internal sealed partial class ShellService
         sb.AppendLine();
         sb.AppendLine("[bold]Direct role invocation:[/]");
         sb.Append("  [cyan]@role[/] <message>    e.g. [dim]@architect can you review our API design?[/]");
+        if (showAll)
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("[bold]Hidden extras:[/]");
+            sb.AppendLine("  [cyan]/adventure[/] [[on|off]]  [dim]Toggle the ASCII office explorer mode[/]");
+            sb.Append("  [dim]While active: arrow keys move, Enter chats with a nearby desk, Esc returns to the normal shell.[/]");
+        }
+
         return sb.ToString();
     }
 
@@ -248,6 +257,11 @@ internal sealed partial class ShellService
         var titleColor = borderColor;
         var escaped = Markup.Escape(text);
         var lines = escaped.Split('\n');
+        lock (_gate)
+        {
+            _adventureSpeechBubbles[roleSlug] = BuildAdventureBubbleText(text);
+        }
+
         if (lines.Length <= MaxPanelChunkLines)
         {
             var headerText = outcome is not null ? $"{roleSlug} — {outcome}" : roleSlug;
@@ -268,6 +282,12 @@ internal sealed partial class ShellService
                 BorderColor: borderColor,
                 TitleColor: titleColor));
         }
+    }
+
+    private static string BuildAdventureBubbleText(string text)
+    {
+        var firstLine = text.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "(no reply)";
+        return firstLine.Length <= 40 ? firstLine : firstLine[..37] + "...";
     }
 
     private void AddQuestion(string questionText, int? questionId = null, bool isBlocking = true, int index = 1, int total = 1)
