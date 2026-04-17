@@ -34,7 +34,7 @@ public static class ProviderSelectionService
         if (provider is null)
         {
             throw new InvalidOperationException(
-                $"Unknown provider '{providerName}'. Configure it in .devteam-source\\PROVIDERS.json or reset the provider override.");
+                $"Unknown provider '{providerName}'. Configure it in .devteam-source/PROVIDERS.json or reset the provider override.");
         }
 
         return provider;

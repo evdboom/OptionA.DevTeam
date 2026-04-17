@@ -101,6 +101,7 @@ public class LoopExecutor(
             }
 
             var pendingRuns = new List<PendingAgentRun>();
+            var canCaptureChangedPathsReliably = state.Runtime.WorktreeMode || runsToExecute.Count <= 1;
             var sharedGitStatusBeforeRun = _git.TryCaptureStatus(state.RepoRoot);
             foreach (var queuedRun in runsToExecute)
             {
@@ -164,7 +165,9 @@ public class LoopExecutor(
                         .Select(item => item.Id)
                         .ToList();
                 }
-                var changedPaths = _git.GetPathsChangedSince(pendingRun.WorkingDirectory, pendingRun.GitStatusBeforeRun);
+                var changedPaths = canCaptureChangedPathsReliably
+                    ? _git.GetPathsChangedSince(pendingRun.WorkingDirectory, pendingRun.GitStatusBeforeRun)
+                    : [];
                 var completedIssue = state.Issues.First(issue => issue.Id == completed.Run.IssueId);
                 var model = state.Models.FirstOrDefault(item => string.Equals(item.Name, completed.Run.ModelName, StringComparison.OrdinalIgnoreCase));
                 var usageTelemetry = UsageTelemetryExtractor.Extract(model, completed.Response);

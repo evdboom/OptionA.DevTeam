@@ -72,8 +72,12 @@ internal static class SeedData
 
         if (state.Providers.Count == 0)
         {
-            state.Providers = loader.LoadProviders(repoRoot);
-            changed = true;
+            var loadedProviders = loader.LoadProviders(repoRoot);
+            if (loadedProviders.Count > 0)
+            {
+                state.Providers = loadedProviders;
+                changed = true;
+            }
         }
 
         if (state.Modes.Count == 0)

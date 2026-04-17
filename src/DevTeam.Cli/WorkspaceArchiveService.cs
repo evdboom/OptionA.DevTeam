@@ -97,7 +97,7 @@ internal static class WorkspaceArchiveService
             }
 
             var destinationPath = Path.GetFullPath(Path.Combine(destination, entry.FullName));
-            if (!destinationPath.StartsWith(destination, StringComparison.OrdinalIgnoreCase))
+            if (!IsPathWithinDestination(destination, destinationPath))
             {
                 throw new InvalidOperationException("Archive contains an invalid path outside the workspace root.");
             }
@@ -112,6 +112,23 @@ internal static class WorkspaceArchiveService
         }
 
         return destination;
+    }
+
+    private static bool IsPathWithinDestination(string destinationRoot, string destinationPath)
+    {
+        var relativePath = Path.GetRelativePath(destinationRoot, destinationPath);
+        if (Path.IsPathRooted(relativePath))
+        {
+            return false;
+        }
+
+        if (relativePath.Equals("..", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return !relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            && !relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal);
     }
 
     private static bool HasExistingWorkspace(string workspacePath)
