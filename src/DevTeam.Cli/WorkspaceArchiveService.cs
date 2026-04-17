@@ -80,6 +80,7 @@ internal static class WorkspaceArchiveService
         }
 
         Directory.CreateDirectory(destination);
+        var fullDestinationRoot = Path.GetFullPath(destination + Path.DirectorySeparatorChar);
 
         using var archive = ZipFile.OpenRead(source);
         var manifestEntry = archive.GetEntry("devteam-export.json")
@@ -97,7 +98,7 @@ internal static class WorkspaceArchiveService
             }
 
             var destinationPath = Path.GetFullPath(Path.Combine(destination, entry.FullName));
-            if (!IsPathWithinDestination(destination, destinationPath))
+            if (!destinationPath.StartsWith(fullDestinationRoot, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("Archive contains an invalid path outside the workspace root.");
             }
