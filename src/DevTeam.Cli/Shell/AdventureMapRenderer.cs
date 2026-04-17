@@ -380,9 +380,10 @@ internal static class AdventureMapRenderer
             return false;
         }
 
-        var halfWidth = DeskGlyphWidth / 2;
-        return point.X >= desk.Position.X - halfWidth
-               && point.X <= desk.Position.X + halfWidth;
+        var leftOffset = (DeskGlyphWidth - 1) / 2;
+        var rightOffset = DeskGlyphWidth / 2;
+        return point.X >= desk.Position.X - leftOffset
+               && point.X <= desk.Position.X + rightOffset;
     }
 
     private static int ManhattanDistance(AdventurePoint left, AdventurePoint right) =>
