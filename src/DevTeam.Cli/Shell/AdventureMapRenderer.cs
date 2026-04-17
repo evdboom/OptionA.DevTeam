@@ -30,6 +30,7 @@ internal static class AdventureMapRenderer
 {
     private const int RoomWidth = 58;
     private const int RoomHeight = 14;
+    private const int DeskGlyphWidth = 3;
     private const int DeskLabelMax = 13;
     private const int DeskBubbleMax = 15;
     private static readonly AdventurePoint[] DeskPositions =
@@ -370,7 +371,19 @@ internal static class AdventureMapRenderer
         new(Math.Clamp(point.X, 1, RoomWidth - 2), Math.Clamp(point.Y, 1, RoomHeight - 2));
 
     private static bool IsDeskTile(AdventureWorld world, AdventurePoint point) =>
-        world.Desks.Any(desk => desk.Position == point);
+        world.Desks.Any(desk => IsDeskTile(desk, point));
+
+    private static bool IsDeskTile(AdventureDesk desk, AdventurePoint point)
+    {
+        if (point.Y != desk.Position.Y)
+        {
+            return false;
+        }
+
+        var halfWidth = DeskGlyphWidth / 2;
+        return point.X >= desk.Position.X - halfWidth
+               && point.X <= desk.Position.X + halfWidth;
+    }
 
     private static int ManhattanDistance(AdventurePoint left, AdventurePoint right) =>
         Math.Abs(left.X - right.X) + Math.Abs(left.Y - right.Y);

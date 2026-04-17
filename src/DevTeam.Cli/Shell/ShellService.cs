@@ -35,9 +35,6 @@ internal sealed partial class ShellService : IDisposable
     private CancellationTokenSource? _loopCts;
     private string? _lastContextKey;
     private bool _keepAwakeEnabled;
-    private bool _adventureModeEnabled;
-    private List<AdventureRoleSlot> _adventureRoles = [];
-    private readonly Dictionary<string, string> _adventureSpeechBubbles = new(StringComparer.OrdinalIgnoreCase);
 
     // ── Public surface ─────────────────────────────────────────────────────────
 
@@ -54,10 +51,6 @@ internal sealed partial class ShellService : IDisposable
     }
 
     public bool IsLoopRunning => _loopTask is { IsCompleted: false };
-    public bool IsAdventureModeEnabled
-    {
-        get { lock (_gate) return _adventureModeEnabled; }
-    }
 
     public string PromptText => IsLoopRunning ? "devteam (running)> " : "devteam> ";
 
@@ -68,23 +61,6 @@ internal sealed partial class ShellService : IDisposable
     }
 
     private ShellLayoutSnapshot _layoutSnapshot = ShellLayoutSnapshot.Empty;
-
-    public AdventureShellSnapshot AdventureSnapshot
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return new AdventureShellSnapshot(
-                    _adventureModeEnabled,
-                    _layoutSnapshot.Phase,
-                    [.. _adventureRoles],
-                    [.. _layoutSnapshot.Agents],
-                    [.. _layoutSnapshot.Roadmap],
-                    new Dictionary<string, string>(_adventureSpeechBubbles, StringComparer.OrdinalIgnoreCase));
-            }
-        }
-    }
 
     // ── Constructor ────────────────────────────────────────────────────────────
 
@@ -1326,20 +1302,8 @@ internal sealed partial class ShellService : IDisposable
         lock (_gate)
         {
             _layoutSnapshot = new ShellLayoutSnapshot(phase, showMiddle, agents, roadmap);
-            _adventureRoles = state.Roles
-                .Select(role => new AdventureRoleSlot(role.Slug, string.IsNullOrWhiteSpace(role.Name) ? role.Slug : role.Name))
-                .ToList();
         }
-        NotifyStateChanged();
-    }
-
-    private void SetAdventureMode(bool enabled)
-    {
-        lock (_gate)
-        {
-            _adventureModeEnabled = enabled;
-        }
-
+        UpdateAdventureRoles(state);
         NotifyStateChanged();
     }
 

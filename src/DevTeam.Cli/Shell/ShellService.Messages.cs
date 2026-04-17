@@ -284,12 +284,6 @@ internal sealed partial class ShellService
         }
     }
 
-    private static string BuildAdventureBubbleText(string text)
-    {
-        var firstLine = text.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "(no reply)";
-        return firstLine.Length <= 40 ? firstLine : firstLine[..37] + "...";
-    }
-
     private void AddQuestion(string questionText, int? questionId = null, bool isBlocking = true, int index = 1, int total = 1)
     {
         var counter = total > 1 ? $" ({index}/{total})" : "";

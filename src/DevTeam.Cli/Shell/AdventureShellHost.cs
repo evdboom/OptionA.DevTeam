@@ -14,6 +14,7 @@ internal sealed class AdventureSessionState
 
 internal static class AdventureShellHost
 {
+    internal const int LeftColumnWidth = 66;
     private const int StatusSize = 10;
 
     internal static Layout BuildLayoutTree()
@@ -25,7 +26,7 @@ internal static class AdventureShellHost
                 new Layout("Input").Size(6));
 
         root["Body"].SplitColumns(
-            new Layout("Left").Size(66),
+            new Layout("Left").Size(LeftColumnWidth),
             new Layout("Right"));
 
         root["Left"].SplitRows(
@@ -280,6 +281,6 @@ internal static class AdventureShellHost
     private static int ProgressWidth()
     {
         var terminalWidth = Console.IsOutputRedirected ? 120 : Math.Max(40, Console.WindowWidth);
-        return Math.Max(20, terminalWidth - 66 - 4);
+        return Math.Max(20, terminalWidth - LeftColumnWidth - 4);
     }
 }

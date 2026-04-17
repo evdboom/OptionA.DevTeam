@@ -14,6 +14,7 @@ internal static class AdventureMapRendererTests
         new("BuildWorld_PrioritizesActiveRolesAndBubbles", BuildWorld_PrioritizesActiveRolesAndBubbles),
         new("MapPanel_RendersPlayerAndSpeechBubble", MapPanel_RendersPlayerAndSpeechBubble),
         new("AdjacentDesk_FindsNearbyDesk", AdjacentDesk_FindsNearbyDesk),
+        new("MovePlayer_BlocksEntireDeskGlyph", MovePlayer_BlocksEntireDeskGlyph),
     ];
 
     private static Task HelpMarkup_HidesAdventureByDefault()
@@ -101,6 +102,29 @@ internal static class AdventureMapRendererTests
         var nearby = AdventureMapRenderer.FindAdjacentDesk(world, new AdventurePoint(desk.Position.X + 1, desk.Position.Y));
 
         Assert.That(nearby is not null && nearby.RoleSlug == "architect", "Expected player beside the desk to be able to talk to architect.");
+        return Task.CompletedTask;
+    }
+
+    private static Task MovePlayer_BlocksEntireDeskGlyph()
+    {
+        var snapshot = new AdventureShellSnapshot(
+            true,
+            WorkflowPhase.Execution,
+            [new AdventureRoleSlot("architect", "architect")],
+            [],
+            [],
+            new Dictionary<string, string>());
+
+        var world = AdventureMapRenderer.BuildWorld(snapshot);
+        var desk = world.Desks.Single();
+
+        var fromLeft = new AdventurePoint(desk.Position.X - 2, desk.Position.Y);
+        var movedFromLeft = AdventureMapRenderer.MovePlayer(world, fromLeft, 1, 0);
+        Assert.That(movedFromLeft == fromLeft, "Expected desk left bracket tile to block movement.");
+
+        var fromRight = new AdventurePoint(desk.Position.X + 2, desk.Position.Y);
+        var movedFromRight = AdventureMapRenderer.MovePlayer(world, fromRight, -1, 0);
+        Assert.That(movedFromRight == fromRight, "Expected desk right bracket tile to block movement.");
         return Task.CompletedTask;
     }
 

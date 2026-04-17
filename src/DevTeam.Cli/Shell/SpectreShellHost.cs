@@ -47,15 +47,15 @@ internal static class SpectreShellHost
 
         try
         {
-            // Build the Layout tree ONCE. Reuse the same instance and only
-            // call .Update() on the leaf nodes each tick. This guarantees
-            // the tree shape and rendered height never change between frames,
-            // which is the prerequisite for Live display to overwrite correctly.
+            // Keep the Live target stable by rendering through a single wrapper layout.
+            // Normal/adventure layouts are both pre-built once and refreshed in place.
             var layout = BuildLayoutTree();
             var adventureLayout = AdventureShellHost.BuildLayoutTree();
+            var liveRoot = new Layout("LiveRoot");
             UpdateLayout(layout, shell, string.Empty, 0, scrollOffset);
+            liveRoot.Update(layout);
 
-            await console.Live(layout)
+            await console.Live(liveRoot)
                 .Overflow(VerticalOverflow.Crop)
                 .Cropping(VerticalOverflowCropping.Top)
                 .StartAsync(async context =>
@@ -68,14 +68,16 @@ internal static class SpectreShellHost
                         {
                             AdventureShellHost.ReadInput(adventureSession, inputBuffer, shell, commandChannel.Writer, ref cursorPosition, ref historyCursor, ref savedDraft, ref scrollOffset);
                             AdventureShellHost.UpdateLayout(adventureLayout, shell, adventureSession, inputBuffer.ToString(), cursorPosition, scrollOffset);
-                            context.UpdateTarget(adventureLayout);
+                            liveRoot.Update(adventureLayout);
                         }
                         else
                         {
                             ReadInput(inputBuffer, shell, commandChannel.Writer, ref cursorPosition, ref historyCursor, ref savedDraft, ref scrollOffset);
                             UpdateLayout(layout, shell, inputBuffer.ToString(), cursorPosition, scrollOffset);
-                            context.UpdateTarget(layout);
+                            liveRoot.Update(layout);
                         }
+
+                        context.UpdateTarget(liveRoot);
 
                         try { await Task.Delay(RefreshMs, cancellationToken); }
                         catch (OperationCanceledException) { break; }
