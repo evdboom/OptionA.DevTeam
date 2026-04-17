@@ -18,6 +18,12 @@ public static class WorkspaceMcpSessionConfigFactory
             SkillDirectories = ResolveSkillDirectories(request.WorkingDirectory)
         };
 
+        if (request.Provider is not null)
+        {
+            sessionConfig.Provider = BuildProviderConfig(request.Provider);
+            sessionConfig.EnableConfigDiscovery = false;
+        }
+
         var allMcpServers = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
         var mcpConfig = CreateLocalMcpServerConfig(request);
@@ -49,6 +55,44 @@ public static class WorkspaceMcpSessionConfigFactory
         }
 
         return sessionConfig;
+    }
+
+    public static ProviderConfig BuildProviderConfig(ProviderDefinition provider)
+    {
+        if (string.IsNullOrWhiteSpace(provider.Name))
+        {
+            throw new InvalidOperationException("Provider name must not be empty.");
+        }
+
+        if (string.IsNullOrWhiteSpace(provider.Type))
+        {
+            throw new InvalidOperationException($"Provider '{provider.Name}' is missing Type.");
+        }
+
+        if (string.IsNullOrWhiteSpace(provider.BaseUrl))
+        {
+            throw new InvalidOperationException($"Provider '{provider.Name}' is missing BaseUrl.");
+        }
+
+        var apiKey = ReadSecret(provider.ApiKeyEnvVar);
+        var bearerToken = ReadSecret(provider.BearerTokenEnvVar);
+        if (string.IsNullOrWhiteSpace(apiKey) && string.IsNullOrWhiteSpace(bearerToken))
+        {
+            throw new InvalidOperationException(
+                $"Provider '{provider.Name}' requires an API key or bearer token. Set {DescribeSecretSources(provider)} and try again.");
+        }
+
+        return new ProviderConfig
+        {
+            Type = provider.Type.Trim(),
+            WireApi = provider.WireApi.Trim(),
+            BaseUrl = provider.BaseUrl.Trim(),
+            ApiKey = apiKey ?? "",
+            BearerToken = bearerToken ?? "",
+            Azure = string.IsNullOrWhiteSpace(provider.AzureApiVersion)
+                ? null
+                : new AzureOptions { ApiVersion = provider.AzureApiVersion.Trim() }
+        };
     }
 
     public static McpLocalServerConfig? CreateLocalMcpServerConfig(AgentInvocationRequest request)
@@ -152,5 +196,21 @@ public static class WorkspaceMcpSessionConfigFactory
         }
 
         return Path.GetFullPath(workingDirectory);
+    }
+
+    private static string? ReadSecret(string envVar) =>
+        string.IsNullOrWhiteSpace(envVar)
+            ? null
+            : Environment.GetEnvironmentVariable(envVar.Trim());
+
+    private static string DescribeSecretSources(ProviderDefinition provider)
+    {
+        var names = new[] { provider.ApiKeyEnvVar, provider.BearerTokenEnvVar }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return names.Count == 0 ? "the required provider secret environment variables" : string.Join(" or ", names);
     }
 }

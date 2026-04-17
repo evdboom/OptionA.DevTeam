@@ -1,4 +1,5 @@
 using DevTeam.Core;
+using DevTeam.Cli.Shell;
 using Spectre.Console;
 
 namespace DevTeam.Cli;
@@ -8,11 +9,17 @@ internal static class WorkspaceStatusPrinter
     internal static void PrintStatus(WorkspaceState state, DevTeamRuntime runtime)
     {
         var report = runtime.BuildStatusReport(state);
+        var loopStateColor = GetLoopStateColor(report.LoopState);
 
         AnsiConsole.MarkupLine($"[bold]Phase:[/] [cyan]{Markup.Escape(state.Phase.ToString())}[/]  " +
             $"[bold]Mode:[/] [cyan]{Markup.Escape(state.Runtime.ActiveModeSlug)}[/]  " +
             $"[bold]Max-iter:[/] {state.Runtime.DefaultMaxIterations}  " +
             $"[bold]Max-sub:[/] {state.Runtime.DefaultMaxSubagents}");
+        if (!string.IsNullOrWhiteSpace(state.Runtime.DefaultProviderName))
+        {
+            AnsiConsole.MarkupLine($"[bold]Provider:[/] [cyan]{Markup.Escape(state.Runtime.DefaultProviderName)}[/]");
+        }
+        AnsiConsole.MarkupLine($"[bold]State:[/] [{loopStateColor}]{Markup.Escape(DescribeLoopState(report.LoopState))}[/]");
 
         var issues = state.Issues.OrderBy(i => i.Id).ToList();
         if (issues.Count > 0)
@@ -57,13 +64,21 @@ internal static class WorkspaceStatusPrinter
             $"premium {report.Budget.PremiumCreditsCommitted:0.##}/{report.Budget.PremiumCreditCap} " +
             $"[dim]({report.Budget.PremiumCreditCap - report.Budget.PremiumCreditsCommitted:0.##} remaining)[/]");
 
+        if (report.RoleUsage.Count > 0)
+        {
+            AnsiConsole.MarkupLine($"\n{BuildRoleUsageMarkup(report.RoleUsage)}");
+        }
+
         if (report.OpenQuestions.Count > 0)
         {
             AnsiConsole.MarkupLine($"\n[bold yellow]{report.OpenQuestions.Count} open question(s)[/]");
+            if (report.IsWaitingOnBlockingQuestion && report.OldestBlockingQuestionAge is { } stallAge)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Stalled on user input[/] [dim](oldest blocking question asked {Markup.Escape(FormatQuestionAge(stallAge))})[/]");
+            }
             foreach (var q in report.OpenQuestions)
             {
-                var tag = q.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
-                AnsiConsole.MarkupLine($"  [dim]#{q.Id}[/] [{tag}] {Markup.Escape(q.Text)}");
+                AnsiConsole.MarkupLine($"  {BuildQuestionLineMarkup(q, report.OpenQuestionAges)}");
             }
         }
 
@@ -111,6 +126,44 @@ internal static class WorkspaceStatusPrinter
             $"({ConsoleTheme.Number($"{budget.TotalCreditCap - budget.CreditsCommitted:0.##}")} remaining), " +
             $"premium {ConsoleTheme.BudgetUsage(budget.PremiumCreditsCommitted, budget.PremiumCreditCap)} " +
             $"({ConsoleTheme.Number($"{budget.PremiumCreditCap - budget.PremiumCreditsCommitted:0.##}")} remaining)");
+    }
+
+    internal static string BuildRoleUsageMarkup(IReadOnlyList<RoleUsageSummary> roleUsage)
+    {
+        var lines = roleUsage
+            .Select(item =>
+            {
+                var details = new List<string>
+                {
+                    $"{item.CreditsUsed:0.##} credits",
+                    $"{item.RunCount} run(s)",
+                    $"{item.CompletedRunCount} completed"
+                };
+                if (item.PremiumCreditsUsed > 0)
+                {
+                    details.Add($"{item.PremiumCreditsUsed:0.##} premium");
+                }
+
+                if (item.InputTokens is int inputTokens || item.OutputTokens is int outputTokens)
+                {
+                    var input = item.InputTokens ?? 0;
+                    var output = item.OutputTokens ?? 0;
+                    details.Add($"{input + output} tokens ({input} in / {output} out)");
+                }
+                else
+                {
+                    details.Add("tokens unavailable");
+                }
+
+                if (item.EstimatedCostUsd is double estimatedCostUsd)
+                {
+                    details.Add($"~${estimatedCostUsd:0.####}");
+                }
+
+                return $"  [cyan]{Markup.Escape(item.RoleSlug)}[/]: {string.Join(", ", details)}";
+            });
+
+        return $"[bold]Role usage:[/]\n{string.Join("\n", lines)}";
     }
 
     internal static bool PrintArchitectSummary(WorkspaceState state)
@@ -164,8 +217,9 @@ internal static class WorkspaceStatusPrinter
         return true;
     }
 
-    internal static void PrintQuestions(WorkspaceState state, WorkspaceStore store)
+    internal static void PrintQuestions(WorkspaceState state, WorkspaceStore store, DevTeamRuntime runtime)
     {
+        var report = runtime.BuildStatusReport(state);
         var openQuestions = state.Questions
             .Where(item => item.Status == QuestionStatus.Open)
             .OrderBy(item => item.Id)
@@ -177,18 +231,21 @@ internal static class WorkspaceStatusPrinter
             return;
         }
 
+        if (report.IsWaitingOnBlockingQuestion && report.OldestBlockingQuestionAge is { } stallAge)
+        {
+            Console.WriteLine($"Stalled on user input (oldest blocking question asked {FormatQuestionAge(stallAge)}).");
+        }
+
         foreach (var question in openQuestions)
         {
-            Console.WriteLine($"#{question.Id} [{(question.IsBlocking ? "blocking" : "non-blocking")}] {question.Text}");
+            Console.WriteLine(NonInteractiveShellHost.StripMarkup(BuildQuestionLineMarkup(question, report.OpenQuestionAges)));
         }
     }
 
-    internal static void PrintOpenQuestions(WorkspaceState state, bool interactive)
+    internal static void PrintOpenQuestions(WorkspaceState state, bool interactive, DevTeamRuntime runtime)
     {
-        var openQuestions = state.Questions
-            .Where(item => item.Status == QuestionStatus.Open)
-            .OrderBy(item => item.Id)
-            .ToList();
+        var report = runtime.BuildStatusReport(state);
+        var openQuestions = report.OpenQuestions;
 
         if (openQuestions.Count == 0)
         {
@@ -197,15 +254,75 @@ internal static class WorkspaceStatusPrinter
 
         Console.WriteLine();
         Console.WriteLine(ConsoleTheme.Label($"─── {openQuestions.Count} open question{(openQuestions.Count == 1 ? "" : "s")} ───"));
+        if (report.IsWaitingOnBlockingQuestion && report.OldestBlockingQuestionAge is { } stallAge)
+        {
+            Console.WriteLine(ConsoleTheme.Warning($"Stalled on user input (oldest blocking question asked {FormatQuestionAge(stallAge)})."));
+        }
         foreach (var question in openQuestions)
         {
-            var tag = question.IsBlocking ? ConsoleTheme.Warning("blocking") : ConsoleTheme.Muted("non-blocking");
-            Console.WriteLine($"  #{ConsoleTheme.Number(question.Id.ToString())} [{tag}] {question.Text}");
+            Console.WriteLine($"  {NonInteractiveShellHost.StripMarkup(BuildQuestionLineMarkup(question, report.OpenQuestionAges))}");
         }
         Console.WriteLine(interactive
             ? $"Answer with: {ConsoleTheme.Command("/answer")} <id> <text>"
             : "Answer with: answer-question <id> <text>");
         Console.WriteLine();
+    }
+
+    internal static string DescribeLoopState(string loopState) =>
+        loopState.Trim().ToLowerInvariant() switch
+        {
+            "waiting-for-user" => "waiting for user input",
+            "awaiting-plan-approval" => "awaiting plan approval",
+            "awaiting-architect-approval" => "awaiting architect approval",
+            _ => loopState.Replace('-', ' ')
+        };
+
+    internal static string GetLoopStateColor(string loopState) =>
+        loopState.Trim().ToLowerInvariant() switch
+        {
+            "running" or "queued" => "cyan",
+            "waiting-for-user" or "awaiting-plan-approval" or "awaiting-architect-approval" => "yellow",
+            "idle" => "dim",
+            _ => "white"
+        };
+
+    internal static string FormatQuestionAge(TimeSpan age)
+    {
+        if (age < TimeSpan.Zero)
+        {
+            age = TimeSpan.Zero;
+        }
+
+        if (age.TotalMinutes < 1)
+        {
+            return "just now";
+        }
+
+        if (age.TotalHours < 1)
+        {
+            return $"{Math.Max(1, (int)Math.Floor(age.TotalMinutes))}m ago";
+        }
+
+        if (age.TotalDays < 1)
+        {
+            return $"{Math.Max(1, (int)Math.Floor(age.TotalHours))}h ago";
+        }
+
+        if (age.TotalDays < 7)
+        {
+            return $"{Math.Max(1, (int)Math.Floor(age.TotalDays))}d ago";
+        }
+
+        return $"{Math.Max(1, (int)Math.Floor(age.TotalDays / 7))}w ago";
+    }
+
+    internal static string BuildQuestionLineMarkup(QuestionItem question, IReadOnlyDictionary<int, TimeSpan> agesByQuestionId)
+    {
+        var tag = question.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
+        var ageText = agesByQuestionId.TryGetValue(question.Id, out var age)
+            ? $" [dim](asked {Markup.Escape(FormatQuestionAge(age))})[/]"
+            : "";
+        return $"[dim]#{question.Id}[/] {tag}{ageText} {Markup.Escape(question.Text)}";
     }
 
     internal static void PrintPlan(WorkspaceStore store)
@@ -239,10 +356,17 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("DevTeam CLI");
         Console.WriteLine("Commands (plain or slash-prefixed, for example `/init`):");
         Console.WriteLine("  start [--keep-awake true|false] [--no-tty] [--output-format plain|jsonl] [--workspace PATH]");
-        Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false] [--recon true|false] [--backend sdk|cli] [--timeout-seconds N]");
+        Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--provider NAME] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false] [--recon true|false] [--backend sdk|cli] [--timeout-seconds N]");
         Console.WriteLine("  customize [--force]                Copy default roles, modes, and superpowers to .devteam-source/ for editing");
+        Console.WriteLine("  export [--output PATH] [--workspace PATH]");
+        Console.WriteLine("  import --input PATH [--force] [--workspace PATH]");
+        Console.WriteLine("  start-here [new|medior|expert] [--workspace PATH]  Show a persona-based onboarding guide");
         Console.WriteLine("  bug-report [--save PATH] [--redact-paths true|false] [--history-count N] [--error-count N] [--workspace PATH]");
         Console.WriteLine("  set-goal <TEXT> [--goal-file PATH] [--workspace PATH]");
+        Console.WriteLine("  pipeline [--workspace PATH]");
+        Console.WriteLine("  set-pipeline <ROLE...|default> [--workspace PATH]");
+        Console.WriteLine("  provider [--workspace PATH]");
+        Console.WriteLine("  set-provider <NAME|default> [--workspace PATH]");
         Console.WriteLine("  set-mode <SLUG> [--workspace PATH]");
         Console.WriteLine("  set-keep-awake <true|false> [--workspace PATH]");
         Console.WriteLine("  set-auto-approve <true|false> [--workspace PATH]");
@@ -250,20 +374,25 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("  max-subagents <N> [--workspace PATH]     Set workspace default for max parallel subagents");
         Console.WriteLine("  add-roadmap <TITLE> [--detail TEXT] [--priority N] [--workspace PATH]");
         Console.WriteLine("  add-issue <TITLE> --role ROLE [--area AREA] [--detail TEXT] [--priority N] [--roadmap-item-id N] [--depends-on N [N...]] [--workspace PATH]");
+        Console.WriteLine("  edit-issue <ID> [--title TEXT] [--detail TEXT] [--role ROLE] [--area AREA | --clear-area] [--priority N] [--status open|in-progress|done|blocked] [--depends-on N [N...]] [--clear-depends] [--note TEXT] [--workspace PATH]");
+        Console.WriteLine("  diff-run <RUN-ID> [COMPARE-RUN-ID] [--workspace PATH]");
+        Console.WriteLine("  brownfield-log [--workspace PATH]");
+        Console.WriteLine("  github-sync [--workspace PATH]");
         Console.WriteLine("  add-question <TEXT> [--blocking] [--workspace PATH]");
         Console.WriteLine("  answer-question <ID> <ANSWER> [--workspace PATH]");
         Console.WriteLine("  approve-plan [--note TEXT] [--workspace PATH]");
         Console.WriteLine("  feedback <TEXT> [--workspace PATH]");
+        Console.WriteLine("  preview [--max-subagents N] [--workspace PATH]");
         Console.WriteLine("  questions [--workspace PATH]");
         Console.WriteLine("  plan [--workspace PATH]");
         Console.WriteLine("  budget [--total N] [--premium N] [--workspace PATH]");
         Console.WriteLine("  check-update");
         Console.WriteLine("  update");
         Console.WriteLine("  run-once [--max-subagents N] [--workspace PATH]");
-        Console.WriteLine("  run-loop [--backend sdk|cli] [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--verbosity quiet|normal|detailed] [--keep-awake true|false] [--workspace PATH]");
+        Console.WriteLine("  run-loop [--backend sdk|cli] [--provider NAME] [--max-iterations N] [--max-subagents N] [--timeout-seconds N] [--verbosity quiet|normal|detailed] [--keep-awake true|false] [--dry-run] [--workspace PATH]");
         Console.WriteLine("  complete-run --run-id N --outcome completed|failed|blocked --summary TEXT [--workspace PATH]");
         Console.WriteLine("  status [--workspace PATH]");
-        Console.WriteLine("  agent-invoke [--backend sdk|cli] [--prompt TEXT] [--model NAME] [--timeout-seconds N] [--working-directory PATH] [--extra-arg ARG ...]");
+        Console.WriteLine("  agent-invoke [--backend sdk|cli] [--provider NAME] [--prompt TEXT] [--model NAME] [--timeout-seconds N] [--working-directory PATH] [--extra-arg ARG ...]");
         Console.WriteLine("  workspace-mcp --workspace PATH");
     }
 
@@ -274,20 +403,32 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine();
         Console.WriteLine($"  {ConsoleTheme.Command("/init")} \"goal text\" [[--goal-file PATH]] [[--force]] [[--mode SLUG]] [[--keep-awake true|false]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/customize")} [[--force]]    Copy default assets to .devteam-source/ for editing");
+        Console.WriteLine($"  {ConsoleTheme.Command("/export")} [[--output PATH]]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/import")} --input PATH [[--force]]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/start-here")} [[new|medior|expert]]    Show the guided onboarding flow for your persona");
         Console.WriteLine($"  {ConsoleTheme.Command("/bug")} [[--save PATH]] [[--redact-paths true|false]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/status")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/history")}              Show session command history (last 50)");
+        Console.WriteLine($"  {ConsoleTheme.Command("/pipeline")}             Show the current default role chain");
+        Console.WriteLine($"  {ConsoleTheme.Command("/set-pipeline")} <role...|default>");
+        Console.WriteLine($"  {ConsoleTheme.Command("/provider")}             Show the current BYOK provider override");
+        Console.WriteLine($"  {ConsoleTheme.Command("/set-provider")} <name|default>");
         Console.WriteLine($"  {ConsoleTheme.Command("/mode")} <slug>");
         Console.WriteLine($"  {ConsoleTheme.Command("/keep-awake")} <on|off>");
         Console.WriteLine($"  {ConsoleTheme.Command("/add-issue")} \"title\" --role ROLE [[--area AREA]] [[--detail TEXT]] [[--priority N]] [[--roadmap-item-id N]] [[--depends-on N [[N...]]]]");
-        Console.WriteLine($"  {ConsoleTheme.Command("/plan")}");
+        Console.WriteLine($"  {ConsoleTheme.Command("/edit-issue")} <id> [[--title TEXT]] [[--detail TEXT]] [[--role ROLE]] [[--area AREA|--clear-area]] [[--priority N]] [[--status STATE]] [[--depends-on N [[N...]]|--clear-depends]]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/plan")} [[--provider NAME]]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/diff-run")} <run-id> [[compare-run-id]]");
+        Console.WriteLine($"  {ConsoleTheme.Command("/brownfield-log")}      Show the brownfield before/after audit log");
+        Console.WriteLine($"  {ConsoleTheme.Command("/sync")}                Pull GitHub-labelled issues into the local workspace");
         Console.WriteLine($"  {ConsoleTheme.Command("/questions")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/budget")} [[--total N]] [[--premium N]]");
         Console.WriteLine($"  {ConsoleTheme.Command("/check-update")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/update")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/max-iterations")} <N>    Set workspace default max iterations (used by all future /run calls)");
         Console.WriteLine($"  {ConsoleTheme.Command("/max-subagents")} <N>     Set workspace default max subagents (1=sequential, 2–4=parallel)");
-        Console.WriteLine($"  {ConsoleTheme.Command("/run")} [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--keep-awake true|false]]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
+        Console.WriteLine($"  {ConsoleTheme.Command("/preview")} [[--max-subagents N]]  Preview the next batch without spending credits");
+        Console.WriteLine($"  {ConsoleTheme.Command("/run")} [[--provider NAME]] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--keep-awake true|false]] [[--dry-run]]  {ConsoleTheme.Muted("starts in background — shell stays responsive")}");
         Console.WriteLine($"  {ConsoleTheme.Command("/stop")}              Cancel the running loop (waits for current agent call to finish)");
         Console.WriteLine($"  {ConsoleTheme.Command("/wait")}              Re-attach to the running loop and wait for it to finish");
         Console.WriteLine($"  {ConsoleTheme.Command("/feedback")} <text>");

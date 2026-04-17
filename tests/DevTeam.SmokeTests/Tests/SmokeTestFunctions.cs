@@ -324,6 +324,47 @@ internal static class SmokeTestFunctions
         AssertEqual("npx", context7!.Command, "Context7 should launch via npx.");
         AssertTrue(context7.Args.Contains("@upstash/context7-mcp@latest"), "Context7 should reference the correct package.");
     }
+
+    internal static void TestSdkSessionConfigWiresByokProvider()
+    {
+        using var harness = new TestHarness();
+        const string providerEnvVar = "DEVTEAM_TEST_PROVIDER_KEY";
+        var originalValue = Environment.GetEnvironmentVariable(providerEnvVar);
+        try
+        {
+            Environment.SetEnvironmentVariable(providerEnvVar, "test-key");
+            var request = new AgentInvocationRequest
+            {
+                Prompt = "Summarize the work.",
+                Model = "gpt-5.4",
+                SessionId = "provider-run-001",
+                WorkingDirectory = harness.RepoRoot,
+                Provider = new ProviderDefinition
+                {
+                    Name = "azure-foundry",
+                    Type = "azure",
+                    BaseUrl = "https://example.openai.azure.com/openai",
+                    ApiKeyEnvVar = providerEnvVar,
+                    WireApi = "responses",
+                    AzureApiVersion = "2024-10-21"
+                }
+            };
+
+            var sessionConfig = WorkspaceMcpSessionConfigFactory.BuildSessionConfig(request);
+            var provider = sessionConfig.Provider ?? throw new InvalidOperationException("Session config should include a provider.");
+
+            AssertEqual("azure", provider.Type, "Provider type should map into the SDK session config.");
+            AssertEqual("https://example.openai.azure.com/openai", provider.BaseUrl, "Provider base URL should be preserved.");
+            AssertEqual("test-key", provider.ApiKey, "Provider API key should be resolved from the environment.");
+            AssertEqual("responses", provider.WireApi, "Provider wire API should be preserved.");
+            AssertEqual("2024-10-21", provider.Azure?.ApiVersion, "Azure provider should carry its API version.");
+            AssertEqual(false, sessionConfig.EnableConfigDiscovery, "BYOK session config should disable config discovery.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(providerEnvVar, originalValue);
+        }
+    }
     
     internal static void TestWorkspaceLoadsMcpServers()
     {
@@ -340,9 +381,10 @@ internal static class SmokeTestFunctions
     {
         using var harness = new TestHarness();
     
-        AssertTrue(harness.State.Modes.Count >= 2, "Workspace should load at least the default modes.");
+        AssertTrue(harness.State.Modes.Count >= 3, "Workspace should load at least the packaged modes.");
         AssertTrue(harness.State.Modes.Any(mode => mode.Slug == "develop"), "Develop mode should be available.");
         AssertTrue(harness.State.Modes.Any(mode => mode.Slug == "creative-writing"), "Creative writing mode should be available.");
+        AssertTrue(harness.State.Modes.Any(mode => mode.Slug == "github"), "GitHub mode should be available.");
         AssertEqual("develop", harness.State.Runtime.ActiveModeSlug, "Develop should be the default active mode.");
     }
     
@@ -490,6 +532,114 @@ internal static class SmokeTestFunctions
         AssertEqual("creative-writing", harness.State.Runtime.ActiveModeSlug, "Mode should update.");
         AssertTrue(harness.State.Runtime.DefaultPipelineRoles.SequenceEqual(["architect", "developer", "reviewer"]),
             "Creative writing mode should swap the default pipeline roles.");
+    }
+
+    internal static void TestGitHubModeSyncImportsQueue()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-github-sync-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        var workspacePath = Path.Combine(tempRoot, ".devteam");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        var originalGitHubCliPath = Environment.GetEnvironmentVariable("DEVTEAM_GH_PATH");
+        try
+        {
+            var ghScriptPath = Path.Combine(tempRoot, "gh.cmd");
+            File.WriteAllText(ghScriptPath, """
+@echo off
+if "%1 %2"=="auth status" exit /b 0
+if "%1 %2"=="issue list" (
+  echo [{"number":101,"title":"Review queue import","body":"---\nrole: reviewer\npriority: 90\narea: repo sync\n---\nReview the imported GitHub issue.","labels":[{"name":"devteam:ready"}]},{"number":102,"title":"Clarify the release workflow","body":"Please confirm the release checklist.","labels":[{"name":"devteam:question"},{"name":"devteam:blocking"}]}]
+  exit /b 0
+)
+echo Unexpected gh arguments 1>&2
+exit /b 1
+""");
+            Environment.SetEnvironmentVariable("PATH", tempRoot + ";" + originalPath);
+            Environment.SetEnvironmentVariable("DEVTEAM_GH_PATH", ghScriptPath);
+
+            var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--mode", "github", "--recon", "false");
+            AssertEqual(0, initResult.ExitCode, "GitHub mode init exit code");
+
+            var syncResult = RunDevTeamCli(tempRoot, "github-sync", "--workspace", workspacePath);
+            AssertEqual(0, syncResult.ExitCode, "GitHub sync exit code");
+            AssertTrue(syncResult.StdOut.Contains("GitHub sync complete:", StringComparison.Ordinal), "GitHub sync should print a summary.");
+
+            var store = new WorkspaceStore(workspacePath);
+            var state = store.Load();
+            AssertEqual("github", state.Runtime.ActiveModeSlug, "GitHub mode should be active.");
+            AssertTrue(state.Runtime.DefaultPipelineRoles.SequenceEqual(["developer", "reviewer"]),
+                "GitHub mode should prefer the developer -> reviewer pipeline.");
+            AssertTrue(state.Issues.Any(issue =>
+                    issue.ExternalReference == "github#101"
+                    && issue.RoleSlug == "reviewer"
+                    && issue.Priority == 90
+                    && issue.Area == "repo-sync"),
+                "Ready GitHub issues should import into the local issue queue.");
+            AssertTrue(state.Questions.Any(question =>
+                    question.ExternalReference == "github#102"
+                    && question.IsBlocking
+                    && question.Text.Contains("Clarify the release workflow", StringComparison.Ordinal)),
+                "Question-labelled GitHub issues should import as local questions.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DEVTEAM_GH_PATH", originalGitHubCliPath);
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
+    internal static void TestSetProviderCommandUpdatesRuntimeConfiguration()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-provider-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            var workspacePath = Path.Combine(tempRoot, ".devteam");
+            var assetDir = Path.Combine(tempRoot, ".devteam-source");
+            Directory.CreateDirectory(assetDir);
+            File.WriteAllText(Path.Combine(assetDir, "PROVIDERS.json"), """
+                [
+                  {
+                    "Name": "ollama-local",
+                    "Type": "openai",
+                    "BaseUrl": "http://localhost:11434/v1",
+                    "ApiKeyEnvVar": "OLLAMA_API_KEY"
+                  }
+                ]
+                """);
+
+            var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--goal", "Test provider defaults.", "--recon", "false");
+            AssertEqual(0, initResult.ExitCode, "Provider init exit code");
+
+            var setResult = RunDevTeamCli(tempRoot, "set-provider", "ollama-local", "--workspace", workspacePath);
+            AssertEqual(0, setResult.ExitCode, "Set provider exit code");
+
+            var providerResult = RunDevTeamCli(tempRoot, "provider", "--workspace", workspacePath);
+            AssertEqual(0, providerResult.ExitCode, "Provider status exit code");
+            AssertTrue(providerResult.StdOut.Contains("ollama-local", StringComparison.Ordinal), "Provider command should show the configured provider.");
+
+            var state = new WorkspaceStore(workspacePath).Load();
+            AssertEqual("ollama-local", state.Runtime.DefaultProviderName, "Workspace should persist the default provider override.");
+        }
+        finally
+        {
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
+    internal static void TestCustomizedPipelineSurvivesModeSwitch()
+    {
+        using var harness = new TestHarness();
+
+        harness.Runtime.SetDefaultPipelineRoles(harness.State, ["architect", "developer", "reviewer"]);
+        harness.Runtime.SetMode(harness.State, "autopilot");
+
+        AssertEqual("autopilot", harness.State.Runtime.ActiveModeSlug, "Mode should still update.");
+        AssertTrue(harness.State.Runtime.AutoApproveEnabled, "Autopilot should still enable auto-approve.");
+        AssertTrue(harness.State.Runtime.PipelineRolesCustomized, "Custom pipeline flag should remain set.");
+        AssertTrue(harness.State.Runtime.DefaultPipelineRoles.SequenceEqual(["architect", "developer", "reviewer"]),
+            "Mode changes should not overwrite customized pipeline roles.");
     }
     
     internal static void TestSetKeepAwakeUpdatesRuntimeConfiguration()
@@ -1180,8 +1330,84 @@ internal static class SmokeTestFunctions
         AssertTrue(runArtifact.Contains("## Superpowers Used", StringComparison.Ordinal), "Run artifact should include superpowers.");
         AssertTrue(runArtifact.Contains("- plan", StringComparison.Ordinal), "Run artifact should list used superpowers.");
         AssertTrue(runArtifact.Contains("## Tools Used", StringComparison.Ordinal), "Run artifact should include tools.");
+        AssertTrue(runArtifact.Contains("## Usage", StringComparison.Ordinal), "Run artifact should include usage telemetry.");
+        AssertTrue(runArtifact.Contains("Committed credits: 1", StringComparison.Ordinal), "Run artifact should include committed credits.");
+        AssertTrue(runArtifact.Contains("Tokens: unavailable from backend", StringComparison.Ordinal), "Run artifact should explain when token telemetry is unavailable.");
         AssertTrue(issueArtifact.Contains("Superpowers Used: plan, verify", StringComparison.Ordinal), "Issue mirror should include superpower usage.");
         AssertTrue(issueArtifact.Contains("Tools Used: dotnet, node", StringComparison.Ordinal), "Issue mirror should include tool usage.");
+    }
+
+    internal static void TestStatusCommandShowsRoleUsage()
+    {
+        using var harness = new TestHarness();
+        harness.State.AgentRuns.Add(new AgentRun
+        {
+            Id = 1,
+            IssueId = 7,
+            RoleSlug = "developer",
+            Status = AgentRunStatus.Completed,
+            CreditsUsed = 2,
+            InputTokens = 1200,
+            OutputTokens = 300,
+            EstimatedCostUsd = 0.12
+        });
+        harness.Store.Save(harness.State);
+
+        var result = RunDevTeamCli(harness.RepoRoot, "status", "--workspace", harness.Store.WorkspacePath);
+
+        AssertEqual(0, result.ExitCode, "status exit code");
+        AssertTrue(result.StdOut.Contains("Role usage:", StringComparison.Ordinal), "status should show the role usage section.");
+        AssertTrue(result.StdOut.Contains("developer", StringComparison.Ordinal), "status should include the role slug.");
+        AssertTrue(result.StdOut.Contains("2 credits", StringComparison.Ordinal), "status should include per-role credits.");
+        AssertTrue(result.StdOut.Contains("1500 tokens", StringComparison.Ordinal), "status should include per-role token totals when available.");
+    }
+
+    internal static void TestBrownfieldLogCapturesApproachAndRationale()
+    {
+        using var harness = new TestHarness();
+        harness.State.CodebaseContext = "## Existing patterns\n- MVC controllers";
+        harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+        harness.Runtime.AddIssue(harness.State, "Extend billing controller", "Add a new endpoint.", "developer", 90, null, []);
+        harness.Store.Save(harness.State);
+        var executor = new LoopExecutor(
+            harness.Runtime,
+            harness.Store,
+            new FuncAgentClientFactory(_ => new FakeAgentClient("""
+    OUTCOME: completed
+    SUMMARY:
+    Added the endpoint without changing the overall controller structure.
+    APPROACH: extend
+    RATIONALE:
+    The current MVC controller pattern already matches the billing area and keeps the change local.
+    ISSUES:
+    (none)
+    SUPERPOWERS_USED:
+    (none)
+    TOOLS_USED:
+    - dotnet
+    QUESTIONS:
+    (none)
+    """)));
+
+        executor.RunAsync(
+            harness.State,
+            new LoopExecutionOptions
+            {
+                Backend = "sdk",
+                MaxIterations = 1,
+                MaxSubagents = 1,
+                Verbosity = LoopVerbosity.Normal
+            }).GetAwaiter().GetResult();
+
+        var logPath = Path.Combine(harness.Store.WorkspacePath, "brownfield-delta.md");
+        var logText = File.ReadAllText(logPath);
+        var commandResult = RunDevTeamCli(harness.RepoRoot, "brownfield-log", "--workspace", harness.Store.WorkspacePath);
+
+        AssertTrue(File.Exists(logPath), "Brownfield runs should write the brownfield delta log.");
+        AssertTrue(logText.Contains("Approach: extend", StringComparison.Ordinal), "Brownfield log should capture the chosen approach.");
+        AssertTrue(logText.Contains("controller pattern", StringComparison.Ordinal), "Brownfield log should capture the rationale.");
+        AssertEqual(0, commandResult.ExitCode, "brownfield-log exit code");
+        AssertTrue(commandResult.StdOut.Contains("Brownfield Change Delta", StringComparison.Ordinal), "brownfield-log should print the audit log.");
     }
     
     internal static void TestLegacyWorkspaceHydratesMetadata()
@@ -1670,6 +1896,22 @@ internal static class SmokeTestFunctions
         var architectPrompt = agent.LastPrompt ?? throw new InvalidOperationException("Expected architect prompt.");
         AssertTrue(architectPrompt.Contains("FILE BOUNDARY", StringComparison.Ordinal), "Architect prompt should include FILE BOUNDARY enforcement.");
         AssertTrue(architectPrompt.Contains("design-only role", StringComparison.Ordinal), "Architect prompt should state it is a design-only role.");
+        AssertTrue(architectPrompt.Contains("constructor injection", StringComparison.OrdinalIgnoreCase), "Architect prompt should require constructor injection.");
+        AssertTrue(architectPrompt.Contains("file system", StringComparison.OrdinalIgnoreCase)
+            && architectPrompt.Contains("clock", StringComparison.OrdinalIgnoreCase),
+            "Architect prompt should call out explicit infrastructure abstractions for testability.");
+
+        var auditorIssue = harness.Runtime.AddIssue(harness.State, "Audit recent codebase drift", "Inspect recent maintainability erosion.", "auditor", 90, null, []);
+        var auditorPrompt = AgentPromptBuilder.BuildPrompt(harness.State, auditorIssue);
+        AssertTrue(auditorPrompt.Contains("FILE BOUNDARY", StringComparison.Ordinal), "Auditor prompt should include FILE BOUNDARY enforcement.");
+        AssertTrue(auditorPrompt.Contains("legacy drift", StringComparison.OrdinalIgnoreCase)
+            && auditorPrompt.Contains("recent drift", StringComparison.OrdinalIgnoreCase)
+            && auditorPrompt.Contains("active regression risk", StringComparison.OrdinalIgnoreCase),
+            "Auditor prompt should classify drift findings explicitly.");
+        AssertTrue(auditorPrompt.Contains("Reviewer", StringComparison.Ordinal)
+            && auditorPrompt.Contains("Navigator", StringComparison.Ordinal)
+            && auditorPrompt.Contains("Security", StringComparison.Ordinal),
+            "Auditor prompt should define boundaries against reviewer, navigator, and security.");
     
         // Developer should NOT get file boundary enforcement
         var devIssue = harness.Runtime.AddIssue(harness.State, "Build the game loop", "Implement it.", "developer", 80, null, []);
@@ -1731,7 +1973,167 @@ internal static class SmokeTestFunctions
             TryCleanupTempRepo(tempRoot);
         }
     }
-    
+
+    internal static void TestEditIssueCommandUpdatesQueuedIssue()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-cli-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var workspacePath = Path.Combine(tempRoot, ".devteam");
+            var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath);
+            AssertEqual(0, initResult.ExitCode, "Init exit code");
+
+            var addResult = RunDevTeamCli(
+                tempRoot,
+                "add-issue",
+                "Draft UI flow",
+                "--workspace", workspacePath,
+                "--role", "developer",
+                "--detail", "Initial scope.",
+                "--priority", "40");
+            AssertEqual(0, addResult.ExitCode, "Add issue exit code");
+
+            var editResult = RunDevTeamCli(
+                tempRoot,
+                "edit-issue",
+                "1",
+                "--workspace", workspacePath,
+                "--priority", "90",
+                "--area", "UI Layer",
+                "--status", "blocked",
+                "--note", "Waiting on UX copy.");
+            AssertEqual(0, editResult.ExitCode, "Edit issue exit code");
+
+            var store = new WorkspaceStore(workspacePath);
+            var state = store.Load();
+            var issue = state.Issues.Single(item => item.Id == 1);
+            AssertEqual(90, issue.Priority, "Edited issue priority");
+            AssertEqual("ui-layer", issue.Area, "Edited issue area");
+            AssertEqual(ItemStatus.Blocked, issue.Status, "Edited issue status");
+            AssertTrue(issue.Notes.Contains("Waiting on UX copy.", StringComparison.Ordinal), "Edited issue should append notes.");
+        }
+        finally
+        {
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
+    internal static void TestSetPipelineCommandUpdatesDefaultRoles()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-set-pipeline-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var workspacePath = Path.Combine(tempRoot, ".devteam");
+            var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--goal", "Build an expert workflow.");
+            AssertEqual(0, initResult.ExitCode, "Init exit code");
+
+            var setResult = RunDevTeamCli(
+                tempRoot,
+                "set-pipeline",
+                "architect",
+                "developer",
+                "reviewer",
+                "--workspace", workspacePath);
+            AssertEqual(0, setResult.ExitCode, "set-pipeline exit code");
+
+            var pipelineResult = RunDevTeamCli(tempRoot, "pipeline", "--workspace", workspacePath);
+            AssertEqual(0, pipelineResult.ExitCode, "pipeline exit code");
+            AssertTrue(pipelineResult.StdOut.Contains("architect -> developer -> reviewer", StringComparison.Ordinal),
+                "pipeline should print the customized role chain.");
+            AssertTrue(pipelineResult.StdOut.Contains("[custom]", StringComparison.Ordinal),
+                "pipeline should identify a customized role chain.");
+
+            var store = new WorkspaceStore(workspacePath);
+            var state = store.Load();
+            AssertTrue(state.Runtime.PipelineRolesCustomized, "Custom pipeline flag should be saved.");
+            AssertTrue(state.Runtime.DefaultPipelineRoles.SequenceEqual(["architect", "developer", "reviewer"]),
+                "set-pipeline should persist the requested role chain.");
+        }
+        finally
+        {
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
+    internal static void TestDiffRunCommandShowsRunDelta()
+    {
+        using var harness = new TestHarness();
+        harness.Runtime.ApprovePlan(harness.State, "Run in execution mode.");
+        var issue = harness.Runtime.AddIssue(harness.State, "Implement traceable UI", "Build the UI slice.", "developer", 90, null, [], "ui");
+        harness.State.Issues.Add(new IssueItem
+        {
+            Id = harness.State.NextIssueId++,
+            Title = "Test traceable UI",
+            RoleSlug = "tester",
+            Area = "ui",
+            Status = ItemStatus.Open
+        });
+        harness.State.Questions.Add(new QuestionItem
+        {
+            Id = harness.State.NextQuestionId++,
+            Text = "Use light or dark theme?",
+            IsBlocking = true,
+            Status = QuestionStatus.Open
+        });
+        harness.State.AgentRuns.Add(new AgentRun
+        {
+            Id = 12,
+            IssueId = issue.Id,
+            RoleSlug = "developer",
+            Status = AgentRunStatus.Completed,
+            Summary = "Implemented the UI slice.",
+            ResultingIssueStatus = ItemStatus.Done,
+            ChangedPaths = ["src/Ui.cs", "tests/UiTests.cs"],
+            CreatedIssueIds = [2],
+            CreatedQuestionIds = [1]
+        });
+        harness.Store.Save(harness.State);
+
+        var result = RunDevTeamCli(harness.RepoRoot, "diff-run", "12", "--workspace", harness.Store.WorkspacePath);
+
+        AssertEqual(0, result.ExitCode, "diff-run exit code");
+        AssertTrue(result.StdOut.Contains("Run #12 diff", StringComparison.Ordinal), "diff-run should identify the run.");
+        AssertTrue(result.StdOut.Contains("src/Ui.cs", StringComparison.Ordinal), "diff-run should list changed files.");
+        AssertTrue(result.StdOut.Contains("Test traceable UI", StringComparison.Ordinal), "diff-run should list created issues.");
+        AssertTrue(result.StdOut.Contains("Use light or dark theme?", StringComparison.Ordinal), "diff-run should list created questions.");
+    }
+
+    internal static void TestWorkspaceExportImportRoundTrip()
+    {
+        using var harness = new TestHarness();
+        harness.Runtime.SetGoal(harness.State, "Ship a portable workspace.");
+        harness.Runtime.AddIssue(harness.State, "Implement export", "Package the workspace.", "developer", 80, null, [], "cli");
+        harness.State.Questions.Add(new QuestionItem
+        {
+            Id = harness.State.NextQuestionId++,
+            Text = "Should import overwrite existing files?",
+            IsBlocking = true,
+            Status = QuestionStatus.Open
+        });
+        harness.Store.Save(harness.State);
+
+        var archivePath = Path.Combine(harness.TempRoot, "handoff.zip");
+        var importedWorkspace = Path.Combine(harness.TempRoot, ".devteam-imported");
+
+        var exportResult = RunDevTeamCli(harness.RepoRoot, "export", "--workspace", harness.Store.WorkspacePath, "--output", archivePath);
+        AssertEqual(0, exportResult.ExitCode, "Export exit code");
+        AssertTrue(File.Exists(archivePath), "Export should create the archive.");
+
+        var importResult = RunDevTeamCli(harness.RepoRoot, "import", "--workspace", importedWorkspace, "--input", archivePath);
+        AssertEqual(0, importResult.ExitCode, "Import exit code");
+
+        var importedStore = new WorkspaceStore(importedWorkspace);
+        var importedState = importedStore.Load();
+        AssertEqual(harness.State.ActiveGoal?.GoalText, importedState.ActiveGoal?.GoalText, "Imported goal");
+        AssertEqual(harness.State.Issues.Count, importedState.Issues.Count, "Imported issue count");
+        AssertEqual(harness.State.Questions.Count, importedState.Questions.Count, "Imported question count");
+        AssertTrue(importedState.Issues.Any(issue => issue.Title == "Implement export"), "Imported workspace should contain exported issue.");
+    }
+
     internal static void TestArchitectRunUpdatesPlanArtifact()
     {
         using var harness = new TestHarness();

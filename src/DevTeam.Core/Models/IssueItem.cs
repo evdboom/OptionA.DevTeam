@@ -20,6 +20,7 @@ public sealed class IssueItem
     public int? PipelineId { get; set; }
     public int? PipelineStageIndex { get; set; }
     public string Notes { get; set; } = "";
+    public string ExternalReference { get; set; } = "";
     /// <summary>
     /// Optional 0–100 complexity signal. 0 = trivial, 100 = very complex / cross-cutting.
     /// Used by the orchestrator to decide whether to inject a navigator preflight issue.

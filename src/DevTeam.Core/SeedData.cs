@@ -6,17 +6,18 @@ internal static class SeedData
     {
         ["orchestrator"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["planner"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
-        ["architect"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
+        ["architect"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true, ModelPool = ["claude-opus-4.6", "claude-opus-4.7"] },
         ["developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gpt-5.4", "claude-sonnet-4.6"] },
         ["backend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gpt-5.4", "claude-sonnet-4.6"] },
         ["frontend-developer"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["claude-sonnet-4.6", "gpt-5.4"] },
         ["fullstack-developer"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["claude-sonnet-4.6", "gpt-5.4"] },
         ["tester"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gemini-3.1-pro-preview", "gpt-5.4", "claude-sonnet-4.6"] },
-        ["reviewer"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
+        ["reviewer"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true, ModelPool = ["claude-opus-4.6", "claude-opus-4.7"] },
+        ["auditor"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true, ModelPool = ["claude-opus-4.6", "claude-opus-4.7"] },
         ["ux"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["user"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
         ["game-designer"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
-        ["navigator"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true },
+        ["navigator"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true, ModelPool = ["claude-opus-4.6", "claude-opus-4.7"] },
         ["analyst"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["security"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
         ["docs"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
@@ -41,6 +42,7 @@ internal static class SeedData
         };
 
         state.Models = loader.LoadModels(repoRoot);
+        state.Providers = loader.LoadProviders(repoRoot);
         state.Modes = loader.LoadModes(repoRoot);
         state.Roles = loader.LoadRoles(repoRoot);
         state.Superpowers = loader.LoadSuperpowers(repoRoot);
@@ -66,6 +68,16 @@ internal static class SeedData
         {
             state.Roles = loader.LoadRoles(repoRoot);
             changed = true;
+        }
+
+        if (state.Providers.Count == 0)
+        {
+            var loadedProviders = loader.LoadProviders(repoRoot);
+            if (loadedProviders.Count > 0)
+            {
+                state.Providers = loadedProviders;
+                changed = true;
+            }
         }
 
         if (state.Modes.Count == 0)

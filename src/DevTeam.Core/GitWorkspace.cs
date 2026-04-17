@@ -54,6 +54,17 @@ public static class GitWorkspace
     public static IReadOnlyList<string> StagePathsChangedSince(
         string workingDirectory,
         GitStatusSnapshot? beforeSnapshot)
+        => CollectPathsChangedSince(workingDirectory, beforeSnapshot, stagePaths: true);
+
+    public static IReadOnlyList<string> GetPathsChangedSince(
+        string workingDirectory,
+        GitStatusSnapshot? beforeSnapshot)
+        => CollectPathsChangedSince(workingDirectory, beforeSnapshot, stagePaths: false);
+
+    private static IReadOnlyList<string> CollectPathsChangedSince(
+        string workingDirectory,
+        GitStatusSnapshot? beforeSnapshot,
+        bool stagePaths)
     {
         if (beforeSnapshot is null || !IsGitRepository(workingDirectory))
         {
@@ -80,7 +91,11 @@ public static class GitWorkspace
             return [];
         }
 
-        RunGit(afterSnapshot.RepositoryRoot, ["add", "--all", "--", .. pathsToStage]);
+        if (stagePaths)
+        {
+            RunGit(afterSnapshot.RepositoryRoot, ["add", "--all", "--", .. pathsToStage]);
+        }
+
         return pathsToStage;
     }
 
@@ -255,6 +270,8 @@ public sealed class ProcessGitRepository : IGitRepository
     public bool IsGitRepository(string workingDirectory) => GitWorkspace.IsGitRepository(workingDirectory);
     public bool EnsureRepository(string workingDirectory) => GitWorkspace.EnsureRepository(workingDirectory);
     public GitStatusSnapshot? TryCaptureStatus(string workingDirectory) => GitWorkspace.TryCaptureStatus(workingDirectory);
+    public IReadOnlyList<string> GetPathsChangedSince(string workingDirectory, GitStatusSnapshot? beforeSnapshot) =>
+        GitWorkspace.GetPathsChangedSince(workingDirectory, beforeSnapshot);
     public IReadOnlyList<string> StagePathsChangedSince(string workingDirectory, GitStatusSnapshot? beforeSnapshot) =>
         GitWorkspace.StagePathsChangedSince(workingDirectory, beforeSnapshot);
     public bool TryCreateWorktree(string repoRoot, string worktreePath, string branchName) =>

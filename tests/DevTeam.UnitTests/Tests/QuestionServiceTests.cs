@@ -6,6 +6,7 @@ internal static class QuestionServiceTests
     [
         new("AddQuestion_AssignsIncrementingId", AddQuestion_AssignsIncrementingId),
         new("AddQuestion_DefaultsToBlocking_WhenFlagSet", AddQuestion_DefaultsToBlocking_WhenFlagSet),
+        new("AddQuestion_RecordsCreatedTimestamp", AddQuestion_RecordsCreatedTimestamp),
         new("AnswerQuestion_SetsStatusToAnswered", AnswerQuestion_SetsStatusToAnswered),
         new("AnswerQuestion_Throws_WhenQuestionNotFound", AnswerQuestion_Throws_WhenQuestionNotFound),
         new("AddQuestion_NonBlocking_FlagRespected", AddQuestion_NonBlocking_FlagRespected),
@@ -46,6 +47,22 @@ internal static class QuestionServiceTests
 
         Assert.That(question.Status == QuestionStatus.Answered, $"Expected Answered but got {question.Status}");
         Assert.That(question.Answer == "The plan is X.", $"Expected answer 'The plan is X.' but got '{question.Answer}'");
+        return Task.CompletedTask;
+    }
+
+    private static Task AddQuestion_RecordsCreatedTimestamp()
+    {
+        var clock = new FakeSystemClock
+        {
+            UtcNow = new DateTimeOffset(2025, 2, 3, 4, 5, 6, TimeSpan.Zero)
+        };
+        var svc = new QuestionService(clock);
+        var state = new WorkspaceState();
+
+        var question = svc.AddQuestion(state, "When was this asked?", blocking: true);
+
+        Assert.That(question.CreatedAtUtc == clock.UtcNow,
+            $"Expected CreatedAtUtc {clock.UtcNow:O} but got {question.CreatedAtUtc:O}");
         return Task.CompletedTask;
     }
 

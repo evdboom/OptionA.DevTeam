@@ -13,6 +13,11 @@ public class CopilotCliAgentClient(ICommandRunner? runner = null) : IAgentClient
             throw new InvalidOperationException("Prompt is required.");
         }
 
+        if (request.Provider is not null)
+        {
+            throw new InvalidOperationException("Provider overrides are only supported by the sdk backend.");
+        }
+
         var arguments = new List<string>();
         foreach (var argument in request.ExtraArguments)
         {

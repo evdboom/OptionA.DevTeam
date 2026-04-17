@@ -22,7 +22,7 @@ internal static class ChatConsole
     public static void WriteNoWorkspace()
     {
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[dim]No workspace found.[/] Use [cyan]/init[/] [dim]--goal \"<your goal>\"[/] to get started.");
+        AnsiConsole.MarkupLine("[dim]No workspace found.[/] Use [cyan]/start-here new[/] for a guided first run or [cyan]/init[/] [dim]--goal \"<your goal>\"[/] to get started.");
     }
 
     // ── Panels ────────────────────────────────────────────────────────────────

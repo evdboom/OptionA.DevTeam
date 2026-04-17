@@ -9,6 +9,7 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
     private static readonly string[] ModeDirectoryCandidates = [Path.Combine(".devteam-source", "modes")];
     private static readonly string[] SuperpowerDirectoryCandidates = [Path.Combine(".devteam-source", "superpowers")];
     private static readonly string[] ModelFileCandidates = [Path.Combine(".devteam-source", "MODELS.json")];
+    private static readonly string[] ProviderFileCandidates = [Path.Combine(".devteam-source", "PROVIDERS.json")];
     private static readonly string[] McpServerFileCandidates = [Path.Combine(".devteam-source", "MCP_SERVERS.json")];
 
     private readonly IFileSystem _fs;
@@ -41,13 +42,44 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
             models.Add(new ModelDefinition
             {
                 Name = element.GetProperty("Name").GetString() ?? "",
+                ProviderName = GetString(element, "ProviderName"),
                 Cost = cost,
+                InputCostPer1kTokens = GetNullableDouble(element, "InputCostPer1kTokens"),
+                OutputCostPer1kTokens = GetNullableDouble(element, "OutputCostPer1kTokens"),
+                Family = GetModelFamily(element),
                 IsDefault = element.TryGetProperty("Default", out var isDefault) && isDefault.GetBoolean(),
                 IsPremium = cost > 1
             });
         }
 
         return models;
+    }
+
+    public List<ProviderDefinition> LoadProviders(string repoRoot)
+    {
+        var providersPath = ResolveFirstFile(repoRoot, ProviderFileCandidates);
+        if (!_fs.FileExists(providersPath))
+        {
+            return [];
+        }
+
+        using var doc = JsonDocument.Parse(_fs.ReadAllText(providersPath));
+        var providers = new List<ProviderDefinition>();
+        foreach (var element in doc.RootElement.EnumerateArray())
+        {
+            providers.Add(new ProviderDefinition
+            {
+                Name = GetString(element, "Name"),
+                Type = GetString(element, "Type"),
+                BaseUrl = GetString(element, "BaseUrl"),
+                WireApi = GetString(element, "WireApi"),
+                ApiKeyEnvVar = GetString(element, "ApiKeyEnvVar"),
+                BearerTokenEnvVar = GetString(element, "BearerTokenEnvVar"),
+                AzureApiVersion = GetString(element, "AzureApiVersion")
+            });
+        }
+
+        return providers;
     }
 
     public List<RoleDefinition> LoadRoles(string repoRoot)
@@ -119,6 +151,24 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
                     - Surface gaps in character motivation, pacing, or clarity instead of glossing over them.
                     - When useful, propose follow-on editorial work as focused issues rather than broad rewrites.
                     - Keep supporting notes and documentation aligned with the latest draft direction.
+                    """
+                },
+                new ModeDefinition
+                {
+                    Slug = "github",
+                    Name = "GitHub",
+                    SourcePath = Path.Combine(".devteam-source", "modes", "github.md"),
+                    Body = """
+                    # Mode: GitHub
+
+                    Optimize for repository-native teamwork where GitHub Issues act as the shared work queue.
+
+                    Guardrails:
+                    - Treat GitHub Issues as the source of truth for incoming execution work when the team is using issue sync.
+                    - Sync the GitHub work queue before running a batch so local execution reflects the latest labelled issues.
+                    - Keep execution conservative by default: prefer smaller batches, clear summaries, and review-friendly issue scope.
+                    - Preserve the intent of the originating GitHub issue. If you narrow or reinterpret the work, explain that clearly in the summary.
+                    - When work extends an existing GitHub thread, keep the resulting local issue, run summary, and audit trail easy to map back to the original issue reference.
                     """
                 }
             ];
@@ -241,6 +291,43 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
 
     private static IEnumerable<string> ParseToolList(string inline) =>
         inline.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string GetString(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? ""
+            : "";
+
+    private static double? GetNullableDouble(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.Number
+            ? value.GetDouble()
+            : null;
+
+    private static string GetModelFamily(JsonElement element)
+    {
+        var family = GetString(element, "Family");
+        if (!string.IsNullOrWhiteSpace(family))
+        {
+            return NormalizeModelFamily(family);
+        }
+
+        return NormalizeModelFamily(GetString(element, "Provider"));
+    }
+
+    private static string NormalizeModelFamily(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "openai" or "azure" or "azure-openai" or "azure ai" or "azure ai foundry" => "openai",
+            "anthropic" => "anthropic",
+            "google" or "gemini" => "google",
+            _ => value.Trim().ToLowerInvariant()
+        };
+    }
 
     private static string ResolveFirstDirectory(string repoRoot, IEnumerable<string> candidates)
     {

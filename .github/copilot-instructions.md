@@ -18,8 +18,9 @@
 - `DevTeam.slnx` contains the new runtime. `src\DevTeam.Core` holds the core domain model, prompt asset loading, model policy, Copilot backends, and the loop executor. `src\DevTeam.Cli` exposes the runtime as a CLI.
 - Workspace state is persisted under `.devteam\workspace.json` through `WorkspaceStore`. The runtime also creates `.devteam\runs\`, `.devteam\decisions\`, and `.devteam\artifacts\` for loop outputs and future structured artifacts.
 - `WorkspaceStore` also regenerates readable markdown issue mirrors under `.devteam\issues\`, including `_index.md` and per-issue files.
-- Prompt assets live in `.devteam-source\`. Roles, superpowers, `MODELS.json`, and `MCP_SERVERS.json` are loaded from there and drive model selection, external tool access, and runtime prompting.
+- Prompt assets live in `.devteam-source\`. Roles, superpowers, `MODELS.json`, `PROVIDERS.json`, and `MCP_SERVERS.json` are loaded from there and drive model selection, BYOK provider selection, external tool access, and runtime prompting.
 - External MCP servers are declared in `.devteam-source\MCP_SERVERS.json`. Each entry specifies a `Name`, `Command`, `Args`, optional `Cwd`, `Description`, and `Enabled` flag. Enabled servers are registered with every Copilot SDK session so spawned agents can call their tools.
+- BYOK provider profiles are declared in `.devteam-source\PROVIDERS.json`. Each entry specifies a `Name`, `Type`, `BaseUrl`, optional `ApiKeyEnvVar`, optional `BearerTokenEnvVar`, optional `WireApi`, and optional `AzureApiVersion`. Provider overrides are only supported on the Copilot SDK backend.
 - The default agent backend is the GitHub Copilot .NET SDK. `CopilotSdkAgentClient` manages sessions, enables streaming, approves tools, and points the SDK at `.devteam-source\superpowers` via `SkillDirectories`. `CopilotCliAgentClient` remains as a fallback adapter.
 - `DevTeamRuntime` manages goal, roadmap, issue, question, run, phase, and decision state. `LoopExecutor` runs ready issues, assigns deterministic Copilot session ids, can execute multiple queued runs concurrently, parses structured responses, marks runs complete, and writes run/decision artifacts.
 

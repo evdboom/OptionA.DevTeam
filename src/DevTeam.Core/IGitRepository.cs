@@ -5,6 +5,7 @@ public interface IGitRepository
     bool IsGitRepository(string workingDirectory);
     bool EnsureRepository(string workingDirectory);
     GitStatusSnapshot? TryCaptureStatus(string workingDirectory);
+    IReadOnlyList<string> GetPathsChangedSince(string workingDirectory, GitStatusSnapshot? beforeSnapshot);
     IReadOnlyList<string> StagePathsChangedSince(string workingDirectory, GitStatusSnapshot? beforeSnapshot);
 
     /// <summary>Creates a git worktree at <paramref name="worktreePath"/> on a new branch <paramref name="branchName"/>.

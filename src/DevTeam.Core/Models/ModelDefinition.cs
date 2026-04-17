@@ -3,7 +3,10 @@ namespace DevTeam.Core;
 public sealed class ModelDefinition
 {
     public string Name { get; set; } = "";
+    public string ProviderName { get; set; } = "";
     public double Cost { get; set; }
+    public double? InputCostPer1kTokens { get; set; }
+    public double? OutputCostPer1kTokens { get; set; }
     public bool IsDefault { get; set; }
     public bool IsPremium { get; set; }
     /// <summary>
@@ -27,5 +30,25 @@ public sealed class ModelDefinition
         if (lower.StartsWith("gpt-") || lower.StartsWith("o1") || lower.StartsWith("o3") || lower.StartsWith("o4")) return "openai";
         if (lower.StartsWith("gemini-")) return "google";
         return "other";
+    }
+
+    public double? EstimateCostUsd(int? inputTokens, int? outputTokens)
+    {
+        double total = 0;
+        var hasEstimate = false;
+
+        if (inputTokens is int input && InputCostPer1kTokens is double inputRate)
+        {
+            total += input / 1000d * inputRate;
+            hasEstimate = true;
+        }
+
+        if (outputTokens is int output && OutputCostPer1kTokens is double outputRate)
+        {
+            total += output / 1000d * outputRate;
+            hasEstimate = true;
+        }
+
+        return hasEstimate ? Math.Round(total, 6) : null;
     }
 }

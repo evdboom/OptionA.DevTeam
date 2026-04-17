@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using DevTeam.Cli;
 using DevTeam.Core;
 using Spectre.Console;
 
@@ -94,7 +95,7 @@ internal sealed partial class ShellService : IDisposable
 
         if (initialState is null)
         {
-            AddLine("[dim]No workspace found.[/] Use [cyan]/init[/] [dim]--goal \"<your goal>\"[/] to get started.");
+            AddLine("[dim]No workspace found.[/] Use [cyan]/start-here new[/] for a guided first run or [cyan]/init[/] [dim]--goal \"<your goal>\"[/] to get started.");
         }
 
         // Apply keep-awake
@@ -276,6 +277,30 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "export":
+                {
+                    var archivePath = WorkspaceArchiveService.Export(_store.WorkspacePath, GetOption(options, "output"));
+                    AddSuccess($"Exported workspace to {Markup.Escape(archivePath)}");
+                    break;
+                }
+
+                case "import":
+                {
+                    var inputPath = GetOption(options, "input") ?? GetPositionalValue(options)
+                        ?? throw new InvalidOperationException("Usage: /import --input PATH [--force]");
+                    var importedPath = WorkspaceArchiveService.Import(inputPath, _store.WorkspacePath, GetBoolOption(options, "force", false));
+                    AddSuccess($"Imported workspace into {Markup.Escape(importedPath)}");
+                    break;
+                }
+
+                case "start-here":
+                {
+                    TryLoadState(out var current);
+                    var persona = GetPositionalValue(options);
+                    AddSystem(OnboardingGuideBuilder.BuildMarkup(current, _runtime, persona), "start here");
+                    break;
+                }
+
                 case "bug":
                 case "bug-report":
                 {
@@ -320,10 +345,12 @@ internal sealed partial class ShellService : IDisposable
                     var gitInit = GitWorkspace.EnsureRepository(Environment.CurrentDirectory);
                     var initialized = _store.Initialize(Environment.CurrentDirectory, totalCap, premiumCap);
                     var modeName = GetOption(options, "mode");
+                    var providerName = GetOption(options, "provider");
                     initialized.Runtime.KeepAwakeEnabled = GetBoolOption(options, "keep-awake", initialized.Runtime.KeepAwakeEnabled);
                     initialized.Runtime.WorkspaceMcpEnabled = GetBoolOption(options, "workspace-mcp", true);
                     initialized.Runtime.PipelineSchedulingEnabled = GetBoolOption(options, "pipeline-scheduling", true);
                     if (!string.IsNullOrWhiteSpace(modeName)) _runtime.SetMode(initialized, modeName);
+                    if (!string.IsNullOrWhiteSpace(providerName)) ProviderSelectionService.SetDefaultProvider(initialized, providerName);
                     if (!string.IsNullOrWhiteSpace(goal)) _runtime.SetGoal(initialized, goal);
                     _store.Save(initialized);
                     AddSuccess($"Initialized workspace at {Markup.Escape(_store.WorkspacePath)}");
@@ -373,6 +400,16 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "edit-issue":
+                {
+                    var current = _store.Load();
+                    var request = IssueEditRequestParser.Parse(_runtime, current, options);
+                    var issue = _runtime.EditIssue(current, request);
+                    _store.Save(current);
+                    AddSuccess($"Updated issue #{issue.Id}: {Markup.Escape(issue.Title)} ({Markup.Escape(issue.RoleSlug)}, priority {issue.Priority}, status {Markup.Escape(issue.Status.ToString().ToLowerInvariant())})");
+                    break;
+                }
+
                 case "questions":
                     PrintQuestions(_store.Load());
                     break;
@@ -381,6 +418,44 @@ internal sealed partial class ShellService : IDisposable
                 {
                     var current = _store.Load();
                     await ShowPlanAsync(current, options);
+                    break;
+                }
+
+                case "diff-run":
+                {
+                    var current = _store.Load();
+                    var values = GetPositionalValues(options);
+                    if (values.Count is < 1 or > 2 || !int.TryParse(values[0], out var runId) || (values.Count == 2 && !int.TryParse(values[1], out _)))
+                    {
+                        throw new InvalidOperationException("Usage: /diff-run <run-id> [compare-run-id]");
+                    }
+
+                    var compareRunId = values.Count == 2 ? int.Parse(values[1]) : (int?)null;
+                    var report = _runtime.BuildRunDiff(current, runId, compareRunId);
+                    AddSystem(RunDiffPrinter.BuildMarkup(report), "run diff");
+                    break;
+                }
+
+                case "brownfield-log":
+                {
+                    var path = Path.Combine(_store.WorkspacePath, "brownfield-delta.md");
+                    if (!File.Exists(path))
+                    {
+                        AddLine("No brownfield delta log yet.");
+                        break;
+                    }
+
+                    AddSystem(Markup.Escape(File.ReadAllText(path)).TrimEnd(), "brownfield log");
+                    break;
+                }
+
+                case "sync":
+                case "github-sync":
+                {
+                    var current = _store.Load();
+                    var report = await new GitHubIssueSyncService().SyncAsync(current, _runtime, Environment.CurrentDirectory, CancellationToken.None);
+                    _store.Save(current);
+                    AddSuccess($"GitHub sync complete: {report.ImportedIssueCount} issue(s) imported, {report.UpdatedIssueCount} updated, {report.ImportedQuestionCount} question(s) imported, {report.UpdatedQuestionCount} updated, {report.SkippedCount} skipped.");
                     break;
                 }
 
@@ -396,6 +471,70 @@ internal sealed partial class ShellService : IDisposable
                     _runtime.SetGoal(current, goal);
                     _store.Save(current);
                     AddSuccess("Updated active goal.");
+                    break;
+                }
+
+                case "pipeline":
+                {
+                    var current = _store.Load();
+                    var source = current.Runtime.PipelineRolesCustomized ? "custom" : $"mode default ({current.Runtime.ActiveModeSlug})";
+                    AddSystem($"[bold]Current pipeline[/]\n{Markup.Escape(string.Join(" -> ", current.Runtime.DefaultPipelineRoles))}\n[dim]{Markup.Escape(source)}[/]", "pipeline");
+                    break;
+                }
+
+                case "set-pipeline":
+                {
+                    var current = _store.Load();
+                    var values = GetPositionalValues(options);
+                    if (values.Count == 0)
+                    {
+                        throw new InvalidOperationException("Usage: /set-pipeline <role...|default>");
+                    }
+
+                    if (values.Count == 1 && string.Equals(values[0], "default", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _runtime.ResetDefaultPipelineRoles(current);
+                        _store.Save(current);
+                        AddSuccess($"Reset pipeline to mode default: {Markup.Escape(string.Join(" -> ", current.Runtime.DefaultPipelineRoles))}");
+                        break;
+                    }
+
+                    _runtime.SetDefaultPipelineRoles(current, values);
+                    _store.Save(current);
+                    AddSuccess($"Updated pipeline: {Markup.Escape(string.Join(" -> ", current.Runtime.DefaultPipelineRoles))}");
+                    break;
+                }
+
+                case "provider":
+                {
+                    var current = _store.Load();
+                    var currentProvider = string.IsNullOrWhiteSpace(current.Runtime.DefaultProviderName) ? "(default Copilot auth)" : current.Runtime.DefaultProviderName;
+                    var knownProviders = ProviderSelectionService.GetConfiguredProviderNames(current);
+                    var body = new StringBuilder()
+                        .AppendLine("[bold]Current provider[/]")
+                        .AppendLine(Markup.Escape(currentProvider))
+                        .AppendLine()
+                        .AppendLine("[bold]Configured providers[/]")
+                        .AppendLine(knownProviders.Count == 0
+                            ? "[dim](none — add .devteam-source/PROVIDERS.json to enable BYOK providers)[/]"
+                            : Markup.Escape(string.Join(", ", knownProviders)))
+                        .ToString()
+                        .TrimEnd();
+                    AddSystem(body, "provider");
+                    break;
+                }
+
+                case "set-provider":
+                {
+                    var current = _store.Load();
+                    var providerArg = GetPositionalValue(options) ?? throw new InvalidOperationException("Usage: /set-provider <name|default>");
+                    ProviderSelectionService.SetDefaultProvider(
+                        current,
+                        string.Equals(providerArg, "default", StringComparison.OrdinalIgnoreCase) ? null : providerArg);
+                    _store.Save(current);
+                    AddSuccess(string.IsNullOrWhiteSpace(current.Runtime.DefaultProviderName)
+                        ? "Reset provider override to default Copilot auth."
+                        : $"Updated default provider to {Markup.Escape(current.Runtime.DefaultProviderName)}.");
                     break;
                 }
 
@@ -565,6 +704,26 @@ internal sealed partial class ShellService : IDisposable
                     break;
                 }
 
+                case "preview":
+                {
+                    var current = _store.Load();
+                    if (PlanWorkflow.RequiresPlanningBeforeRun(current, _store))
+                    {
+                        AddLine("No plan has been written yet. Run [cyan]/plan[/] first.");
+                        break;
+                    }
+                    if (PlanWorkflow.IsAwaitingApproval(current, _store))
+                    {
+                        AddLine("A plan is ready. Use [cyan]/plan[/] to review, type feedback to revise, or [cyan]/approve[/] to continue.");
+                        break;
+                    }
+
+                    var usingSubagents = options.ContainsKey("max-subagents") ? int.Parse(options["max-subagents"][0]) : current.Runtime.DefaultMaxSubagents;
+                    AddSystem(RunPreviewPrinter.BuildPreviewMarkup(current, _runtime, usingSubagents), "preview");
+                    AddHint("Use [cyan]/run[/] to start the loop, or [cyan]/max-subagents N[/] to change the previewed batch size.");
+                    break;
+                }
+
                 case "answer":
                 case "answer-question":
                 {
@@ -599,8 +758,14 @@ internal sealed partial class ShellService : IDisposable
                         AddLine("A plan is ready. Use [cyan]/plan[/] to review, type feedback to revise, or [cyan]/approve[/] to continue.");
                         break;
                     }
-                    var usingIterations = options.ContainsKey("max-iterations") ? int.Parse(options["max-iterations"][0]) : current.Runtime.DefaultMaxIterations;
                     var usingSubagents = options.ContainsKey("max-subagents") ? int.Parse(options["max-subagents"][0]) : current.Runtime.DefaultMaxSubagents;
+                    if (GetBoolOption(options, "dry-run", false))
+                    {
+                        AddSystem(RunPreviewPrinter.BuildPreviewMarkup(current, _runtime, usingSubagents), "preview");
+                        AddHint("Dry run only — nothing was executed. Use [cyan]/run[/] to start the loop.");
+                        break;
+                    }
+                    var usingIterations = options.ContainsKey("max-iterations") ? int.Parse(options["max-iterations"][0]) : current.Runtime.DefaultMaxIterations;
                     AddHint($"max-iterations: [bold]{usingIterations}[/] · max-subagents: [bold]{usingSubagents}[/] [dim](change with /max-iterations N or /max-subagents N)[/]");
                     StartLoopInBackground(current, options);
                     AddEvent("🚀", "Loop started — running in the background. You can type commands while work progresses.", "green");
@@ -842,16 +1007,22 @@ internal sealed partial class ShellService : IDisposable
         Action<string>? logger = null)
     {
         var backend = GetOption(options, "backend") ?? "sdk";
+        var providerName = GetOption(options, "provider");
         var maxSubagents = GetIntOption(options, "max-subagents", state.Runtime.DefaultMaxSubagents);
         var maxIterations = GetIntOption(options, "max-iterations", state.Runtime.DefaultMaxIterations);
         var timeoutSeconds = GetIntOption(options, "timeout-seconds", 600);
         var verbosity = ParseVerbosity(GetOption(options, "verbosity"));
+        if (!string.IsNullOrWhiteSpace(providerName))
+        {
+            ProviderSelectionService.GetRequiredProvider(state, providerName);
+        }
 
         Action<string> log = logger ?? MakeBackgroundLogger();
 
         var executionOptions = new LoopExecutionOptions
         {
             Backend = backend,
+            ProviderName = providerName,
             MaxSubagents = maxSubagents,
             MaxIterations = maxIterations,
             AgentTimeout = TimeSpan.FromSeconds(timeoutSeconds),
@@ -924,14 +1095,18 @@ internal sealed partial class ShellService : IDisposable
             AddHint("No plan has been written yet.");
 
         // Show open questions
-        var openQs = state.Questions.Where(q => q.Status == QuestionStatus.Open).OrderBy(q => q.Id).ToList();
+        var questionReport = _runtime.BuildStatusReport(state);
+        var openQs = questionReport.OpenQuestions.OrderBy(q => q.Id).ToList();
         if (openQs.Count > 0)
         {
             var sb = new StringBuilder($"[bold]─── {openQs.Count} open question{(openQs.Count == 1 ? "" : "s")} ───[/]\n");
+            if (questionReport.IsWaitingOnBlockingQuestion && questionReport.OldestBlockingQuestionAge is { } stallAge)
+            {
+                sb.AppendLine($"[yellow]Stalled on user input[/] [dim](oldest blocking question asked {Markup.Escape(WorkspaceStatusPrinter.FormatQuestionAge(stallAge))})[/]");
+            }
             foreach (var oq in openQs)
             {
-                var tag = oq.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
-                sb.AppendLine($"  [dim]#{oq.Id}[/] {tag} {Markup.Escape(oq.Text)}");
+                sb.AppendLine($"  {WorkspaceStatusPrinter.BuildQuestionLineMarkup(oq, questionReport.OpenQuestionAges)}");
             }
             sb.Append($"Answer with: [cyan]/answer[/] <id> <text>");
             AddSystem(sb.ToString(), "questions");
@@ -985,6 +1160,7 @@ internal sealed partial class ShellService : IDisposable
 
         var prompt = AgentPromptBuilder.BuildAdHocPrompt(state, roleSlug, userMessage);
         var sessionId = $"devteam-adhoc-{roleSlug}";
+        var provider = ProviderSelectionService.ResolveProvider(state, model);
         AddEvent("→", $"Asking {Markup.Escape(roleSlug)} via {Markup.Escape(model)}...", "dim cyan");
 
         var client = new DefaultAgentClientFactory().Create("sdk");
@@ -997,6 +1173,7 @@ internal sealed partial class ShellService : IDisposable
                 SessionId = sessionId,
                 WorkingDirectory = state.RepoRoot,
                 WorkspacePath = _store.WorkspacePath,
+                Provider = provider,
                 Timeout = TimeSpan.FromMinutes(10),
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
@@ -1155,6 +1332,13 @@ internal sealed partial class ShellService : IDisposable
             $"premium {report.Budget.PremiumCreditsCommitted:0.##}/{report.Budget.PremiumCreditCap} " +
             $"[dim]({report.Budget.PremiumCreditCap - report.Budget.PremiumCreditsCommitted:0.##} remaining)[/]");
 
+        if (report.RoleUsage.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.Append(WorkspaceStatusPrinter.BuildRoleUsageMarkup(report.RoleUsage));
+        }
+
         if (report.OpenQuestions.Count > 0)
         {
             sb.AppendLine();
@@ -1187,17 +1371,21 @@ internal sealed partial class ShellService : IDisposable
 
     private void PrintQuestions(WorkspaceState state)
     {
-        var openQs = state.Questions.Where(q => q.Status == QuestionStatus.Open).OrderBy(q => q.Id).ToList();
+        var report = _runtime.BuildStatusReport(state);
+        var openQs = report.OpenQuestions.OrderBy(q => q.Id).ToList();
         if (openQs.Count == 0)
         {
             AddLine("No open questions.");
             return;
         }
         var sb = new StringBuilder();
+        if (report.IsWaitingOnBlockingQuestion && report.OldestBlockingQuestionAge is { } stallAge)
+        {
+            sb.AppendLine($"[yellow]Stalled on user input[/] [dim](oldest blocking question asked {Markup.Escape(WorkspaceStatusPrinter.FormatQuestionAge(stallAge))})[/]");
+        }
         foreach (var q in openQs)
         {
-            var tag = q.IsBlocking ? "[yellow]blocking[/]" : "[dim]non-blocking[/]";
-            sb.AppendLine($"[dim]#{q.Id}[/] {tag} {Markup.Escape(q.Text)}");
+            sb.AppendLine(WorkspaceStatusPrinter.BuildQuestionLineMarkup(q, report.OpenQuestionAges));
         }
         AddSystem(sb.ToString().TrimEnd(), $"questions ({openQs.Count})");
     }

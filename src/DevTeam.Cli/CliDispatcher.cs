@@ -89,6 +89,11 @@ internal sealed class CliDispatcher
                 {
                     _runtime.SetMode(state, mode);
                 }
+                var provider = GetOption(options, "provider");
+                if (!string.IsNullOrWhiteSpace(provider))
+                {
+                    ProviderSelectionService.SetDefaultProvider(state, provider);
+                }
                 if (!string.IsNullOrWhiteSpace(goal))
                 {
                     _runtime.SetGoal(state, goal);
@@ -131,6 +136,54 @@ internal sealed class CliDispatcher
                 return 0;
             }
 
+            case "export":
+            {
+                var outputPath = GetOption(options, "output");
+                var archivePath = WorkspaceArchiveService.Export(_workspacePath, outputPath);
+                _output.WriteLine($"Exported workspace to {archivePath}");
+                return 0;
+            }
+
+            case "import":
+            {
+                var inputPath = GetOption(options, "input") ?? GetPositionalValue(options)
+                    ?? throw new InvalidOperationException("Usage: import --input PATH [--force] [--workspace PATH]");
+                var importedPath = WorkspaceArchiveService.Import(inputPath, _workspacePath, GetBoolOption(options, "force", false));
+                _output.WriteLine($"Imported workspace into {importedPath}");
+                return 0;
+            }
+
+            case "brownfield-log":
+            {
+                var path = Path.Combine(_workspacePath, "brownfield-delta.md");
+                if (!File.Exists(path))
+                {
+                    _output.WriteLine("No brownfield delta log yet.");
+                    return 0;
+                }
+
+                _output.WriteLine(File.ReadAllText(path));
+                return 0;
+            }
+
+            case "github-sync":
+            {
+                var state = _store.Load();
+                var report = await new GitHubIssueSyncService().SyncAsync(state, _runtime, Environment.CurrentDirectory, CancellationToken.None);
+                _store.Save(state);
+                _output.WriteLine($"GitHub sync complete: {report.ImportedIssueCount} issue(s) imported, {report.UpdatedIssueCount} updated, {report.ImportedQuestionCount} question(s) imported, {report.UpdatedQuestionCount} updated, {report.SkippedCount} skipped.");
+                return 0;
+            }
+
+            case "start-here":
+            {
+                var state = File.Exists(_store.StatePath) ? _store.Load() : null;
+                var persona = GetPositionalValue(options);
+                _output.WriteLine(DevTeam.Cli.Shell.NonInteractiveShellHost.StripMarkup(
+                    OnboardingGuideBuilder.BuildMarkup(state, _runtime, persona)));
+                return 0;
+            }
+
             case "bug":
             case "bug-report":
             {
@@ -150,6 +203,63 @@ internal sealed class CliDispatcher
                 _runtime.SetGoal(state, goal);
                 _store.Save(state);
                 _output.WriteLine("Updated active goal.");
+                return 0;
+            }
+
+            case "pipeline":
+            {
+                var state = _store.Load();
+                var source = state.Runtime.PipelineRolesCustomized ? "custom" : $"mode default ({state.Runtime.ActiveModeSlug})";
+                _output.WriteLine($"Current pipeline: {string.Join(" -> ", state.Runtime.DefaultPipelineRoles)} [{source}]");
+                return 0;
+            }
+
+            case "set-pipeline":
+            {
+                var state = _store.Load();
+                var values = GetPositionalValues(options);
+                if (values.Count == 0)
+                {
+                    throw new InvalidOperationException("Usage: set-pipeline <role...|default>");
+                }
+
+                if (values.Count == 1 && string.Equals(values[0], "default", StringComparison.OrdinalIgnoreCase))
+                {
+                    _runtime.ResetDefaultPipelineRoles(state);
+                    _store.Save(state);
+                    _output.WriteLine($"Reset pipeline to mode default: {string.Join(" -> ", state.Runtime.DefaultPipelineRoles)}");
+                    return 0;
+                }
+
+                _runtime.SetDefaultPipelineRoles(state, values);
+                _store.Save(state);
+                _output.WriteLine($"Updated pipeline: {string.Join(" -> ", state.Runtime.DefaultPipelineRoles)}");
+                return 0;
+            }
+
+            case "provider":
+            {
+                var state = _store.Load();
+                var currentProvider = string.IsNullOrWhiteSpace(state.Runtime.DefaultProviderName) ? "(default Copilot auth)" : state.Runtime.DefaultProviderName;
+                var knownProviders = ProviderSelectionService.GetConfiguredProviderNames(state);
+                _output.WriteLine($"Current provider: {currentProvider}");
+                _output.WriteLine(knownProviders.Count == 0
+                    ? "Configured providers: none (.devteam-source\\PROVIDERS.json is empty or missing)"
+                    : $"Configured providers: {string.Join(", ", knownProviders)}");
+                return 0;
+            }
+
+            case "set-provider":
+            {
+                var state = _store.Load();
+                var providerName = GetPositionalValue(options) ?? throw new InvalidOperationException("Usage: set-provider <name|default>");
+                ProviderSelectionService.SetDefaultProvider(
+                    state,
+                    string.Equals(providerName, "default", StringComparison.OrdinalIgnoreCase) ? null : providerName);
+                _store.Save(state);
+                _output.WriteLine(string.IsNullOrWhiteSpace(state.Runtime.DefaultProviderName)
+                    ? "Reset provider override to default Copilot auth."
+                    : $"Updated default provider to {state.Runtime.DefaultProviderName}.");
                 return 0;
             }
 
@@ -203,6 +313,16 @@ internal sealed class CliDispatcher
                 var issue = _runtime.AddIssue(state, title, detail, role, priority, roadmapId, dependsOn, area);
                 _store.Save(state);
                 _output.WriteLine($"Created issue #{issue.Id}: {issue.Title} ({issue.RoleSlug}{(string.IsNullOrWhiteSpace(issue.Area) ? "" : $", area {issue.Area}")})");
+                return 0;
+            }
+
+            case "edit-issue":
+            {
+                var state = _store.Load();
+                var request = IssueEditRequestParser.Parse(_runtime, state, options);
+                var issue = _runtime.EditIssue(state, request);
+                _store.Save(state);
+                _output.WriteLine($"Updated issue #{issue.Id}: {issue.Title} ({issue.RoleSlug}{(string.IsNullOrWhiteSpace(issue.Area) ? "" : $", area {issue.Area}")}, priority {issue.Priority}, status {issue.Status.ToString().ToLowerInvariant()})");
                 return 0;
             }
 
@@ -282,6 +402,40 @@ internal sealed class CliDispatcher
                 return 0;
             }
 
+            case "preview":
+            {
+                var state = _store.Load();
+                if (PlanWorkflow.RequiresPlanningBeforeRun(state, _store))
+                {
+                    _output.WriteLine("No plan has been written yet. Run `plan` first.");
+                    return 0;
+                }
+                if (PlanWorkflow.IsAwaitingApproval(state, _store))
+                {
+                    _output.WriteLine("A plan is ready. Review it with `plan`, provide feedback, or approve it before starting the loop.");
+                    return 0;
+                }
+
+                var maxSubagents = GetIntOption(options, "max-subagents", state.Runtime.DefaultMaxSubagents);
+                RunPreviewPrinter.PrintPreview(state, _runtime, maxSubagents);
+                return 0;
+            }
+
+            case "diff-run":
+            {
+                var state = _store.Load();
+                var values = GetPositionalValues(options);
+                if (values.Count is < 1 or > 2 || !int.TryParse(values[0], out var runId) || (values.Count == 2 && !int.TryParse(values[1], out _)))
+                {
+                    throw new InvalidOperationException("Usage: diff-run <run-id> [compare-run-id]");
+                }
+
+                var compareRunId = values.Count == 2 ? int.Parse(values[1]) : (int?)null;
+                var report = _runtime.BuildRunDiff(state, runId, compareRunId);
+                _output.WriteLine(DevTeam.Cli.Shell.NonInteractiveShellHost.StripMarkup(RunDiffPrinter.BuildMarkup(report)));
+                return 0;
+            }
+
             case "run-once":
             {
                 var state = _store.Load();
@@ -305,6 +459,18 @@ internal sealed class CliDispatcher
                 {
                     _output.WriteLine("No plan has been written yet. Run `plan` first.");
                     return 1;
+                }
+                if (PlanWorkflow.IsAwaitingApproval(state, _store))
+                {
+                    _output.WriteLine("A plan is ready. Review it with `plan`, provide feedback, or approve it before starting the loop.");
+                    return 1;
+                }
+                if (GetBoolOption(options, "dry-run", false))
+                {
+                    var maxSubagents = GetIntOption(options, "max-subagents", state.Runtime.DefaultMaxSubagents);
+                    RunPreviewPrinter.PrintPreview(state, _runtime, maxSubagents);
+                    _output.WriteLine("Dry run only — nothing was executed.");
+                    return 0;
                 }
                 var report = await RunLoopAsync(_store, _runtime, _loopExecutor, state, options);
                 _output.WriteLine($"Loop complete after {report.IterationsExecuted} iteration(s). Final state: {report.FinalState}");
@@ -335,7 +501,7 @@ internal sealed class CliDispatcher
             case "questions":
             {
                 var state = _store.Load();
-                PrintQuestions(state, _store);
+                PrintQuestions(state, _store, _runtime);
                 return 0;
             }
 
@@ -361,11 +527,22 @@ internal sealed class CliDispatcher
                 var prompt = GetOption(options, "prompt") ?? GetPositionalValue(options)
                     ?? throw new InvalidOperationException("Missing prompt text.");
                 var model = GetOption(options, "model");
+                var providerName = GetOption(options, "provider");
                 var timeoutSeconds = GetIntOption(options, "timeout-seconds", 1200);
                 var workingDirectory = GetOption(options, "working-directory") ?? Environment.CurrentDirectory;
                 var extraArgs = options.TryGetValue("extra-arg", out var values)
                     ? values
                     : [];
+                var providerState = File.Exists(_store.StatePath)
+                    ? _store.Load()
+                    : new WorkspaceState
+                    {
+                        RepoRoot = Environment.CurrentDirectory,
+                        Runtime = RuntimeConfiguration.CreateDefault(),
+                        Models = new FileSystemConfigurationLoader().LoadModels(Environment.CurrentDirectory),
+                        Providers = new FileSystemConfigurationLoader().LoadProviders(Environment.CurrentDirectory)
+                    };
+                var provider = ProviderSelectionService.ResolveProvider(providerState, model, providerName);
 
                 var client = new DefaultAgentClientFactory().Create(backend);
                 var result = await client.InvokeAsync(new AgentInvocationRequest
@@ -376,6 +553,7 @@ internal sealed class CliDispatcher
                     Timeout = TimeSpan.FromSeconds(timeoutSeconds),
                     ExtraArguments = extraArgs,
                     WorkspacePath = Path.GetFullPath(_workspacePath),
+                    Provider = provider,
                     EnableWorkspaceMcp = GetBoolOption(options, "workspace-mcp", false),
                     ToolHostPath = System.Reflection.Assembly.GetEntryAssembly()?.Location
                 });

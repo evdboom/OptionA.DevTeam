@@ -48,3 +48,7 @@ Your handoff MUST include:
 - **No static I/O.** Never call `File.*`, `Directory.*`, `Process.Start`, or `Console.*` directly in core/domain logic. Inject `IFileSystem`, `IGitRepository`, `IConsoleOutput`, or equivalent interfaces so tests can substitute them without touching the real filesystem or spawning processes.
 - **No static clocks.** Never call `DateTime.Now` or `DateTimeOffset.UtcNow` directly in core logic. Inject `ISystemClock` (or equivalent) via constructor and use `_clock.UtcNow`. Tests must be able to control time.
 - **No fire-and-forget tasks.** Never discard an async result with `_ = Task.Run(...)` or ignore a returned `Task`. Exceptions in fire-and-forget tasks are silently swallowed. Use `await`, a `Channel<T>` consumer, or a properly supervised background loop.
+
+## Brownfield delta
+- When the prompt includes existing codebase context, explicitly decide whether you **extend**, **replace**, or **work around** the current pattern for this issue.
+- Report that decision in `APPROACH:` and explain it briefly in `RATIONALE:` so the runtime can write an audit trail for future developers.

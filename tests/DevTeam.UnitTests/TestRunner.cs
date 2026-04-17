@@ -22,9 +22,13 @@ internal static class TestRunner
         var r11 = await RunSuiteAsync("CursorNavigationTests", CursorNavigationTests.GetTests());
         var r12 = await RunSuiteAsync("WorktreeLifecycleTests", WorktreeLifecycleTests.GetTests());
         var r13 = await RunSuiteAsync("ReconServiceTests", ReconServiceTests.GetTests());
+        var r14 = await RunSuiteAsync("RunPreviewTests", RunPreviewTests.GetTests());
+        var r15 = await RunSuiteAsync("StatusReportTests", StatusReportTests.GetTests());
+        var r16 = await RunSuiteAsync("RunDiffTests", RunDiffTests.GetTests());
+        var r17 = await RunSuiteAsync("GitHubIssueSyncServiceTests", GitHubIssueSyncServiceTests.GetTests());
 
-        var passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed + r7.Passed + r8.Passed + r9.Passed + r10.Passed + r11.Passed + r12.Passed + r13.Passed;
-        var failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed + r7.Failed + r8.Failed + r9.Failed + r10.Failed + r11.Failed + r12.Failed + r13.Failed;
+        var passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed + r7.Passed + r8.Passed + r9.Passed + r10.Passed + r11.Passed + r12.Passed + r13.Passed + r14.Passed + r15.Passed + r16.Passed + r17.Passed;
+        var failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed + r7.Failed + r8.Failed + r9.Failed + r10.Failed + r11.Failed + r12.Failed + r13.Failed + r14.Failed + r15.Failed + r16.Failed + r17.Failed;
 
         Console.WriteLine();
         Console.WriteLine($"Results: {passed} passed, {failed} failed");

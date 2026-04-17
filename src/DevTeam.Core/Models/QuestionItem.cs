@@ -9,5 +9,7 @@ public sealed class QuestionItem
     public bool IsBlocking { get; set; } = true;
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public QuestionStatus Status { get; set; } = QuestionStatus.Open;
+    public DateTimeOffset CreatedAtUtc { get; set; }
     public string Answer { get; set; } = "";
+    public string ExternalReference { get; set; } = "";
 }

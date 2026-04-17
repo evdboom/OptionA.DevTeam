@@ -15,6 +15,7 @@ public static class AgentPromptBuilder
         ["fullstack-developer"] = ["plan", "tdd", "verify"],
         ["tester"] = ["tdd", "debug", "verify"],
         ["reviewer"] = ["review", "verify"],
+        ["auditor"] = ["scout", "review", "verify", "hygiene"],
         ["ux"] = ["verify"],
         ["user"] = ["verify"],
         ["game-designer"] = ["brainstorm", "review", "verify"],
@@ -23,7 +24,7 @@ public static class AgentPromptBuilder
 
     private static readonly HashSet<string> DesignOnlyRoles = new(StringComparer.OrdinalIgnoreCase)
     {
-        "planner", "orchestrator", "architect", "navigator", "analyst", "security", "reviewer"
+        "planner", "orchestrator", "architect", "navigator", "analyst", "security", "reviewer", "auditor"
     };
 
     private static string BuildFileBoundaryBlock(string roleSlug)
@@ -129,11 +130,13 @@ public static class AgentPromptBuilder
         {BuildFileBoundaryBlock(issue.RoleSlug)}
         Task:
         Work on the current issue using the available tools, active mode guardrails, and role guidance. Keep the scope narrow. If you discover follow-on work, a blocker, a prerequisite, or a natural decomposition that should not be absorbed into the current issue, use the workspace MCP tools when available and also summarize the outcome under ISSUES for compatibility. Avoid manually creating obvious next-stage architect, developer, or tester follow-ups for the same issue family when the runtime can chain those automatically. If you are blocked by missing information, say so clearly. Do not try to ask the user interactively. Instead, put every needed user question in the QUESTIONS section and use the workspace MCP tools when available to persist them immediately.
+        {BuildBrownfieldGuidanceBlock(state)}
 
         Reply in exactly this shape:
         OUTCOME: completed|blocked|failed
         SUMMARY:
         <short summary>
+        {BuildBrownfieldReplyShape(state)}
         ISSUES:
         - role=<role>; area=<shared-work-area-or-none>; priority=<1-100>; depends=<comma-separated existing issue ids or none>; title=<title>; detail=<detail>
         If no issues should be created, write `(none)` under ISSUES.
@@ -281,18 +284,20 @@ public static class AgentPromptBuilder
         if (!response.Success)
         {
             var error = string.IsNullOrWhiteSpace(response.StdErr) ? "Agent invocation failed." : response.StdErr.Trim();
-            return new ParsedAgentResponse("failed", error, [], [], [], [], []);
+            return new ParsedAgentResponse("failed", error, "", "", [], [], [], [], []);
         }
 
         var text = NormalizeStructuredResponse(response.StdOut).Trim();
         if (string.IsNullOrWhiteSpace(text))
         {
-            return new ParsedAgentResponse("completed", "Agent returned no summary.", [], [], [], [], []);
+            return new ParsedAgentResponse("completed", "Agent returned no summary.", "", "", [], [], [], [], []);
         }
 
         var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         var outcomeLine = lines.FirstOrDefault(line => line.StartsWith("OUTCOME:", StringComparison.OrdinalIgnoreCase));
         var summaryIndex = Array.FindIndex(lines, line => line.StartsWith("SUMMARY:", StringComparison.OrdinalIgnoreCase));
+        var approachIndex = Array.FindIndex(lines, line => line.StartsWith("APPROACH:", StringComparison.OrdinalIgnoreCase));
+        var rationaleIndex = Array.FindIndex(lines, line => line.StartsWith("RATIONALE:", StringComparison.OrdinalIgnoreCase));
         var selectedIssuesIndex = Array.FindIndex(lines, line => line.StartsWith("SELECTED_ISSUES:", StringComparison.OrdinalIgnoreCase));
         var issuesIndex = Array.FindIndex(lines, line => line.StartsWith("ISSUES:", StringComparison.OrdinalIgnoreCase));
         var superpowersIndex = Array.FindIndex(lines, line => line.StartsWith("SUPERPOWERS_USED:", StringComparison.OrdinalIgnoreCase));
@@ -312,7 +317,7 @@ public static class AgentPromptBuilder
         string summary;
         if (summaryIndex >= 0)
         {
-            var summaryEndIndexCandidates = new[] { issuesIndex, superpowersIndex, toolsIndex, questionsIndex }
+            var summaryEndIndexCandidates = new[] { approachIndex, rationaleIndex, issuesIndex, superpowersIndex, toolsIndex, questionsIndex }
                 .Where(index => index >= 0 && index > summaryIndex)
                 .ToList();
             var summaryEndIndex = summaryEndIndexCandidates.Count > 0 ? summaryEndIndexCandidates.Min() : lines.Length;
@@ -331,6 +336,10 @@ public static class AgentPromptBuilder
             summary = text;
         }
 
+        var approach = approachIndex >= 0
+            ? lines[approachIndex]["APPROACH:".Length..].Trim().ToLowerInvariant()
+            : "";
+        var rationale = ParseSection(lines, rationaleIndex, issuesIndex, superpowersIndex, toolsIndex, questionsIndex);
         var selectedIssueIds = ParseSelectedIssueIds(lines, selectedIssuesIndex, issuesIndex, superpowersIndex, toolsIndex, questionsIndex);
         var issues = ParseIssues(lines, issuesIndex, questionsIndex);
         var superpowersUsed = ParseSimpleList(lines, superpowersIndex, toolsIndex, questionsIndex);
@@ -339,6 +348,8 @@ public static class AgentPromptBuilder
         return new ParsedAgentResponse(
             outcome,
             string.IsNullOrWhiteSpace(summary) ? "No summary provided." : summary,
+            approach,
+            rationale,
             selectedIssueIds,
             issues,
             superpowersUsed,
@@ -354,7 +365,7 @@ public static class AgentPromptBuilder
         }
 
         var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
-        foreach (var header in new[] { "OUTCOME:", "SUMMARY:", "SELECTED_ISSUES:", "ISSUES:", "SUPERPOWERS_USED:", "TOOLS_USED:", "QUESTIONS:" })
+        foreach (var header in new[] { "OUTCOME:", "SUMMARY:", "APPROACH:", "RATIONALE:", "SELECTED_ISSUES:", "ISSUES:", "SUPERPOWERS_USED:", "TOOLS_USED:", "QUESTIONS:" })
         {
             normalized = Regex.Replace(
                 normalized,
@@ -391,6 +402,37 @@ public static class AgentPromptBuilder
             openQuestions.Select(item => $"- #{item.Id} [{(item.IsBlocking ? "blocking" : "non-blocking")}] {item.Text}"));
     }
 
+    private static string BuildBrownfieldGuidanceBlock(WorkspaceState state)
+    {
+        if (string.IsNullOrWhiteSpace(state.CodebaseContext))
+        {
+            return "";
+        }
+
+        return """
+
+        Brownfield delta:
+        You are working in an existing codebase with prior patterns and constraints. In addition to the summary, explain how you handled the existing code:
+        - APPROACH must be one of: extend, replace, workaround
+        - RATIONALE should explain why that approach fit the existing codebase
+        Keep this decision scoped to the current issue only.
+        """;
+    }
+
+    private static string BuildBrownfieldReplyShape(WorkspaceState state)
+    {
+        if (string.IsNullOrWhiteSpace(state.CodebaseContext))
+        {
+            return "";
+        }
+
+        return """
+        APPROACH: extend|replace|workaround
+        RATIONALE:
+        <one short rationale about how you handled the existing codebase>
+        """;
+    }
+
     private static string BuildDecisionBlock(WorkspaceState state)
     {
         var recentDecisions = state.Decisions
@@ -405,6 +447,29 @@ public static class AgentPromptBuilder
         return string.Join(
             "\n",
             recentDecisions.Select(item => $"- #{item.Id} [{item.Source}] {item.Title}: {item.Detail}"));
+    }
+
+    private static string ParseSection(
+        string[] lines,
+        int startIndex,
+        params int[] endIndexes)
+    {
+        if (startIndex < 0)
+        {
+            return "";
+        }
+
+        var endIndex = endIndexes
+            .Where(index => index >= 0 && index > startIndex)
+            .DefaultIfEmpty(lines.Length)
+            .Min();
+        var inlineContent = lines[startIndex].Split(':', 2).Skip(1).FirstOrDefault()?.Trim() ?? "";
+        if (!string.IsNullOrWhiteSpace(inlineContent))
+        {
+            return inlineContent;
+        }
+
+        return string.Join('\n', lines.Skip(startIndex + 1).Take(endIndex - startIndex - 1)).Trim();
     }
 
     private static string BuildCandidateBlock(IReadOnlyList<IssueItem> candidates)

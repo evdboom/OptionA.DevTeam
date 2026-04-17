@@ -16,6 +16,8 @@ internal static class ReconServiceTests
         new("BuildPrompt_InjectsCodebaseContext_ForPlannerRole", BuildPrompt_InjectsCodebaseContext_ForPlannerRole),
         new("BuildPrompt_OmitsCodebaseContext_WhenEmpty", BuildPrompt_OmitsCodebaseContext_WhenEmpty),
         new("BuildPrompt_OmitsCodebaseContext_ForTesterRole", BuildPrompt_OmitsCodebaseContext_ForTesterRole),
+        new("BuildPrompt_IncludesBrownfieldDeltaInstructions", BuildPrompt_IncludesBrownfieldDeltaInstructions),
+        new("ParseResponse_ReadsBrownfieldApproachAndRationale", ParseResponse_ReadsBrownfieldApproachAndRationale),
         new("WorkspaceStore_WritesCodebaseContextFile_WhenPresent", WorkspaceStore_WritesCodebaseContextFile_WhenPresent),
         new("WorkspaceStore_DoesNotWriteContextFile_WhenEmpty", WorkspaceStore_DoesNotWriteContextFile_WhenEmpty),
     ];
@@ -147,6 +149,53 @@ internal static class ReconServiceTests
         var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
 
         Assert.DoesNotContain("Codebase context", prompt);
+        return Task.CompletedTask;
+    }
+
+    private static Task BuildPrompt_IncludesBrownfieldDeltaInstructions()
+    {
+        var state = new WorkspaceState
+        {
+            RepoRoot = "/repo",
+            CodebaseContext = "## Existing patterns\nMVC controllers",
+            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+        };
+        var issue = new IssueItem { Id = 1, Title = "Update controller", RoleSlug = "developer", Status = ItemStatus.Open };
+        state.Issues.Add(issue);
+
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+
+        Assert.Contains("Brownfield delta", prompt);
+        Assert.Contains("APPROACH: extend|replace|workaround", prompt);
+        Assert.Contains("RATIONALE:", prompt);
+        return Task.CompletedTask;
+    }
+
+    private static Task ParseResponse_ReadsBrownfieldApproachAndRationale()
+    {
+        var parsed = AgentPromptBuilder.ParseResponse(new AgentInvocationResult
+        {
+            ExitCode = 0,
+            StdOut = """
+                OUTCOME: completed
+                SUMMARY:
+                Updated the controller safely.
+                APPROACH: extend
+                RATIONALE:
+                The existing controller pattern already matches the feature boundary.
+                ISSUES:
+                (none)
+                SUPERPOWERS_USED:
+                (none)
+                TOOLS_USED:
+                (none)
+                QUESTIONS:
+                (none)
+                """
+        });
+
+        Assert.That(parsed.Approach == "extend", $"Expected approach 'extend' but got '{parsed.Approach}'");
+        Assert.Contains("existing controller pattern", parsed.Rationale);
         return Task.CompletedTask;
     }
 

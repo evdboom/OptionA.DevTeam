@@ -29,12 +29,18 @@ public sealed class BudgetService : IBudgetService
                 .ToList();
             if (affordable.Count > 0)
             {
-                // Prefer cross-family when excludeFamily is set
-                var crossFamily = excludeFamily is not null
-                    ? affordable.Where(m => !string.Equals(m!.EffectiveFamily, excludeFamily, StringComparison.OrdinalIgnoreCase)).ToList()
-                    : null;
-                var pool = crossFamily?.Count > 0 ? crossFamily : affordable;
-                return pool[PoolRng.Next(pool.Count)]!;
+                if (excludeFamily is null)
+                {
+                    return affordable[PoolRng.Next(affordable.Count)]!;
+                }
+
+                var crossFamily = affordable
+                    .Where(m => !string.Equals(m!.EffectiveFamily, excludeFamily, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (crossFamily.Count > 0)
+                {
+                    return crossFamily[PoolRng.Next(crossFamily.Count)]!;
+                }
             }
         }
 

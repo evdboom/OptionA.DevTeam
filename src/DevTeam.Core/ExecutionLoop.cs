@@ -101,6 +101,8 @@ public class LoopExecutor(
             }
 
             var pendingRuns = new List<PendingAgentRun>();
+            var canCaptureChangedPathsReliably = state.Runtime.WorktreeMode || runsToExecute.Count <= 1;
+            var sharedGitStatusBeforeRun = _git.TryCaptureStatus(state.RepoRoot);
             foreach (var queuedRun in runsToExecute)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -110,6 +112,10 @@ public class LoopExecutor(
 
                 // Allocate a git worktree for this run if worktree mode is enabled
                 var worktreePath = AllocateWorktree(state, queuedRun);
+                var workingDirectory = worktreePath ?? state.RepoRoot;
+                var gitStatusBeforeRun = worktreePath is null
+                    ? sharedGitStatusBeforeRun
+                    : _git.TryCaptureStatus(workingDirectory);
 
                 Log(log, options.Verbosity, $"  Running issue #{queuedRun.IssueId} as {queuedRun.RoleSlug} via {queuedRun.ModelName}");
                 var runIssue = state.Issues.FirstOrDefault(i => i.Id == queuedRun.IssueId);
@@ -132,7 +138,9 @@ public class LoopExecutor(
                     queuedRun,
                     sessionId,
                     ExecuteRunAsync(state, options, queuedRun, sessionId, worktreePath, cancellationToken),
-                    _clock.UtcNow));
+                    _clock.UtcNow,
+                    workingDirectory,
+                    gitStatusBeforeRun));
             }
 
             _store.Save(state);
@@ -140,22 +148,51 @@ public class LoopExecutor(
             while (pendingRuns.Count > 0)
             {
                 var completed = await AwaitNextCompletionAsync(pendingRuns, options, log, cancellationToken);
+                var pendingRun = pendingRuns.First(item => item.Run.RunId == completed.Run.RunId);
                 pendingRuns.RemoveAll(item => item.Run.RunId == completed.Run.RunId);
                 _runtime.MergeWorkspaceAdditions(state, _store.Load());
+                var createdQuestionIds = new List<int>();
                 if (completed.Questions.Count > 0)
                 {
-                    _runtime.AddQuestions(state, completed.Questions);
+                    createdQuestionIds = _runtime.AddQuestions(state, completed.Questions)
+                        .Select(item => item.Id)
+                        .ToList();
                 }
+                var createdIssueIds = new List<int>();
                 if (completed.Issues.Count > 0)
                 {
-                    _runtime.AddGeneratedIssues(state, completed.Run.IssueId, completed.Issues);
+                    createdIssueIds = _runtime.AddGeneratedIssues(state, completed.Run.IssueId, completed.Issues)
+                        .Select(item => item.Id)
+                        .ToList();
                 }
-                _runtime.CompleteRun(state, completed.Run.RunId, completed.Outcome, completed.Summary, completed.SuperpowersUsed, completed.ToolsUsed);
+                var changedPaths = canCaptureChangedPathsReliably
+                    ? _git.GetPathsChangedSince(pendingRun.WorkingDirectory, pendingRun.GitStatusBeforeRun)
+                    : [];
+                var completedIssue = state.Issues.First(issue => issue.Id == completed.Run.IssueId);
+                var model = state.Models.FirstOrDefault(item => string.Equals(item.Name, completed.Run.ModelName, StringComparison.OrdinalIgnoreCase));
+                var usageTelemetry = UsageTelemetryExtractor.Extract(model, completed.Response);
+                _runtime.CompleteRun(
+                    state,
+                    completed.Run.RunId,
+                    completed.Outcome,
+                    completed.Summary,
+                    completed.SuperpowersUsed,
+                    completed.ToolsUsed,
+                    changedPaths,
+                    createdIssueIds,
+                    createdQuestionIds,
+                    completedIssue.Status,
+                    usageTelemetry.InputTokens,
+                    usageTelemetry.OutputTokens,
+                    usageTelemetry.EstimatedCostUsd);
                 var decision = state.Decisions.Last();
                 var persistedRun = state.AgentRuns.First(run => run.Id == completed.Run.RunId);
                 WriteRunArtifact(_store.WorkspacePath, completed.Run, persistedRun, completed.Response, completed.Outcome, completed.Summary);
-                WriteDecisionArtifact(_store.WorkspacePath, decision);
-                var completedIssue = state.Issues.First(issue => issue.Id == completed.Run.IssueId);
+                WriteDecisionArtifact(_store.WorkspacePath, decision, persistedRun);
+                if (!string.IsNullOrWhiteSpace(state.CodebaseContext) && string.Equals(completed.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteBrownfieldDeltaLog(_store.WorkspacePath, completedIssue, persistedRun, completed.Approach, completed.Rationale);
+                }
 
                 // Merge worktree branch back into the main repo (if worktree mode active for this run)
                 FinalizeWorktree(state, completed, log, options.Verbosity);
@@ -197,6 +234,10 @@ public class LoopExecutor(
                 if (options.Verbosity == LoopVerbosity.Detailed)
                 {
                     Log(log, options.Verbosity, $"    Summary: {completed.Summary}");
+                    if (changedPaths.Count > 0)
+                    {
+                        Log(log, options.Verbosity, $"    Changed files: {string.Join(", ", changedPaths)}");
+                    }
                     if (completed.Questions.Count > 0)
                     {
                         Log(log, options.Verbosity, $"    Questions: {completed.Questions.Count}");
@@ -269,15 +310,41 @@ public class LoopExecutor(
         _runtime.StartRun(state, queuedRun.RunId, session.SessionId);
         _store.Save(state);
 
+        var gitStatusBeforeRun = _git.TryCaptureStatus(state.RepoRoot);
         var result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, cancellationToken: cancellationToken);
 
         _runtime.MergeWorkspaceAdditions(state, _store.Load());
-        if (result.Questions.Count > 0) _runtime.AddQuestions(state, result.Questions);
-        if (result.Issues.Count > 0) _runtime.AddGeneratedIssues(state, result.Run.IssueId, result.Issues);
-        _runtime.CompleteRun(state, result.Run.RunId, result.Outcome, result.Summary, result.SuperpowersUsed, result.ToolsUsed);
+        var createdQuestionIds = result.Questions.Count > 0
+            ? _runtime.AddQuestions(state, result.Questions).Select(item => item.Id).ToList()
+            : [];
+        var createdIssueIds = result.Issues.Count > 0
+            ? _runtime.AddGeneratedIssues(state, result.Run.IssueId, result.Issues).Select(item => item.Id).ToList()
+            : [];
+        var changedPaths = _git.GetPathsChangedSince(state.RepoRoot, gitStatusBeforeRun);
+        var completedIssue = state.Issues.First(issue => issue.Id == result.Run.IssueId);
+        var model = state.Models.FirstOrDefault(item => string.Equals(item.Name, result.Run.ModelName, StringComparison.OrdinalIgnoreCase));
+        var usageTelemetry = UsageTelemetryExtractor.Extract(model, result.Response);
+        _runtime.CompleteRun(
+            state,
+            result.Run.RunId,
+            result.Outcome,
+            result.Summary,
+            result.SuperpowersUsed,
+            result.ToolsUsed,
+            changedPaths,
+            createdIssueIds,
+            createdQuestionIds,
+            completedIssue.Status,
+            usageTelemetry.InputTokens,
+            usageTelemetry.OutputTokens,
+            usageTelemetry.EstimatedCostUsd);
         var persistedRun = state.AgentRuns.First(r => r.Id == result.Run.RunId);
         WriteRunArtifact(_store.WorkspacePath, result.Run, persistedRun, result.Response, result.Outcome, result.Summary);
-        WriteDecisionArtifact(_store.WorkspacePath, state.Decisions.Last());
+        WriteDecisionArtifact(_store.WorkspacePath, state.Decisions.Last(), persistedRun);
+        if (!string.IsNullOrWhiteSpace(state.CodebaseContext) && string.Equals(result.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            WriteBrownfieldDeltaLog(_store.WorkspacePath, completedIssue, persistedRun, result.Approach, result.Rationale);
+        }
         _store.Save(state);
 
         return $"Issue #{issueId} completed with outcome: {result.Outcome}. Summary: {result.Summary}";
@@ -373,6 +440,27 @@ public class LoopExecutor(
         var runsDir = Path.Combine(workspacePath, "runs");
         _fileSystem.CreateDirectory(runsDir);
         var path = Path.Combine(runsDir, $"run-{queuedRun.RunId:000}.md");
+        var usageLines = new List<string>
+        {
+            $"- Committed credits: {persistedRun.CreditsUsed:0.##}",
+            $"- Premium credits: {persistedRun.PremiumCreditsUsed:0.##}"
+        };
+        if (persistedRun.InputTokens is int inputTokens || persistedRun.OutputTokens is int outputTokens)
+        {
+            var input = persistedRun.InputTokens ?? 0;
+            var output = persistedRun.OutputTokens ?? 0;
+            usageLines.Add($"- Tokens: {input + output} total ({input} input / {output} output)");
+        }
+        else
+        {
+            usageLines.Add("- Tokens: unavailable from backend");
+        }
+
+        if (persistedRun.EstimatedCostUsd is double estimatedCostUsd)
+        {
+            usageLines.Add($"- Estimated USD cost: ${estimatedCostUsd:0.####}");
+        }
+
         var content = $"""
         # Run {queuedRun.RunId}
 
@@ -383,6 +471,7 @@ public class LoopExecutor(
         - Backend: {response.BackendName}
         - Session: {response.SessionId}
         - Outcome: {outcome}
+        - Resulting issue status: {(persistedRun.ResultingIssueStatus?.ToString() ?? "(none)")}
 
         ## Summary
 
@@ -396,6 +485,22 @@ public class LoopExecutor(
 
         {(persistedRun.ToolsUsed.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.ToolsUsed.Select(item => $"- {item}")))}
 
+        ## Usage
+
+        {string.Join(Environment.NewLine, usageLines)}
+
+        ## Changed Files
+
+        {(persistedRun.ChangedPaths.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.ChangedPaths.Select(item => $"- {item}")))}
+
+        ## Created Issues
+
+        {(persistedRun.CreatedIssueIds.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.CreatedIssueIds.Select(item => $"- #{item}")))}
+
+        ## Created Questions
+
+        {(persistedRun.CreatedQuestionIds.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.CreatedQuestionIds.Select(item => $"- #{item}")))}
+
         ## Output
 
         {response.StdOut}
@@ -407,11 +512,47 @@ public class LoopExecutor(
         _fileSystem.WriteAllText(path, content);
     }
 
-    private void WriteDecisionArtifact(string workspacePath, DecisionRecord decision)
+    private void WriteBrownfieldDeltaLog(
+        string workspacePath,
+        IssueItem issue,
+        AgentRun persistedRun,
+        string approach,
+        string rationale)
+    {
+        var path = Path.Combine(workspacePath, "brownfield-delta.md");
+        var existing = _fileSystem.FileExists(path)
+            ? _fileSystem.ReadAllText(path).TrimEnd()
+            : "# Brownfield Change Delta\n\nAppend-only log of how runs handled existing code patterns.\n";
+        var changedFiles = persistedRun.ChangedPaths.Count == 0
+            ? "- (none)"
+            : string.Join(Environment.NewLine, persistedRun.ChangedPaths.Select(item => $"- {item}"));
+        var entry = $"""
+
+        ## Run #{persistedRun.Id} — issue #{issue.Id} [{issue.RoleSlug}] {issue.Title}
+
+        - Outcome: {persistedRun.Status}
+        - Approach: {(string.IsNullOrWhiteSpace(approach) ? "(not specified)" : approach)}
+        - Created: {persistedRun.UpdatedAtUtc:O}
+
+        ### Rationale
+
+        {(string.IsNullOrWhiteSpace(rationale) ? "(not specified)" : rationale.Trim())}
+
+        ### Changed Files
+
+        {changedFiles}
+        """;
+        _fileSystem.WriteAllText(path, $"{existing}{entry}{Environment.NewLine}");
+    }
+
+    private void WriteDecisionArtifact(string workspacePath, DecisionRecord decision, AgentRun? relatedRun = null)
     {
         var decisionsDir = Path.Combine(workspacePath, "decisions");
         _fileSystem.CreateDirectory(decisionsDir);
         var path = Path.Combine(decisionsDir, $"decision-{decision.Id:000}.md");
+        var changedFiles = relatedRun?.ChangedPaths.Count > 0
+            ? string.Join(Environment.NewLine, relatedRun.ChangedPaths.Select(item => $"- {item}"))
+            : "(none)";
         var content = $"""
         # Decision {decision.Id}
 
@@ -428,6 +569,10 @@ public class LoopExecutor(
         ## Detail
 
         {decision.Detail}
+
+        ## Changed Files
+
+        {changedFiles}
         """;
         _fileSystem.WriteAllText(path, content);
     }
@@ -518,6 +663,7 @@ public class LoopExecutor(
         var workingDirectory = overrideWorkingDirectory ?? state.RepoRoot;
         try
         {
+            var provider = ProviderSelectionService.ResolveProvider(state, queuedRun.ModelName, options.ProviderName);
             var response = await client.InvokeAsync(new AgentInvocationRequest
             {
                 Prompt = prompt,
@@ -525,13 +671,14 @@ public class LoopExecutor(
                 SessionId = sessionId,
                 WorkingDirectory = workingDirectory,
                 WorkspacePath = _store.WorkspacePath,
+                Provider = provider,
                 Timeout = options.AgentTimeout,
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
                 ExternalMcpServers = state.McpServers
             }, cancellationToken);
             var parsed = AgentPromptBuilder.ParseResponse(response);
-            return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Issues, parsed.SuperpowersUsed, parsed.ToolsUsed, parsed.Questions);
+            return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Approach, parsed.Rationale, parsed.Issues, parsed.SuperpowersUsed, parsed.ToolsUsed, parsed.Questions);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -547,6 +694,8 @@ public class LoopExecutor(
                 response,
                 "failed",
                 response.StdErr,
+                "",
+                "",
                 [],
                 [],
                 [],
@@ -566,6 +715,8 @@ public class LoopExecutor(
                 response,
                 "failed",
                 response.StdErr,
+                "",
+                "",
                 [],
                 [],
                 [],
@@ -592,16 +743,19 @@ public class LoopExecutor(
         var orchestratorSession = _runtime.GetOrCreateExecutionOrchestratorSession(state);
         var prompt = AgentPromptBuilder.BuildOrchestratorPrompt(state, candidates, options.MaxSubagents);
         var client = _agentClientFactory.Create(options.Backend);
+        var orchestratorModel = SeedData.GetPolicy(state, "orchestrator").PrimaryModel;
+        var provider = ProviderSelectionService.ResolveProvider(state, orchestratorModel, options.ProviderName);
         Log(log, options.Verbosity, $"  Running execution orchestrator via {options.Backend} (session {orchestratorSession.SessionId}, candidates {candidates.Count}, max {options.MaxSubagents})");
         var startedAtUtc = _clock.UtcNow;
         var response = await AwaitInvocationWithHeartbeatAsync(
             client.InvokeAsync(new AgentInvocationRequest
             {
                 Prompt = prompt,
-                Model = SeedData.GetPolicy(state, "orchestrator").PrimaryModel,
+                Model = orchestratorModel,
                 SessionId = orchestratorSession.SessionId,
                 WorkingDirectory = state.RepoRoot,
                 WorkspacePath = _store.WorkspacePath,
+                Provider = provider,
                 Timeout = options.AgentTimeout,
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,

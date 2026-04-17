@@ -46,11 +46,10 @@ public class DevTeamRuntime
         var mode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, normalized, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException($"Unknown mode '{modeSlug}'. Valid modes: {string.Join(", ", state.Modes.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase))}");
         state.Runtime.ActiveModeSlug = mode.Slug;
-        state.Runtime.DefaultPipelineRoles = mode.Slug.Trim().ToLowerInvariant() switch
+        if (!state.Runtime.PipelineRolesCustomized)
         {
-            "creative-writing" => ["architect", "developer", "reviewer"],
-            _ => ["architect", "developer", "tester"]
-        };
+            state.Runtime.DefaultPipelineRoles = GetModeDefaultPipelineRoles(mode.Slug);
+        }
         state.Runtime.AutoApproveEnabled = string.Equals(mode.Slug, "autopilot", StringComparison.OrdinalIgnoreCase);
         RememberDecision(state, "Updated active mode", mode.Slug, "mode");
     }
@@ -104,6 +103,43 @@ public class DevTeamRuntime
         RememberDecision(state, "Updated default max-subagents", value.ToString(), "runtime");
     }
 
+    public void SetDefaultPipelineRoles(WorkspaceState state, IEnumerable<string> roleSlugs)
+    {
+        var requestedRoles = roleSlugs
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .ToList();
+        if (requestedRoles.Count == 0)
+        {
+            throw new InvalidOperationException("Provide at least one role for the pipeline.");
+        }
+
+        var normalizedRoles = new List<string>();
+        foreach (var requestedRole in requestedRoles)
+        {
+            _issueService.TryResolveRoleSlug(state, requestedRole, out var resolvedRole);
+            if (!state.Roles.Any(role => string.Equals(role.Slug, resolvedRole, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Unknown role '{requestedRole}'. Valid roles: {string.Join(", ", GetKnownRoleSlugs(state))}");
+            }
+
+            if (!normalizedRoles.Contains(resolvedRole, StringComparer.OrdinalIgnoreCase))
+            {
+                normalizedRoles.Add(resolvedRole);
+            }
+        }
+
+        state.Runtime.DefaultPipelineRoles = normalizedRoles;
+        state.Runtime.PipelineRolesCustomized = true;
+        RememberDecision(state, "Updated default pipeline roles", string.Join(" -> ", normalizedRoles), "pipeline");
+    }
+
+    public void ResetDefaultPipelineRoles(WorkspaceState state)
+    {
+        state.Runtime.DefaultPipelineRoles = GetModeDefaultPipelineRoles(state.Runtime.ActiveModeSlug);
+        state.Runtime.PipelineRolesCustomized = false;
+        RememberDecision(state, "Reset default pipeline roles", string.Join(" -> ", state.Runtime.DefaultPipelineRoles), "pipeline");
+    }
+
     public void RecordPlanningFeedback(WorkspaceState state, string feedback) =>
         _planningService.RecordPlanningFeedback(state, feedback);
 
@@ -151,6 +187,13 @@ public class DevTeamRuntime
         return issue;
     }
 
+    public IssueItem EditIssue(WorkspaceState state, IssueEditRequest request)
+    {
+        var issue = _issueService.EditIssue(state, request);
+        RememberDecision(state, $"Edited issue #{issue.Id}", BuildIssueEditDecisionDetail(request, issue), "issue-edit", issueId: issue.Id);
+        return issue;
+    }
+
     public WorkspaceSnapshot BuildWorkspaceSnapshot(WorkspaceState state)
     {
         _issueService.EnsurePipelineAssignments(state);
@@ -174,6 +217,104 @@ public class DevTeamRuntime
     {
         _issueService.EnsurePipelineAssignments(state);
         return _issueService.GetReadyIssues(state, maxSubagents);
+    }
+
+    public IReadOnlyList<QueuedRunInfo> BuildRunPreview(WorkspaceState state, int maxSubagents)
+    {
+        _issueService.EnsurePipelineAssignments(state);
+        var readyIssues = _issueService.GetReadyIssues(state, maxSubagents);
+        if (readyIssues.Count == 0)
+        {
+            return [];
+        }
+
+        var previewState = new WorkspaceState
+        {
+            Models = state.Models,
+            Roles = state.Roles,
+            Budget = new BudgetState
+            {
+                TotalCreditCap = state.Budget.TotalCreditCap,
+                PremiumCreditCap = state.Budget.PremiumCreditCap,
+                CreditsCommitted = state.Budget.CreditsCommitted,
+                PremiumCreditsCommitted = state.Budget.PremiumCreditsCommitted
+            }
+        };
+
+        var preview = new List<QueuedRunInfo>();
+        foreach (var issue in readyIssues)
+        {
+            var excludeFamily = GetExcludeFamilyForReview(state, issue);
+            var model = _budgetService.SelectModelForRole(previewState, issue.RoleSlug, excludeFamily);
+            _budgetService.CommitCredits(previewState, model);
+            preview.Add(new QueuedRunInfo
+            {
+                IssueId = issue.Id,
+                Title = issue.Title,
+                RoleSlug = issue.RoleSlug,
+                Area = issue.Area,
+                ModelName = model.Name
+            });
+        }
+
+        return preview;
+    }
+
+    public RunDiffReport BuildRunDiff(WorkspaceState state, int runId, int? compareToRunId = null)
+    {
+        var primaryRun = state.AgentRuns.FirstOrDefault(item => item.Id == runId)
+            ?? throw new InvalidOperationException($"Run #{runId} was not found.");
+        var primaryIssue = state.Issues.FirstOrDefault(item => item.Id == primaryRun.IssueId);
+        var primaryCreatedIssues = state.Issues
+            .Where(item => primaryRun.CreatedIssueIds.Contains(item.Id))
+            .OrderBy(item => item.Id)
+            .ToList();
+        var primaryCreatedQuestions = state.Questions
+            .Where(item => primaryRun.CreatedQuestionIds.Contains(item.Id))
+            .OrderBy(item => item.Id)
+            .ToList();
+
+        if (compareToRunId is null)
+        {
+            return new RunDiffReport
+            {
+                PrimaryRun = primaryRun,
+                PrimaryIssue = primaryIssue,
+                PrimaryCreatedIssues = primaryCreatedIssues,
+                PrimaryCreatedQuestions = primaryCreatedQuestions,
+                PrimaryOnlyChangedPaths = primaryRun.ChangedPaths
+            };
+        }
+
+        var compareRun = state.AgentRuns.FirstOrDefault(item => item.Id == compareToRunId.Value)
+            ?? throw new InvalidOperationException($"Run #{compareToRunId.Value} was not found.");
+        var compareIssue = state.Issues.FirstOrDefault(item => item.Id == compareRun.IssueId);
+        var compareCreatedIssues = state.Issues
+            .Where(item => compareRun.CreatedIssueIds.Contains(item.Id))
+            .OrderBy(item => item.Id)
+            .ToList();
+        var compareCreatedQuestions = state.Questions
+            .Where(item => compareRun.CreatedQuestionIds.Contains(item.Id))
+            .OrderBy(item => item.Id)
+            .ToList();
+
+        var primaryChanged = primaryRun.ChangedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var compareChanged = compareRun.ChangedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return new RunDiffReport
+        {
+            PrimaryRun = primaryRun,
+            PrimaryIssue = primaryIssue,
+            PrimaryCreatedIssues = primaryCreatedIssues,
+            PrimaryCreatedQuestions = primaryCreatedQuestions,
+            CompareRun = compareRun,
+            CompareIssue = compareIssue,
+            CompareCreatedIssues = compareCreatedIssues,
+            CompareCreatedQuestions = compareCreatedQuestions,
+            SharedChangedPaths = primaryChanged.Intersect(compareChanged, StringComparer.OrdinalIgnoreCase).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            PrimaryOnlyChangedPaths = primaryChanged.Except(compareChanged, StringComparer.OrdinalIgnoreCase).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            CompareOnlyChangedPaths = compareChanged.Except(primaryChanged, StringComparer.OrdinalIgnoreCase).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList()
+        };
     }
 
     public IReadOnlyList<string> PrepareForLoop(WorkspaceState state)
@@ -466,6 +607,8 @@ public class DevTeamRuntime
                 IssueId = issue.Id,
                 RoleSlug = issue.RoleSlug,
                 ModelName = model.Name,
+                CreditsUsed = model.Cost,
+                PremiumCreditsUsed = model.IsPremium ? model.Cost : 0,
                 Status = AgentRunStatus.Queued,
                 UpdatedAtUtc = _clock.UtcNow
             };
@@ -497,7 +640,14 @@ public class DevTeamRuntime
         string outcome,
         string summary,
         IEnumerable<string>? superpowersUsed = null,
-        IEnumerable<string>? toolsUsed = null)
+        IEnumerable<string>? toolsUsed = null,
+        IEnumerable<string>? changedPaths = null,
+        IEnumerable<int>? createdIssueIds = null,
+        IEnumerable<int>? createdQuestionIds = null,
+        ItemStatus? resultingIssueStatus = null,
+        int? inputTokens = null,
+        int? outputTokens = null,
+        double? estimatedCostUsd = null)
     {
         var run = state.AgentRuns.FirstOrDefault(item => item.Id == runId)
             ?? throw new InvalidOperationException($"Run #{runId} was not found.");
@@ -505,8 +655,26 @@ public class DevTeamRuntime
             ?? throw new InvalidOperationException($"Issue #{run.IssueId} was not found.");
 
         run.Summary = summary.Trim();
+        run.ResultingIssueStatus = resultingIssueStatus;
         run.SuperpowersUsed = superpowersUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
         run.ToolsUsed = toolsUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+        run.ChangedPaths = changedPaths?
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+        run.CreatedIssueIds = createdIssueIds?
+            .Distinct()
+            .OrderBy(item => item)
+            .ToList() ?? [];
+        run.CreatedQuestionIds = createdQuestionIds?
+            .Distinct()
+            .OrderBy(item => item)
+            .ToList() ?? [];
+        run.InputTokens = inputTokens;
+        run.OutputTokens = outputTokens;
+        run.EstimatedCostUsd = estimatedCostUsd;
         run.UpdatedAtUtc = _clock.UtcNow;
         switch (outcome.Trim().ToLowerInvariant())
         {
@@ -556,6 +724,21 @@ public class DevTeamRuntime
     public StatusReport BuildStatusReport(WorkspaceState state)
     {
         _issueService.EnsurePipelineAssignments(state);
+        var now = _clock.UtcNow;
+        var queuedRuns = state.AgentRuns.Where(run => run.Status is AgentRunStatus.Queued or AgentRunStatus.Running).ToList();
+        var openQuestions = state.Questions.Where(question => question.Status == QuestionStatus.Open).OrderBy(question => question.Id).ToList();
+        var openQuestionAges = openQuestions.ToDictionary(
+            question => question.Id,
+            question => now - NormalizeQuestionCreatedAt(question, now));
+        var blockingQuestions = openQuestions
+            .Where(question => question.IsBlocking)
+            .OrderBy(question => NormalizeQuestionCreatedAt(question, now))
+            .ThenBy(question => question.Id)
+            .ToList();
+        var loopState = queuedRuns.Count > 0 ? "running" : GetLoopStateWhenNoReadyWork(state);
+        var isWaitingOnBlockingQuestion = string.Equals(loopState, "waiting-for-user", StringComparison.OrdinalIgnoreCase)
+            && blockingQuestions.Count > 0;
+
         return new StatusReport
         {
             Counts = new Dictionary<string, int>
@@ -568,14 +751,58 @@ public class DevTeamRuntime
                 ["roles"] = state.Roles.Count,
                 ["superpowers"] = state.Superpowers.Count
             },
+            LoopState = loopState,
             Budget = state.Budget,
-            QueuedRuns = state.AgentRuns.Where(run => run.Status is AgentRunStatus.Queued or AgentRunStatus.Running).ToList(),
-            OpenQuestions = state.Questions.Where(question => question.Status == QuestionStatus.Open).ToList(),
+            QueuedRuns = queuedRuns,
+            OpenQuestions = openQuestions,
+            OpenQuestionAges = openQuestionAges,
+            RoleUsage = state.AgentRuns
+                .GroupBy(run => run.RoleSlug, StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var inputTokens = group
+                        .Where(run => run.InputTokens.HasValue)
+                        .Sum(run => run.InputTokens ?? 0);
+                    var outputTokens = group
+                        .Where(run => run.OutputTokens.HasValue)
+                        .Sum(run => run.OutputTokens ?? 0);
+                    var estimatedUsd = group
+                        .Where(run => run.EstimatedCostUsd.HasValue)
+                        .Sum(run => run.EstimatedCostUsd ?? 0);
+                    return new RoleUsageSummary
+                    {
+                        RoleSlug = group.Key,
+                        RunCount = group.Count(),
+                        CompletedRunCount = group.Count(run => run.Status == AgentRunStatus.Completed),
+                        CreditsUsed = group.Sum(run => run.CreditsUsed),
+                        PremiumCreditsUsed = group.Sum(run => run.PremiumCreditsUsed),
+                        InputTokens = group.Any(run => run.InputTokens.HasValue) ? inputTokens : null,
+                        OutputTokens = group.Any(run => run.OutputTokens.HasValue) ? outputTokens : null,
+                        EstimatedCostUsd = group.Any(run => run.EstimatedCostUsd.HasValue) ? estimatedUsd : null
+                    };
+                })
+                .OrderByDescending(item => item.CreditsUsed)
+                .ThenBy(item => item.RoleSlug, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            IsWaitingOnBlockingQuestion = isWaitingOnBlockingQuestion,
+            OldestBlockingQuestionAge = isWaitingOnBlockingQuestion
+                ? openQuestionAges[blockingQuestions[0].Id]
+                : null,
             RecentDecisions = state.Decisions
                 .OrderByDescending(item => item.CreatedAtUtc)
                 .Take(5)
                 .ToList()
         };
+    }
+
+    private static DateTimeOffset NormalizeQuestionCreatedAt(QuestionItem question, DateTimeOffset now)
+    {
+        if (question.CreatedAtUtc == default || question.CreatedAtUtc > now)
+        {
+            return now;
+        }
+
+        return question.CreatedAtUtc;
     }
 
     private List<QueuedRunInfo> QueueIssues(WorkspaceState state, IReadOnlyList<IssueItem> issues)
@@ -597,6 +824,8 @@ public class DevTeamRuntime
                 IssueId = issue.Id,
                 RoleSlug = issue.RoleSlug,
                 ModelName = model.Name,
+                CreditsUsed = model.Cost,
+                PremiumCreditsUsed = model.IsPremium ? model.Cost : 0,
                 Status = AgentRunStatus.Queued,
                 UpdatedAtUtc = _clock.UtcNow
             };
@@ -643,6 +872,64 @@ public class DevTeamRuntime
     {
         var normalized = roleSlug.Trim().ToLowerInvariant();
         return normalized is "reviewer" or "review" or "security" or "tester";
+    }
+
+    private static List<string> GetModeDefaultPipelineRoles(string modeSlug) =>
+        modeSlug.Trim().ToLowerInvariant() switch
+        {
+            "creative-writing" => ["architect", "developer", "reviewer"],
+            "github" => ["developer", "reviewer"],
+            _ => ["architect", "developer", "tester"]
+        };
+
+    private static string BuildIssueEditDecisionDetail(IssueEditRequest request, IssueItem issue)
+    {
+        var changes = new List<string>();
+        if (request.Title is not null)
+        {
+            changes.Add($"title=\"{issue.Title}\"");
+        }
+
+        if (request.Detail is not null)
+        {
+            changes.Add("detail updated");
+        }
+
+        if (request.RoleSlug is not null)
+        {
+            changes.Add($"role={issue.RoleSlug}");
+        }
+
+        if (request.Area is not null || request.ClearArea)
+        {
+            changes.Add($"area={(string.IsNullOrWhiteSpace(issue.Area) ? "(none)" : issue.Area)}");
+        }
+
+        if (request.Priority is not null)
+        {
+            changes.Add($"priority={issue.Priority}");
+        }
+
+        if (request.Status is not null)
+        {
+            changes.Add($"status={issue.Status}");
+        }
+
+        if (request.DependsOnIssueIds is not null || request.ClearDependencies)
+        {
+            changes.Add(issue.DependsOnIssueIds.Count == 0
+                ? "dependencies cleared"
+                : $"depends-on={string.Join(", ", issue.DependsOnIssueIds.OrderBy(id => id))}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.NotesToAppend))
+        {
+            changes.Add("note appended");
+        }
+
+        return changes.Count == 0
+            ? "No user-visible fields changed."
+            : string.Join("; ", changes);
     }
 
     private DecisionRecord RememberDecision(
