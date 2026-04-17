@@ -2,7 +2,7 @@
   {
     "Name": "claude-opus-4.6",
     "Provider": "Anthropic",
-    "Context": "192K",
+    "Context": "200K",
     "Description": "Most capable Anthropic model. Deep reasoning, complex problem-solving, sophisticated reasoning.",
     "Strengths": ["Architect", "Navigator", "Reviewer"],
     "BestFor": "Complex architecture decisions, large refactors, multi-file reasoning, thorough code review",
@@ -10,9 +10,19 @@
     "Default": false
   },
   {
+    "Name": "claude-opus-4.7",
+    "Provider": "Anthropic",
+    "Context": "200K",
+    "Description": "Latest flagship Anthropic model. Highest reasoning capability, exceptional at complex system design.",
+    "Strengths": ["Architect", "Navigator", "Reviewer", "Lead Engineer"],
+    "BestFor": "Mission-critical architecture, large-scale refactors, deep technical reviews, organizational-level decisions",
+    "Cost": 7.5,
+    "Default": false
+  },
+  {
     "Name": "claude-sonnet-4.6",
     "Provider": "Anthropic",
-    "Context": "160K",
+    "Context": "200K",
     "Description": "General-purpose coding and agent tasks. Reliable completions, reasoning under pressure, multimodal.",
     "Strengths": ["Developer", "Orchestrator", "Planner", "UX", "Security", "Analyst", "Refactorer"],
     "BestFor": "Complex problem-solving, agentic workflows, visual reasoning, refactoring under pressure",
@@ -22,7 +32,7 @@
   {
     "Name": "claude-haiku-4.5",
     "Provider": "Anthropic",
-    "Context": "160K",
+    "Context": "200K",
     "Description": "Fast help with simple or repetitive tasks. Balances speed with quality output.",
     "Strengths": ["User", "Docs"],
     "BestFor": "Small edits, formatting, lightweight code explanations, quick syntax help",
@@ -32,6 +42,7 @@
   {
     "Name": "gpt-5.4",
     "Provider": "OpenAI",
+    "Context": "400K",
     "Description": "Deep reasoning and debugging. Complex reasoning, code analysis, technical decision-making.",
     "Strengths": ["Architect", "Developer", "Tester", "DevOps"],
     "BestFor": "Complex code generation, multi-step reasoning, architecture fallback, technical decisions",
@@ -41,6 +52,7 @@
   {
     "Name": "gpt-5.3-codex",
     "Provider": "OpenAI",
+    "Context": "400K",
     "Description": "Higher-quality code on complex engineering tasks: features, tests, debugging, refactors, reviews.",
     "Strengths": ["Developer", "Tester", "Refactorer", "Backend Developer", "Frontend Developer"],
     "BestFor": "Feature implementation, test writing, debugging, code refactors, code reviews without lengthy instructions",
@@ -50,6 +62,7 @@
   {
     "Name": "gpt-5.4-mini",
     "Provider": "OpenAI",
+    "Context": "400K",
     "Description": "Agentic development. Codebase exploration, especially effective with grep-style tools.",
     "Strengths": ["Developer", "Tester", "DevOps", "Refactorer"],
     "BestFor": "Agentic tasks, codebase exploration, budget-conscious development iterations",
@@ -59,6 +72,7 @@
   {
     "Name": "gpt-5.1-codex-mini",
     "Provider": "OpenAI",
+    "Context": "400K",
     "Description": "Deep reasoning and debugging at low cost. Multi-step problem solving.",
     "Strengths": ["Developer", "Tester"],
     "BestFor": "Budget-friendly debugging, multi-step problem solving, architecture-level code analysis",
@@ -68,7 +82,7 @@
   {
     "Name": "gemini-3.1-pro-preview",
     "Provider": "Google",
-    "Context": "173K",
+    "Context": "200K",
     "Description": "Effective edit-then-test loops with high tool precision. Advanced long-context reasoning.",
     "Strengths": ["Tester", "Architect", "Game Designer"],
     "BestFor": "Edit-then-test workflows, large codebase analysis, architecture review, creative design",
