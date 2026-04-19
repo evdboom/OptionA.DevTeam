@@ -51,6 +51,7 @@ internal sealed partial class ShellService : IDisposable
     }
 
     public bool IsLoopRunning => _loopTask is { IsCompleted: false };
+
     public string PromptText => IsLoopRunning ? "devteam (running)> " : "devteam> ";
 
     /// <summary>Snapshot of data needed by the layout panels. Updated on every state change.</summary>
@@ -79,6 +80,7 @@ internal sealed partial class ShellService : IDisposable
         _startOptions = startOptions;
         _requestExit = requestExit;
         _clock = clock ?? new SystemClock();
+        _adventureModeEnabled = GetBoolOption(startOptions.Options, "adventure", false);
     }
 
     // ── Initialization ─────────────────────────────────────────────────────────
@@ -258,8 +260,21 @@ internal sealed partial class ShellService : IDisposable
                     return;
 
                 case "help":
-                    AddInteractiveHelp();
+                    AddInteractiveHelp(GetBoolOption(options, "all", false));
                     break;
+
+                case "adventure":
+                {
+                    var requested = GetPositionalValue(options) ?? GetOption(options, "enabled");
+                    var enable = string.IsNullOrWhiteSpace(requested)
+                        ? !IsAdventureModeEnabled
+                        : ParseBoolOrThrow(requested, "Usage: /adventure [on|off]");
+                    SetAdventureMode(enable);
+                    AddSuccess(enable
+                        ? "Adventure mode enabled. Arrow keys move, Enter chats, Esc returns to the normal shell."
+                        : "Adventure mode disabled.");
+                    break;
+                }
 
                 case "check-update":
                     await HandleCheckUpdateAsync();
@@ -1288,6 +1303,7 @@ internal sealed partial class ShellService : IDisposable
         {
             _layoutSnapshot = new ShellLayoutSnapshot(phase, showMiddle, agents, roadmap);
         }
+        UpdateAdventureRoles(state);
         NotifyStateChanged();
     }
 
