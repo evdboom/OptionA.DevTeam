@@ -164,7 +164,7 @@ internal static class ShellPanelBuilder
                     {
                         selectedLines.Add(allLines[i]);
                         windowStart = i;
-                        usedRows = contentRows;
+                        usedRows = Math.Min(contentRows, rowHeight);
                     }
                     break;
                 }
