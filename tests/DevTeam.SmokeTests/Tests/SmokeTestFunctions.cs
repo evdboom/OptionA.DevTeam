@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 
 using DevTeam.Cli;
 using DevTeam.Core;
@@ -551,7 +552,7 @@ internal static class SmokeTestFunctions
         try
         {
             var ghScriptPath = Path.Combine(tempRoot, OperatingSystem.IsWindows() ? "gh.cmd" : "gh");
-            File.WriteAllText(ghScriptPath, OperatingSystem.IsWindows() ? """
+            var ghScriptContent = OperatingSystem.IsWindows() ? """
             @echo off
             if "%1 %2"=="auth status" exit /b 0
             if "%1 %2"=="issue list" (
@@ -560,7 +561,7 @@ internal static class SmokeTestFunctions
             )
             echo Unexpected gh arguments 1>&2
             exit /b 1
-            """ : "#!/usr/bin/env sh\n"
+            """ : "#!/bin/sh\n"
             + "set -eu\n"
             + "if [ \"${1:-} ${2:-}\" = \"auth status\" ]; then\n"
             + "  exit 0\n"
@@ -572,7 +573,8 @@ internal static class SmokeTestFunctions
             + "  exit 0\n"
             + "fi\n"
             + "echo \"Unexpected gh arguments: $*\" 1>&2\n"
-            + "exit 1\n");
+            + "exit 1\n";
+            File.WriteAllText(ghScriptPath, ghScriptContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(ghScriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
