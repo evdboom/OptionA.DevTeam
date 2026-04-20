@@ -8,3 +8,6 @@ obj/
 .vs/
 nupkg/
 aot.devteam/
+build.log
+artifacts/
+testresults/

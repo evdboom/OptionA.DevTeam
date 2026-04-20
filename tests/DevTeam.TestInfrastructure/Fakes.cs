@@ -204,6 +204,7 @@ public static class TestFileSystem
                     }
                     catch
                     {
+                        // Best-effort attribute reset for temp test files.
                     }
                 }
 
@@ -212,6 +213,7 @@ public static class TestFileSystem
         }
         catch
         {
+            // Best-effort cleanup for temporary test directories.
         }
     }
 }

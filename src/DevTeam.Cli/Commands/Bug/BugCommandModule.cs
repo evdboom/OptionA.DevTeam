@@ -1,13 +1,8 @@
 namespace DevTeam.Cli;
 
-internal sealed class BugCommandModule : ICliCommandModule
+internal sealed class BugCommandModule(ICliCommandHandler bugReportHandler) : ICliCommandModule
 {
-    private readonly ICliCommandHandler _bugReportHandler;
-
-    public BugCommandModule(ICliCommandHandler bugReportHandler)
-    {
-        _bugReportHandler = bugReportHandler;
-    }
+    private readonly ICliCommandHandler _bugReportHandler = bugReportHandler;
 
     public void Register(ICliCommandRegistry registry)
     {

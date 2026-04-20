@@ -246,7 +246,7 @@ internal sealed class GitHubIssueSyncService(ICommandRunner? runner = null)
         return normalized.Trim('-');
     }
 
-    private void SyncQuestion(WorkspaceState state, DevTeamRuntime runtime, GitHubIssuePayload payload, GitHubSyncReport report)
+    private static void SyncQuestion(WorkspaceState state, DevTeamRuntime runtime, GitHubIssuePayload payload, GitHubSyncReport report)
     {
         var externalReference = BuildExternalReference(payload.Number);
         var existing = state.Questions.FirstOrDefault(item => string.Equals(item.ExternalReference, externalReference, StringComparison.OrdinalIgnoreCase));
@@ -303,7 +303,23 @@ internal sealed class GitHubIssueSyncService(ICommandRunner? runner = null)
             return existing;
         }
 
-        var created = runtime.AddIssue(state, payload.Title, payload.Detail, payload.RoleSlug, payload.Priority, null, [], payload.Area);
+        var created = runtime.AddIssue(
+            state,
+            new IssueRequest
+            {
+                Title = payload.Title,
+                Detail = payload.Detail,
+                RoleSlug = payload.RoleSlug,
+                Priority = payload.Priority,
+                RoadmapItemId = null,
+                DependsOn = [],
+                Area = payload.Area,
+                FamilyKey = null,
+                ParentIssueId = null,
+                PipelineId = null,
+                PipelineStageIndex = null,
+                ComplexityHint = null
+            });
         created.ExternalReference = externalReference;
         report.ImportedIssueCount++;
         return created;

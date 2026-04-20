@@ -4,7 +4,7 @@ namespace DevTeam.Cli.Shell;
 
 internal sealed partial class ShellService
 {
-    private bool _adventureModeEnabled;
+    private bool _adventureModeEnabled = GetBoolOption(startOptions.Options, "adventure", false);
     private List<AdventureRoleSlot> _adventureRoles = [];
     private readonly Dictionary<string, string> _adventureSpeechBubbles = new(StringComparer.OrdinalIgnoreCase);
 

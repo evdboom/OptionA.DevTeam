@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace DevTeam.Core;
 
 public class DevTeamRuntime
@@ -54,13 +56,14 @@ public class DevTeamRuntime
         RememberDecision(state, "Updated active mode", mode.Slug, "mode");
     }
 
+    [SuppressMessage("Minor Code Smell", "S2325", Justification = "Runtime mutator API remains instance-based for consistency.")]
     public void SetKeepAwake(WorkspaceState state, bool enabled)
     {
         state.Runtime.KeepAwakeEnabled = enabled;
-        RememberDecision(state, "Updated keep-awake setting", enabled ? "enabled" : "disabled", "runtime");
+        RememberDecision(state, "Updated keep-awake setting", enabled ? "enabled" : "disabled", CoreConstants.DecisionSources.Runtime);
     }
 
-    public ModeDefinition GetActiveMode(WorkspaceState state)
+    public static ModeDefinition GetActiveMode(WorkspaceState state)
     {
         var active = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase));
         return active ?? state.Modes.FirstOrDefault() ?? new ModeDefinition
@@ -71,7 +74,7 @@ public class DevTeamRuntime
         };
     }
 
-    public IReadOnlyList<string> GetKnownModeSlugs(WorkspaceState state) =>
+    public static IReadOnlyList<string> GetKnownModeSlugs(WorkspaceState state) =>
         state.Modes
             .Select(mode => mode.Slug)
             .OrderBy(slug => slug, StringComparer.OrdinalIgnoreCase)
@@ -83,24 +86,27 @@ public class DevTeamRuntime
     public void ApproveArchitectPlan(WorkspaceState state, string note) =>
         _planningService.ApproveArchitectPlan(state, note);
 
+    [SuppressMessage("Minor Code Smell", "S2325", Justification = "Runtime mutator API remains instance-based for consistency.")]
     public void SetAutoApprove(WorkspaceState state, bool enabled)
     {
         state.Runtime.AutoApproveEnabled = enabled;
-        RememberDecision(state, "Updated auto-approve setting", enabled ? "enabled" : "disabled", "runtime");
+        RememberDecision(state, "Updated auto-approve setting", enabled ? "enabled" : "disabled", CoreConstants.DecisionSources.Runtime);
     }
 
+    [SuppressMessage("Minor Code Smell", "S2325", Justification = "Runtime mutator API remains instance-based for consistency.")]
     public void SetDefaultMaxIterations(WorkspaceState state, int value)
     {
         if (value < 1) throw new InvalidOperationException("max-iterations must be at least 1.");
         state.Runtime.DefaultMaxIterations = value;
-        RememberDecision(state, "Updated default max-iterations", value.ToString(), "runtime");
+        RememberDecision(state, "Updated default max-iterations", value.ToString(), CoreConstants.DecisionSources.Runtime);
     }
 
+    [SuppressMessage("Minor Code Smell", "S2325", Justification = "Runtime mutator API remains instance-based for consistency.")]
     public void SetDefaultMaxSubagents(WorkspaceState state, int value)
     {
         if (value < 1) throw new InvalidOperationException("max-subagents must be at least 1.");
         state.Runtime.DefaultMaxSubagents = value;
-        RememberDecision(state, "Updated default max-subagents", value.ToString(), "runtime");
+        RememberDecision(state, "Updated default max-subagents", value.ToString(), CoreConstants.DecisionSources.Runtime);
     }
 
     public void SetDefaultPipelineRoles(WorkspaceState state, IEnumerable<string> roleSlugs)
@@ -130,14 +136,15 @@ public class DevTeamRuntime
 
         state.Runtime.DefaultPipelineRoles = normalizedRoles;
         state.Runtime.PipelineRolesCustomized = true;
-        RememberDecision(state, "Updated default pipeline roles", string.Join(" -> ", normalizedRoles), "pipeline");
+        RememberDecision(state, "Updated default pipeline roles", string.Join(" -> ", normalizedRoles), CoreConstants.DecisionSources.Pipeline);
     }
 
+    [SuppressMessage("Minor Code Smell", "S2325", Justification = "Runtime mutator API remains instance-based for consistency.")]
     public void ResetDefaultPipelineRoles(WorkspaceState state)
     {
         state.Runtime.DefaultPipelineRoles = GetModeDefaultPipelineRoles(state.Runtime.ActiveModeSlug);
         state.Runtime.PipelineRolesCustomized = false;
-        RememberDecision(state, "Reset default pipeline roles", string.Join(" -> ", state.Runtime.DefaultPipelineRoles), "pipeline");
+        RememberDecision(state, "Reset default pipeline roles", string.Join(" -> ", state.Runtime.DefaultPipelineRoles), CoreConstants.DecisionSources.Pipeline);
     }
 
     public void RecordPlanningFeedback(WorkspaceState state, string feedback) =>
@@ -146,24 +153,9 @@ public class DevTeamRuntime
     public RoadmapItem AddRoadmapItem(WorkspaceState state, string title, string detail, int priority) =>
         _roadmapService.AddRoadmapItem(state, title, detail, priority);
 
-    public IssueItem AddIssue(
-        WorkspaceState state,
-        string title,
-        string detail,
-        string roleSlug,
-        int priority,
-        int? roadmapItemId,
-        IEnumerable<int> dependsOn,
-        string? area = null,
-        string? familyKey = null,
-        int? parentIssueId = null,
-        int? pipelineId = null,
-        int? pipelineStageIndex = null,
-        int? complexityHint = null)
-        => _issueService.AddIssue(state, title, detail, roleSlug, priority, roadmapItemId, dependsOn,
-            area, familyKey, parentIssueId, pipelineId, pipelineStageIndex, complexityHint);
+    public IssueItem AddIssue(WorkspaceState state, IssueRequest request) => _issueService.AddIssue(state, request);
 
-    public IssueItem UpdateIssueStatus(WorkspaceState state, int issueId, string status, string? notes = null)
+    public static IssueItem UpdateIssueStatus(WorkspaceState state, int issueId, string status, string? notes = null)
     {
         var issue = state.Issues.FirstOrDefault(i => i.Id == issueId)
             ?? throw new InvalidOperationException($"Issue #{issueId} not found.");
@@ -260,7 +252,7 @@ public class DevTeamRuntime
         return preview;
     }
 
-    public RunDiffReport BuildRunDiff(WorkspaceState state, int runId, int? compareToRunId = null)
+    public static RunDiffReport BuildRunDiff(WorkspaceState state, int runId, int? compareToRunId = null)
     {
         var primaryRun = state.AgentRuns.FirstOrDefault(item => item.Id == runId)
             ?? throw new InvalidOperationException($"Run #{runId} was not found.");
@@ -330,16 +322,16 @@ public class DevTeamRuntime
         if (state.Phase == WorkflowPhase.Planning
             && state.Issues.Any(issue => issue.IsPlanningIssue && issue.Status == ItemStatus.Done))
         {
-            return _issueService.HasBlockingQuestions(state) ? "waiting-for-user" : "awaiting-plan-approval";
+            return _issueService.HasBlockingQuestions(state) ? CoreConstants.LoopStates.WaitingForUser : CoreConstants.LoopStates.AwaitingPlanApproval;
         }
 
         if (state.Phase == WorkflowPhase.ArchitectPlanning
-            && state.Issues.Where(issue => string.Equals(issue.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase) && !issue.IsPlanningIssue).All(issue => issue.Status == ItemStatus.Done))
+            && state.Issues.Where(issue => string.Equals(issue.RoleSlug, CoreConstants.Roles.Architect, StringComparison.OrdinalIgnoreCase) && !issue.IsPlanningIssue).All(issue => issue.Status == ItemStatus.Done))
         {
-            return _issueService.HasBlockingQuestions(state) ? "waiting-for-user" : "awaiting-architect-approval";
+            return _issueService.HasBlockingQuestions(state) ? CoreConstants.LoopStates.WaitingForUser : CoreConstants.LoopStates.AwaitingArchitectApproval;
         }
 
-        return _issueService.HasBlockingQuestions(state) ? "waiting-for-user" : "idle";
+        return _issueService.HasBlockingQuestions(state) ? CoreConstants.LoopStates.WaitingForUser : CoreConstants.LoopStates.Idle;
     }
 
     public IReadOnlyList<IssueItem> GetExecutionCandidatesPreview(WorkspaceState state)
@@ -358,7 +350,7 @@ public class DevTeamRuntime
         string? sessionId = null) =>
         RememberDecision(state, title, detail, source, issueId, runId, sessionId);
 
-    public void MergeWorkspaceAdditions(WorkspaceState state, WorkspaceState externalState)
+    public static void MergeWorkspaceAdditions(WorkspaceState state, WorkspaceState externalState)
     {
         foreach (var question in externalState.Questions.Where(item => state.Questions.All(existing => existing.Id != item.Id)))
         {
@@ -412,7 +404,7 @@ public class DevTeamRuntime
     public AgentSession GetOrCreateExecutionOrchestratorSession(WorkspaceState state) =>
         _sessionManager.GetOrCreateExecutionOrchestratorSession(state);
 
-    public void ClearExecutionSelection(WorkspaceState state)
+    public static void ClearExecutionSelection(WorkspaceState state)
     {
         state.ExecutionSelection = new ExecutionSelectionState();
     }
@@ -433,12 +425,10 @@ public class DevTeamRuntime
             throw new InvalidOperationException($"Execution batch can select at most {Math.Max(1, maxSubagents)} issue(s).");
         }
 
-        foreach (var issueId in selected)
+        var invalidIssueId = selected.FirstOrDefault(issueId => !candidateMap.ContainsKey(issueId));
+        if (invalidIssueId != 0)
         {
-            if (!candidateMap.ContainsKey(issueId))
-            {
-                throw new InvalidOperationException($"Issue #{issueId} is not a ready execution candidate.");
-            }
+            throw new InvalidOperationException($"Issue #{invalidIssueId} is not a ready execution candidate.");
         }
 
         var selectedIssues = selected.Select(id => candidateMap[id]).ToList();
@@ -470,12 +460,22 @@ public class DevTeamRuntime
         RememberDecision(
             state,
             "Selected execution batch",
-            state.ExecutionSelection.SelectedIssueIds.Count == 0
-                ? (string.IsNullOrWhiteSpace(state.ExecutionSelection.Rationale) ? "No execution issues selected." : state.ExecutionSelection.Rationale)
-                : $"Issues: {string.Join(", ", state.ExecutionSelection.SelectedIssueIds)}\n\n{state.ExecutionSelection.Rationale}".Trim(),
+            BuildExecutionSelectionDecisionDetail(state),
             "execution-orchestrator",
             sessionId: state.ExecutionSelection.SessionId);
         return state.ExecutionSelection;
+    }
+
+    private static string BuildExecutionSelectionDecisionDetail(WorkspaceState state)
+    {
+        if (state.ExecutionSelection.SelectedIssueIds.Count == 0)
+        {
+            return string.IsNullOrWhiteSpace(state.ExecutionSelection.Rationale)
+                ? "No execution issues selected."
+                : state.ExecutionSelection.Rationale;
+        }
+
+        return $"Issues: {string.Join(", ", state.ExecutionSelection.SelectedIssueIds)}\n\n{state.ExecutionSelection.Rationale}".Trim();
     }
 
     public LoopResult QueueExecutionSelection(WorkspaceState state)
@@ -484,7 +484,7 @@ public class DevTeamRuntime
         {
             return new LoopResult
             {
-                State = _issueService.HasBlockingQuestions(state) ? "waiting-for-user" : "idle"
+                State = _issueService.HasBlockingQuestions(state) ? CoreConstants.LoopStates.WaitingForUser : CoreConstants.LoopStates.Idle
             };
         }
 
@@ -496,7 +496,7 @@ public class DevTeamRuntime
         ClearExecutionSelection(state);
         return new LoopResult
         {
-            State = "queued",
+            State = CoreConstants.LoopStates.Queued,
             QueuedRuns = queued
         };
     }
@@ -512,13 +512,13 @@ public class DevTeamRuntime
         return queued[0];
     }
 
-    public IReadOnlyList<string> GetKnownRoleSlugs(WorkspaceState state) =>
+    public static IReadOnlyList<string> GetKnownRoleSlugs(WorkspaceState state) =>
         state.Roles
             .Select(role => role.Slug)
             .OrderBy(slug => slug, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    public RoleModelPolicy GetRoleModelPolicy(WorkspaceState state, string roleSlug) =>
+    public static RoleModelPolicy GetRoleModelPolicy(WorkspaceState state, string roleSlug) =>
         SeedData.GetPolicy(state, roleSlug);
 
     public IReadOnlyDictionary<string, string> GetKnownRoleAliases(WorkspaceState state) =>
@@ -551,8 +551,8 @@ public class DevTeamRuntime
             var normalizedRole = _issueService.ResolveRoleSlug(state, proposal.RoleSlug);
 
             if (state.Phase == WorkflowPhase.Planning
-                && string.Equals(normalizedRole, "architect", StringComparison.OrdinalIgnoreCase)
-                && state.Issues.Any(i => string.Equals(i.RoleSlug, "architect", StringComparison.OrdinalIgnoreCase) && i.Status != ItemStatus.Done))
+                && string.Equals(normalizedRole, CoreConstants.Roles.Architect, StringComparison.OrdinalIgnoreCase)
+                && state.Issues.Any(i => string.Equals(i.RoleSlug, CoreConstants.Roles.Architect, StringComparison.OrdinalIgnoreCase) && i.Status != ItemStatus.Done))
             {
                 continue;
             }
@@ -566,17 +566,25 @@ public class DevTeamRuntime
                 continue;
             }
 
+            var request = new IssueRequest
+            {
+                Title = normalizedTitle,
+                Detail = proposal.Detail.Trim(),
+                RoleSlug = normalizedRole,
+                Priority = proposal.Priority,
+                RoadmapItemId = sourceIssue.RoadmapItemId,
+                DependsOn = proposal.DependsOnIssueIds,
+                Area = proposal.Area,
+                FamilyKey = "",
+                ParentIssueId = null,
+                PipelineId = null,
+                PipelineStageIndex = null,
+                ComplexityHint = null
+            };
+
             var issue = _issueService.AddIssue(
                 state,
-                normalizedTitle,
-                proposal.Detail.Trim(),
-                normalizedRole,
-                proposal.Priority,
-                sourceIssue.RoadmapItemId,
-                proposal.DependsOnIssueIds,
-                proposal.Area,
-                "",
-                null, null, null, null);
+                request);
             created.Add(issue);
         }
 
@@ -628,55 +636,42 @@ public class DevTeamRuntime
 
         return new LoopResult
         {
-            State = "queued",
+            State = CoreConstants.LoopStates.Queued,
             Created = created,
             QueuedRuns = queued
         };
     }
 
-    public void CompleteRun(
-        WorkspaceState state,
-        int runId,
-        string outcome,
-        string summary,
-        IEnumerable<string>? skillsUsed = null,
-        IEnumerable<string>? toolsUsed = null,
-        IEnumerable<string>? changedPaths = null,
-        IEnumerable<int>? createdIssueIds = null,
-        IEnumerable<int>? createdQuestionIds = null,
-        ItemStatus? resultingIssueStatus = null,
-        int? inputTokens = null,
-        int? outputTokens = null,
-        double? estimatedCostUsd = null)
+    public void CompleteRun(WorkspaceState state, CompleteRunRequest request)
     {
-        var run = state.AgentRuns.FirstOrDefault(item => item.Id == runId)
-            ?? throw new InvalidOperationException($"Run #{runId} was not found.");
+        var run = state.AgentRuns.FirstOrDefault(item => item.Id == request.RunId)
+            ?? throw new InvalidOperationException($"Run #{request.RunId} was not found.");
         var issue = state.Issues.FirstOrDefault(item => item.Id == run.IssueId)
             ?? throw new InvalidOperationException($"Issue #{run.IssueId} was not found.");
 
-        run.Summary = summary.Trim();
-        run.ResultingIssueStatus = resultingIssueStatus;
-        run.SkillsUsed = skillsUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
-        run.ToolsUsed = toolsUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
-        run.ChangedPaths = changedPaths?
+        run.Summary = request.Summary.Trim();
+        run.ResultingIssueStatus = request.ResultingIssueStatus;
+        run.SkillsUsed = request.SkillsUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+        run.ToolsUsed = request.ToolsUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+        run.ChangedPaths = request.ChangedPaths?
             .Where(item => !string.IsNullOrWhiteSpace(item))
             .Select(item => item.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
             .ToList() ?? [];
-        run.CreatedIssueIds = createdIssueIds?
+        run.CreatedIssueIds = request.CreatedIssueIds?
             .Distinct()
             .OrderBy(item => item)
             .ToList() ?? [];
-        run.CreatedQuestionIds = createdQuestionIds?
+        run.CreatedQuestionIds = request.CreatedQuestionIds?
             .Distinct()
             .OrderBy(item => item)
             .ToList() ?? [];
-        run.InputTokens = inputTokens;
-        run.OutputTokens = outputTokens;
-        run.EstimatedCostUsd = estimatedCostUsd;
+        run.InputTokens = request.InputTokens;
+        run.OutputTokens = request.OutputTokens;
+        run.EstimatedCostUsd = request.EstimatedCostUsd;
         run.UpdatedAtUtc = _clock.UtcNow;
-        switch (outcome.Trim().ToLowerInvariant())
+        switch (request.Outcome.Trim().ToLowerInvariant())
         {
             case "completed":
                 run.Status = AgentRunStatus.Completed;
@@ -700,7 +695,7 @@ public class DevTeamRuntime
         RememberDecision(
             state,
             $"Run #{run.Id} {run.Status}",
-            summary.Trim(),
+            request.Summary.Trim(),
             "run",
             issue.Id,
             run.Id,
@@ -736,7 +731,7 @@ public class DevTeamRuntime
             .ThenBy(question => question.Id)
             .ToList();
         var loopState = queuedRuns.Count > 0 ? "running" : GetLoopStateWhenNoReadyWork(state);
-        var isWaitingOnBlockingQuestion = string.Equals(loopState, "waiting-for-user", StringComparison.OrdinalIgnoreCase)
+        var isWaitingOnBlockingQuestion = string.Equals(loopState, CoreConstants.LoopStates.WaitingForUser, StringComparison.OrdinalIgnoreCase)
             && blockingQuestions.Count > 0;
 
         return new StatusReport

@@ -1,13 +1,8 @@
 namespace DevTeam.Cli;
 
-internal sealed class PlanCommandModule : ICliCommandModule
+internal sealed class PlanCommandModule(ICliCommandHandler planHandler) : ICliCommandModule
 {
-    private readonly ICliCommandHandler _planHandler;
-
-    public PlanCommandModule(ICliCommandHandler planHandler)
-    {
-        _planHandler = planHandler;
-    }
+    private readonly ICliCommandHandler _planHandler = planHandler;
 
     public void Register(ICliCommandRegistry registry)
     {

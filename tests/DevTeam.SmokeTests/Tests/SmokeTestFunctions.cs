@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 using DevTeam.Cli;
 using DevTeam.Core;
 using DevTeam.TestInfrastructure;
@@ -5,6 +7,7 @@ using static DevTeam.SmokeTests.TestHelpers;
 
 namespace DevTeam.SmokeTests;
 
+[SuppressMessage("Major Code Smell", "S1192", Justification = "Smoke scenarios intentionally repeat literals for readability and traceability.")]
 internal static class SmokeTestFunctions
 {
     private static readonly string TestCliDllPath = Path.Combine("tools", "DevTeam.Cli.dll");
@@ -1090,7 +1093,7 @@ exit /b 1
         using var harness = new TestHarness();
     
         var aliases = harness.Runtime.GetKnownRoleAliases(harness.State);
-        var knownRoles = harness.Runtime.GetKnownRoleSlugs(harness.State);
+        var knownRoles = DevTeamRuntime.GetKnownRoleSlugs(harness.State);
         var exactResolved = harness.Runtime.TryResolveRoleSlug(harness.State, "developer", out var exactRole);
         var aliasResolved = harness.Runtime.TryResolveRoleSlug(harness.State, "engineer", out var aliasRole);
     

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Threading.Channels;
 using DevTeam.Core;
@@ -16,6 +17,8 @@ internal static class SpectreShellHost
     private const int HeaderSize = 4;
     private const int InputSize = 6; // 4 content lines max (border top + 4 + border bottom)
     private const int AgentsSize = 8;
+    private const string AgentsPanelName = "Agents";
+    private const string RoadmapPanelName = "Roadmap";
 
     internal static async Task RunAsync(ShellService shell, CancellationToken cancellationToken)
     {
@@ -129,8 +132,8 @@ internal static class SpectreShellHost
             new Layout("Right"));
 
         root["Left"].SplitRows(
-            new Layout("Agents").Size(AgentsSize),
-            new Layout("Roadmap"));
+            new Layout(AgentsPanelName).Size(AgentsSize),
+            new Layout(RoadmapPanelName));
 
         return root;
     }
@@ -146,18 +149,18 @@ internal static class SpectreShellHost
 
         if (snapshot.ShowMiddleRow)
         {
-            root["Agents"].Update(ShellPanelBuilder.BuildAgentsPanel(snapshot));
+            root[AgentsPanelName].Update(ShellPanelBuilder.BuildAgentsPanel(snapshot));
 
             // Compute how many roadmap lines can fit in the remaining left-column height
             // without overflowing: termHeight - header - input - agents slot - panel borders.
             var th = Console.IsOutputRedirected ? ShellPanelBuilder.FallbackTerminalHeight : Math.Max(20, Console.WindowHeight);
             var roadmapBudget = Math.Max(2, th - HeaderSize - InputSize - AgentsSize - 3);
-            root["Roadmap"].Update(ShellPanelBuilder.BuildRoadmapPanel(snapshot, Math.Min(MaxRoadmapLines, roadmapBudget)));
+            root[RoadmapPanelName].Update(ShellPanelBuilder.BuildRoadmapPanel(snapshot, Math.Min(MaxRoadmapLines, roadmapBudget)));
         }
         else
         {
-            root["Agents"].Update(ShellPanelBuilder.BuildEmptyPanel("Agents"));
-            root["Roadmap"].Update(ShellPanelBuilder.BuildEmptyPanel("Roadmap"));
+            root[AgentsPanelName].Update(ShellPanelBuilder.BuildEmptyPanel(AgentsPanelName));
+            root[RoadmapPanelName].Update(ShellPanelBuilder.BuildEmptyPanel(RoadmapPanelName));
         }
 
         root["Right"].Update(ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset));
@@ -165,6 +168,7 @@ internal static class SpectreShellHost
 
     // ── Input handling ─────────────────────────────────────────────────────────
 
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "Interactive key-handling loop necessarily branches on many key combinations.")]
     private static void ReadInput(StringBuilder inputBuffer, ShellService shell, ChannelWriter<string> commandWriter, ref int cursorPosition, ref int historyCursor, ref string savedDraft, ref int scrollOffset)
     {
         if (Console.IsInputRedirected) return;
@@ -252,7 +256,7 @@ internal static class SpectreShellHost
                 }
 
                 // On line 0: navigate history (option A)
-                var history = shell.CommandHistory;
+                var history = shell.GetCommandHistory();
                 if (history.Count == 0) continue;
                 if (historyCursor == -1)
                 {
@@ -282,7 +286,7 @@ internal static class SpectreShellHost
 
                 // On last line: navigate history forward
                 if (historyCursor == -1) continue;
-                var history = shell.CommandHistory;
+                var history = shell.GetCommandHistory();
                 if (historyCursor < history.Count - 1)
                 {
                     historyCursor++;

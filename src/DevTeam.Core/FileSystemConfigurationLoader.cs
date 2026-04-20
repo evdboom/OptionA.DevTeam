@@ -5,13 +5,13 @@ namespace DevTeam.Core;
 
 public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
 {
-    private static readonly string[] RoleDirectoryCandidates = [Path.Combine(".devteam-source", "roles")];
-    private static readonly string[] ModeDirectoryCandidates = [Path.Combine(".devteam-source", "modes")];
-    private static readonly string[] SkillDirectoryCandidates = [Path.Combine(".devteam-source", "skills")];
-    private static readonly string[] LegacySuperpowerDirectoryCandidates = [Path.Combine(".devteam-source", "superpowers")];
-    private static readonly string[] ModelFileCandidates = [Path.Combine(".devteam-source", "MODELS.json")];
-    private static readonly string[] ProviderFileCandidates = [Path.Combine(".devteam-source", "PROVIDERS.json")];
-    private static readonly string[] McpServerFileCandidates = [Path.Combine(".devteam-source", "MCP_SERVERS.json")];
+    private static readonly string[] RoleDirectoryCandidates = [Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.Roles)];
+    private static readonly string[] ModeDirectoryCandidates = [Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.Modes)];
+    private static readonly string[] SkillDirectoryCandidates = [Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.Skills)];
+    private static readonly string[] LegacySuperpowerDirectoryCandidates = [Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.Superpowers)];
+    private static readonly string[] ModelFileCandidates = [Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.ModelsFile)];
+    private static readonly string[] ProviderFileCandidates = [Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.ProvidersFile)];
+    private static readonly string[] McpServerFileCandidates = [Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.McpServersFile)];
 
     private readonly IFileSystem _fs;
 
@@ -122,7 +122,7 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
                 {
                     Slug = "develop",
                     Name = "Develop",
-                    SourcePath = Path.Combine(".devteam-source", "modes", "develop.md"),
+                    SourcePath = Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.Modes, "develop.md"),
                     Body = """
                     # Mode: Develop
 
@@ -140,7 +140,7 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
                 {
                     Slug = "creative-writing",
                     Name = "Creative Writing",
-                    SourcePath = Path.Combine(".devteam-source", "modes", "creative-writing.md"),
+                    SourcePath = Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.Modes, "creative-writing.md"),
                     Body = """
                     # Mode: Creative Writing
 
@@ -158,7 +158,7 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
                 {
                     Slug = "github",
                     Name = "GitHub",
-                    SourcePath = Path.Combine(".devteam-source", "modes", "github.md"),
+                    SourcePath = Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.Modes, "github.md"),
                     Body = """
                     # Mode: GitHub
 

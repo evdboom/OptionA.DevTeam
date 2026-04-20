@@ -170,7 +170,6 @@ internal sealed partial class ShellService
             return;
 
         var inProgress = activeIssues.Where(i => i.Status == ItemStatus.InProgress).ToList();
-        var open = activeIssues.Where(i => i.Status == ItemStatus.Open).ToList();
 
         var phaseName = state.Phase switch
         {
@@ -203,16 +202,6 @@ internal sealed partial class ShellService
 
     private void AddLine(string markup) =>
         AddMessage(new ShellMessage(ShellMessageKind.Line, markup));
-
-    private void AddUserInput(string command)
-    {
-        var display = command.Length > 300 ? command[..297] + "..." : command;
-        AddMessage(new ShellMessage(ShellMessageKind.Panel, Markup.Escape(display),
-            Title: "you",
-            BorderColor: Color.Cyan1,
-            TitleColor: Color.Cyan1,
-            TitleJustify: Justify.Right));
-    }
 
     /// <summary>
     /// Adds a system panel, automatically splitting content that exceeds
@@ -284,7 +273,7 @@ internal sealed partial class ShellService
         }
     }
 
-    private void AddQuestion(string questionText, int? questionId = null, bool isBlocking = true, int index = 1, int total = 1)
+    private void AddQuestion(string questionText, bool isBlocking = true, int index = 1, int total = 1)
     {
         var counter = total > 1 ? $" ({index}/{total})" : "";
         var blocking = isBlocking ? " blocking" : "";
@@ -377,45 +366,4 @@ internal sealed partial class ShellService
 
     private void NotifyStateChanged() => OnStateChanged?.Invoke();
 
-    // ── CopyPackagedAssets ─────────────────────────────────────────────────────
-
-    private void CopyPackagedAssets(string targetRoot, bool force)
-    {
-        // Walk up from the tool install directory to find packaged .devteam-source
-        string? sourceRoot = null;
-        var searchBase = AppContext.BaseDirectory;
-        for (var d = new DirectoryInfo(searchBase); d is not null; d = d.Parent)
-        {
-            var candidate = Path.Combine(d.FullName, ".devteam-source");
-            if (Directory.Exists(candidate))
-            {
-                sourceRoot = candidate;
-                break;
-            }
-        }
-
-        if (sourceRoot is null)
-        {
-            AddWarning("Could not locate packaged .devteam-source assets.");
-            return;
-        }
-
-        var copied = 0;
-        var skipped = 0;
-        foreach (var srcFile in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(sourceRoot, srcFile);
-            var destFile = Path.Combine(targetRoot, relative);
-            var destDir = Path.GetDirectoryName(destFile);
-            if (!string.IsNullOrWhiteSpace(destDir)) Directory.CreateDirectory(destDir);
-            if (!force && File.Exists(destFile))
-            {
-                skipped++;
-                continue;
-            }
-            File.Copy(srcFile, destFile, overwrite: true);
-            copied++;
-        }
-        AddSuccess($"Copied {copied} asset(s) to {Markup.Escape(targetRoot)}{(skipped > 0 ? $" ({skipped} skipped — use --force to overwrite)" : "")}.");
-    }
 }

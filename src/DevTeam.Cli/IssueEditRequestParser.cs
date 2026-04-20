@@ -55,9 +55,9 @@ internal static class IssueEditRequestParser
         if (!string.IsNullOrWhiteSpace(role))
         {
             runtime.TryResolveRoleSlug(state, role, out var resolvedRole);
-            if (!runtime.GetKnownRoleSlugs(state).Contains(resolvedRole, StringComparer.OrdinalIgnoreCase))
+            if (!DevTeamRuntime.GetKnownRoleSlugs(state).Contains(resolvedRole, StringComparer.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException($"Unknown role '{role}'. Valid roles: {string.Join(", ", runtime.GetKnownRoleSlugs(state))}");
+                throw new InvalidOperationException($"Unknown role '{role}'. Valid roles: {string.Join(", ", DevTeamRuntime.GetKnownRoleSlugs(state))}");
             }
         }
 

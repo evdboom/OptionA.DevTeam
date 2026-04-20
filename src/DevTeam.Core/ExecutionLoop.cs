@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 
 namespace DevTeam.Core;
@@ -10,6 +11,8 @@ public class LoopExecutor(
     ISystemClock? clock = null,
     IFileSystem? fileSystem = null)
 {
+    private const string NoneText = "(none)";
+
     private readonly DevTeamRuntime _runtime = runtime;
     private readonly WorkspaceStore _store = store;
     private readonly IAgentClientFactory _agentClientFactory = agentClientFactory ?? new DefaultAgentClientFactory();
@@ -17,6 +20,8 @@ public class LoopExecutor(
     private readonly ISystemClock _clock = clock ?? new SystemClock();
     private readonly IFileSystem _fileSystem = fileSystem ?? new PhysicalFileSystem();
 
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "Main loop coordinates planning, orchestration, and execution state transitions.")]
+    [SuppressMessage("Major Code Smell", "S1192", Justification = "Loop outcomes are explicit protocol values shared with prompt contracts.")]
     public async Task<LoopExecutionReport> RunAsync(
         WorkspaceState state,
         LoopExecutionOptions options,
@@ -150,7 +155,7 @@ public class LoopExecutor(
                 var completed = await AwaitNextCompletionAsync(pendingRuns, options, log, cancellationToken);
                 var pendingRun = pendingRuns.First(item => item.Run.RunId == completed.Run.RunId);
                 pendingRuns.RemoveAll(item => item.Run.RunId == completed.Run.RunId);
-                _runtime.MergeWorkspaceAdditions(state, _store.Load());
+                DevTeamRuntime.MergeWorkspaceAdditions(state, _store.Load());
                 var createdQuestionIds = new List<int>();
                 if (completed.Questions.Count > 0)
                 {
@@ -173,19 +178,22 @@ public class LoopExecutor(
                 var usageTelemetry = UsageTelemetryExtractor.Extract(model, completed.Response);
                 _runtime.CompleteRun(
                     state,
-                    completed.Run.RunId,
-                    completed.Outcome,
-                    completed.Summary,
-                    completed.SkillsUsed,
-                    completed.ToolsUsed,
-                    changedPaths,
-                    createdIssueIds,
-                    createdQuestionIds,
-                    completedIssue.Status,
-                    usageTelemetry.InputTokens,
-                    usageTelemetry.OutputTokens,
-                    usageTelemetry.EstimatedCostUsd);
-                var decision = state.Decisions.Last();
+                    new CompleteRunRequest
+                    {
+                        RunId = completed.Run.RunId,
+                        Outcome = completed.Outcome,
+                        Summary = completed.Summary,
+                        SkillsUsed = completed.SkillsUsed,
+                        ToolsUsed = completed.ToolsUsed,
+                        ChangedPaths = changedPaths,
+                        CreatedIssueIds = createdIssueIds,
+                        CreatedQuestionIds = createdQuestionIds,
+                        ResultingIssueStatus = completedIssue.Status,
+                        InputTokens = usageTelemetry.InputTokens,
+                        OutputTokens = usageTelemetry.OutputTokens,
+                        EstimatedCostUsd = usageTelemetry.EstimatedCostUsd
+                    });
+                var decision = state.Decisions[^1];
                 var persistedRun = state.AgentRuns.First(run => run.Id == completed.Run.RunId);
                 WriteRunArtifact(_store.WorkspacePath, completed.Run, persistedRun, completed.Response, completed.Outcome, completed.Summary);
                 WriteDecisionArtifact(_store.WorkspacePath, decision, persistedRun);
@@ -313,7 +321,7 @@ public class LoopExecutor(
         var gitStatusBeforeRun = _git.TryCaptureStatus(state.RepoRoot);
         var result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, cancellationToken: cancellationToken);
 
-        _runtime.MergeWorkspaceAdditions(state, _store.Load());
+        DevTeamRuntime.MergeWorkspaceAdditions(state, _store.Load());
         var createdQuestionIds = result.Questions.Count > 0
             ? _runtime.AddQuestions(state, result.Questions).Select(item => item.Id).ToList()
             : [];
@@ -326,21 +334,24 @@ public class LoopExecutor(
         var usageTelemetry = UsageTelemetryExtractor.Extract(model, result.Response);
         _runtime.CompleteRun(
             state,
-            result.Run.RunId,
-            result.Outcome,
-            result.Summary,
-            result.SkillsUsed,
-            result.ToolsUsed,
-            changedPaths,
-            createdIssueIds,
-            createdQuestionIds,
-            completedIssue.Status,
-            usageTelemetry.InputTokens,
-            usageTelemetry.OutputTokens,
-            usageTelemetry.EstimatedCostUsd);
+            new CompleteRunRequest
+            {
+                RunId = result.Run.RunId,
+                Outcome = result.Outcome,
+                Summary = result.Summary,
+                SkillsUsed = result.SkillsUsed,
+                ToolsUsed = result.ToolsUsed,
+                ChangedPaths = changedPaths,
+                CreatedIssueIds = createdIssueIds,
+                CreatedQuestionIds = createdQuestionIds,
+                ResultingIssueStatus = completedIssue.Status,
+                InputTokens = usageTelemetry.InputTokens,
+                OutputTokens = usageTelemetry.OutputTokens,
+                EstimatedCostUsd = usageTelemetry.EstimatedCostUsd
+            });
         var persistedRun = state.AgentRuns.First(r => r.Id == result.Run.RunId);
         WriteRunArtifact(_store.WorkspacePath, result.Run, persistedRun, result.Response, result.Outcome, result.Summary);
-        WriteDecisionArtifact(_store.WorkspacePath, state.Decisions.Last(), persistedRun);
+        WriteDecisionArtifact(_store.WorkspacePath, state.Decisions[^1], persistedRun);
         if (!string.IsNullOrWhiteSpace(state.CodebaseContext) && string.Equals(result.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
         {
             WriteBrownfieldDeltaLog(_store.WorkspacePath, completedIssue, persistedRun, result.Approach, result.Rationale);
@@ -445,7 +456,7 @@ public class LoopExecutor(
             $"- Committed credits: {persistedRun.CreditsUsed:0.##}",
             $"- Premium credits: {persistedRun.PremiumCreditsUsed:0.##}"
         };
-        if (persistedRun.InputTokens is int inputTokens || persistedRun.OutputTokens is int outputTokens)
+        if (persistedRun.InputTokens.HasValue || persistedRun.OutputTokens.HasValue)
         {
             var input = persistedRun.InputTokens ?? 0;
             var output = persistedRun.OutputTokens ?? 0;
@@ -466,12 +477,12 @@ public class LoopExecutor(
 
         - Issue: {queuedRun.IssueId}
         - Role: {queuedRun.RoleSlug}
-        - Area: {(string.IsNullOrWhiteSpace(queuedRun.Area) ? "(none)" : queuedRun.Area)}
+        - Area: {(string.IsNullOrWhiteSpace(queuedRun.Area) ? NoneText : queuedRun.Area)}
         - Model: {queuedRun.ModelName}
         - Backend: {response.BackendName}
         - Session: {response.SessionId}
         - Outcome: {outcome}
-        - Resulting issue status: {(persistedRun.ResultingIssueStatus?.ToString() ?? "(none)")}
+        - Resulting issue status: {(persistedRun.ResultingIssueStatus?.ToString() ?? NoneText)}
 
         ## Summary
 
@@ -479,11 +490,11 @@ public class LoopExecutor(
 
         ## Skills Used
 
-        {(persistedRun.SkillsUsed.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.SkillsUsed.Select(item => $"- {item}")))}
+        {(persistedRun.SkillsUsed.Count == 0 ? NoneText : string.Join(Environment.NewLine, persistedRun.SkillsUsed.Select(item => $"- {item}")))}
 
         ## Tools Used
 
-        {(persistedRun.ToolsUsed.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.ToolsUsed.Select(item => $"- {item}")))}
+        {(persistedRun.ToolsUsed.Count == 0 ? NoneText : string.Join(Environment.NewLine, persistedRun.ToolsUsed.Select(item => $"- {item}")))}
 
         ## Usage
 
@@ -491,15 +502,15 @@ public class LoopExecutor(
 
         ## Changed Files
 
-        {(persistedRun.ChangedPaths.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.ChangedPaths.Select(item => $"- {item}")))}
+        {(persistedRun.ChangedPaths.Count == 0 ? NoneText : string.Join(Environment.NewLine, persistedRun.ChangedPaths.Select(item => $"- {item}")))}
 
         ## Created Issues
 
-        {(persistedRun.CreatedIssueIds.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.CreatedIssueIds.Select(item => $"- #{item}")))}
+        {(persistedRun.CreatedIssueIds.Count == 0 ? NoneText : string.Join(Environment.NewLine, persistedRun.CreatedIssueIds.Select(item => $"- #{item}")))}
 
         ## Created Questions
 
-        {(persistedRun.CreatedQuestionIds.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.CreatedQuestionIds.Select(item => $"- #{item}")))}
+        {(persistedRun.CreatedQuestionIds.Count == 0 ? NoneText : string.Join(Environment.NewLine, persistedRun.CreatedQuestionIds.Select(item => $"- #{item}")))}
 
         ## Output
 
@@ -552,14 +563,14 @@ public class LoopExecutor(
         var path = Path.Combine(decisionsDir, $"decision-{decision.Id:000}.md");
         var changedFiles = relatedRun?.ChangedPaths.Count > 0
             ? string.Join(Environment.NewLine, relatedRun.ChangedPaths.Select(item => $"- {item}"))
-            : "(none)";
+            : NoneText;
         var content = $"""
         # Decision {decision.Id}
 
         - Source: {decision.Source}
-        - Issue: {(decision.IssueId?.ToString() ?? "(none)")}
-        - Run: {(decision.RunId?.ToString() ?? "(none)")}
-        - Session: {(string.IsNullOrWhiteSpace(decision.SessionId) ? "(none)" : decision.SessionId)}
+        - Issue: {(decision.IssueId?.ToString() ?? NoneText)}
+        - Run: {(decision.RunId?.ToString() ?? NoneText)}
+        - Session: {(string.IsNullOrWhiteSpace(decision.SessionId) ? NoneText : decision.SessionId)}
         - Created: {decision.CreatedAtUtc:O}
 
         ## Title
@@ -591,14 +602,14 @@ public class LoopExecutor(
             .ToList();
 
         var issueLines = pendingIssues.Count == 0
-            ? "(none)"
+            ? NoneText
             : string.Join(
                 Environment.NewLine,
                 pendingIssues.Select(issue =>
                     $"- #{issue.Id} [{issue.RoleSlug}{(string.IsNullOrWhiteSpace(issue.Area) ? "" : $" @ {issue.Area}")}] {issue.Title}" +
                     $"{(issue.DependsOnIssueIds.Count == 0 ? "" : $" (depends on {string.Join(", ", issue.DependsOnIssueIds)})")}"));
         var questionLines = openQuestions.Count == 0
-            ? "(none)"
+            ? NoneText
             : string.Join(
                 Environment.NewLine,
                 openQuestions.Select(question => $"- #{question.Id} [{(question.IsBlocking ? "blocking" : "non-blocking")}] {question.Text}"));
@@ -724,6 +735,7 @@ public class LoopExecutor(
         }
     }
 
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "Batch orchestration contains explicit guardrails and fallback behavior.")]
     private async Task<LoopResult> OrchestrateExecutionBatchAsync(
         WorkspaceState state,
         LoopExecutionOptions options,
@@ -739,7 +751,7 @@ public class LoopExecutor(
             };
         }
 
-        _runtime.ClearExecutionSelection(state);
+        DevTeamRuntime.ClearExecutionSelection(state);
         var orchestratorSession = _runtime.GetOrCreateExecutionOrchestratorSession(state);
         var prompt = AgentPromptBuilder.BuildOrchestratorPrompt(state, candidates, options.MaxSubagents);
         var client = _agentClientFactory.Create(options.Backend);
@@ -769,7 +781,7 @@ public class LoopExecutor(
             cancellationToken);
         var parsed = AgentPromptBuilder.ParseResponse(response);
         Log(log, options.Verbosity, $"  Execution orchestrator outcome: {parsed.Outcome}");
-        _runtime.MergeWorkspaceAdditions(state, _store.Load());
+        DevTeamRuntime.MergeWorkspaceAdditions(state, _store.Load());
         if (parsed.Questions.Count > 0)
         {
             _runtime.AddQuestions(state, parsed.Questions);
@@ -777,7 +789,7 @@ public class LoopExecutor(
         if (parsed.Issues.Count > 0)
         {
             var roadmapIssue = state.Issues.FirstOrDefault(item => !item.IsPlanningIssue)
-                ?? state.Issues.First();
+                ?? state.Issues[0];
             _runtime.AddGeneratedIssues(state, roadmapIssue.Id, parsed.Issues);
         }
         var selectedIssueIds = parsed.SelectedIssueIds.Count > 0

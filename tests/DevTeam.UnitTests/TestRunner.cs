@@ -1,4 +1,5 @@
 using DevTeam.UnitTests.Tests;
+using DevTeam.UnitTests.Tests.Commands;
 
 namespace DevTeam.UnitTests;
 
@@ -26,9 +27,11 @@ internal static class TestRunner
         var r15 = await RunSuiteAsync("StatusReportTests", StatusReportTests.GetTests());
         var r16 = await RunSuiteAsync("RunDiffTests", RunDiffTests.GetTests());
         var r17 = await RunSuiteAsync("GitHubIssueSyncServiceTests", GitHubIssueSyncServiceTests.GetTests());
+        var r18 = await RunSuiteAsync("SetGoalCommandHandlerTests", SetGoalCommandHandlerTests.GetTests());
+        var r19 = await RunSuiteAsync("WorkspaceMcpCommandHandlerTests", WorkspaceMcpCommandHandlerTests.GetTests());
 
-        var passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed + r7.Passed + r8.Passed + r9.Passed + r10.Passed + r11.Passed + r12.Passed + r13.Passed + r14.Passed + r15.Passed + r16.Passed + r17.Passed;
-        var failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed + r7.Failed + r8.Failed + r9.Failed + r10.Failed + r11.Failed + r12.Failed + r13.Failed + r14.Failed + r15.Failed + r16.Failed + r17.Failed;
+        var passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed + r7.Passed + r8.Passed + r9.Passed + r10.Passed + r11.Passed + r12.Passed + r13.Passed + r14.Passed + r15.Passed + r16.Passed + r17.Passed + r18.Passed + r19.Passed;
+        var failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed + r7.Failed + r8.Failed + r9.Failed + r10.Failed + r11.Failed + r12.Failed + r13.Failed + r14.Failed + r15.Failed + r16.Failed + r17.Failed + r18.Failed + r19.Failed;
 
         Console.WriteLine();
         Console.WriteLine($"Results: {passed} passed, {failed} failed");

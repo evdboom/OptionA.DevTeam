@@ -29,7 +29,7 @@ internal static class CliWorkspaceHelper
 
     internal static string BuildRoleCatalog(DevTeamRuntime runtime, WorkspaceState state)
     {
-        var roles = string.Join(", ", runtime.GetKnownRoleSlugs(state));
+        var roles = string.Join(", ", DevTeamRuntime.GetKnownRoleSlugs(state));
         var aliases = runtime.GetKnownRoleAliases(state);
         if (aliases.Count == 0)
         {

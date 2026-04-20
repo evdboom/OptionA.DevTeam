@@ -2,10 +2,7 @@ namespace DevTeam.Core;
 
 public interface IIssueService
 {
-    IssueItem AddIssue(WorkspaceState state, string title, string detail, string roleSlug,
-        int priority, int? roadmapItemId, IEnumerable<int> dependsOn, string? area = null,
-        string? familyKey = null, int? parentIssueId = null, int? pipelineId = null,
-        int? pipelineStageIndex = null, int? complexityHint = null);
+    IssueItem AddIssue(WorkspaceState state, IssueRequest request);
     IssueItem EditIssue(WorkspaceState state, IssueEditRequest request);
     IssueItem? FindIssue(WorkspaceState state, int issueId);
     IReadOnlyList<IssueItem> GetReadyIssues(WorkspaceState state, int maxCount);

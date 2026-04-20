@@ -2,18 +2,11 @@ using DevTeam.Core;
 
 namespace DevTeam.Cli;
 
-internal sealed class RunOnceCommandHandler : ICliCommandHandler
+internal sealed class RunOnceCommandHandler(WorkspaceStore store, DevTeamRuntime runtime, IConsoleOutput output) : ICliCommandHandler
 {
-    private readonly WorkspaceStore _store;
-    private readonly DevTeamRuntime _runtime;
-    private readonly IConsoleOutput _output;
-
-    public RunOnceCommandHandler(WorkspaceStore store, DevTeamRuntime runtime, IConsoleOutput output)
-    {
-        _store = store;
-        _runtime = runtime;
-        _output = output;
-    }
+    private readonly WorkspaceStore _store = store;
+    private readonly DevTeamRuntime _runtime = runtime;
+    private readonly IConsoleOutput _output = output;
 
     public Task<int> ExecuteAsync(Dictionary<string, List<string>> options)
     {

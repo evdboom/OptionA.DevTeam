@@ -163,7 +163,7 @@ public class WorkspaceStore
         };
     }
 
-    private WorkspaceManifest CreateManifest(WorkspaceState state)
+    private static WorkspaceManifest CreateManifest(WorkspaceState state)
     {
         return new WorkspaceManifest
         {

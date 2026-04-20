@@ -2,20 +2,12 @@ using DevTeam.Core;
 
 namespace DevTeam.Cli;
 
-internal sealed class RunLoopCommandHandler : ICliCommandHandler
+internal sealed class RunLoopCommandHandler(WorkspaceStore store, DevTeamRuntime runtime, LoopExecutor loopExecutor, IConsoleOutput output) : ICliCommandHandler
 {
-    private readonly WorkspaceStore _store;
-    private readonly DevTeamRuntime _runtime;
-    private readonly LoopExecutor _loopExecutor;
-    private readonly IConsoleOutput _output;
-
-    public RunLoopCommandHandler(WorkspaceStore store, DevTeamRuntime runtime, LoopExecutor loopExecutor, IConsoleOutput output)
-    {
-        _store = store;
-        _runtime = runtime;
-        _loopExecutor = loopExecutor;
-        _output = output;
-    }
+    private readonly WorkspaceStore _store = store;
+    private readonly DevTeamRuntime _runtime = runtime;
+    private readonly LoopExecutor _loopExecutor = loopExecutor;
+    private readonly IConsoleOutput _output = output;
 
     public async Task<int> ExecuteAsync(Dictionary<string, List<string>> options)
     {
