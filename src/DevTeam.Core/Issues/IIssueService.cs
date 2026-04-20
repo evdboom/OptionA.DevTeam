@@ -2,7 +2,7 @@ namespace DevTeam.Core;
 
 public interface IIssueService
 {
-    IssueItem AddIssue(WorkspaceState state, IssueRequest request);
+    IssueItem CreateIssue(WorkspaceState state, IssueRequest request);
     IssueItem EditIssue(WorkspaceState state, IssueEditRequest request);
     IssueItem? FindIssue(WorkspaceState state, int issueId);
     IReadOnlyList<IssueItem> GetReadyIssues(WorkspaceState state, int maxCount);

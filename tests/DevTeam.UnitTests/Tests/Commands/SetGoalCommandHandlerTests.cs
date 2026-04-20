@@ -15,7 +15,7 @@ internal static class SetGoalCommandHandlerTests
         new("ExecuteAsync_SavesStateToWorkspace", ExecuteAsync_SavesStateToWorkspace),
     ];
 
-    private static Task ExecuteAsync_SetsGoal_WhenGoalProvided()
+    private static async Task ExecuteAsync_SetsGoal_WhenGoalProvided()
     {
         var output = new FakeConsoleOutput();
         var tempDir = Path.Combine(Path.GetTempPath(), $"devteam-test-{Guid.NewGuid()}");
@@ -32,12 +32,11 @@ internal static class SetGoalCommandHandlerTests
                 ["__positional"] = new List<string> { RoverGoal }
             };
 
-            var result = handler.ExecuteAsync(options).Result;
+            var result = await handler.ExecuteAsync(options);
 
             Assert.That(result == 0, $"Expected exit code 0 but got {result}");
             var state = store.Load();
             Assert.That(state.ActiveGoal?.GoalText == RoverGoal, $"Expected goal '{RoverGoal}' but got '{state.ActiveGoal?.GoalText}'");
-            return Task.CompletedTask;
         }
         finally
         {

@@ -552,26 +552,24 @@ internal static class SmokeTestFunctions
         {
                         var ghScriptPath = Path.Combine(tempRoot, OperatingSystem.IsWindows() ? "gh.cmd" : "gh");
                         File.WriteAllText(ghScriptPath, OperatingSystem.IsWindows() ? """
-@echo off
-if "%1 %2"=="auth status" exit /b 0
-if "%1 %2"=="issue list" (
-  echo [{"number":101,"title":"Review queue import","body":"---\nrole: reviewer\npriority: 90\narea: repo sync\n---\nReview the imported GitHub issue.","labels":[{"name":"devteam:ready"}]},{"number":102,"title":"Clarify the release workflow","body":"Please confirm the release checklist.","labels":[{"name":"devteam:question"},{"name":"devteam:blocking"}]}]
-  exit /b 0
-)
-echo Unexpected gh arguments 1>&2
-exit /b 1
-""" : """
-#!/usr/bin/env sh
-if [ "$1 $2" = "auth status" ]; then
-    exit 0
-fi
-if [ "$1 $2" = "issue list" ]; then
-    printf '%s\n' '[{"number":101,"title":"Review queue import","body":"---\nrole: reviewer\npriority: 90\narea: repo sync\n---\nReview the imported GitHub issue.","labels":[{"name":"devteam:ready"}]},{"number":102,"title":"Clarify the release workflow","body":"Please confirm the release checklist.","labels":[{"name":"devteam:question"},{"name":"devteam:blocking"}]}]'
-    exit 0
-fi
-echo Unexpected gh arguments 1>&2
-exit 1
-""");
+            @echo off
+            if "%1 %2"=="auth status" exit /b 0
+            if "%1 %2"=="issue list" (
+            echo [{"number":101,"title":"Review queue import","body":"---\nrole: reviewer\npriority: 90\narea: repo sync\n---\nReview the imported GitHub issue.","labels":[{"name":"devteam:ready"}]},{"number":102,"title":"Clarify the release workflow","body":"Please confirm the release checklist.","labels":[{"name":"devteam:question"},{"name":"devteam:blocking"}]}]
+            exit /b 0
+            )
+            echo Unexpected gh arguments 1>&2
+            exit /b 1
+            """ : "#!/usr/bin/env sh\n"
+            + "if [ \"$1 $2\" = \"auth status\" ]; then\n"
+                + "  exit 0\n"
+                + "fi\n"
+                + "if [ \"$1 $2\" = \"issue list\" ]; then\n"
+                + "  printf '%s\\n' '[{\"number\":101,\"title\":\"Review queue import\",\"body\":\"---\\nrole: reviewer\\npriority: 90\\narea: repo sync\\n---\\nReview the imported GitHub issue.\",\"labels\":[{\"name\":\"devteam:ready\"}]},{\"number\":102,\"title\":\"Clarify the release workflow\",\"body\":\"Please confirm the release checklist.\",\"labels\":[{\"name\":\"devteam:question\"},{\"name\":\"devteam:blocking\"}]}]'\n"
+                + "  exit 0\n"
+                + "fi\n"
+                + "echo Unexpected gh arguments 1>&2\n"
+                + "exit 1\n");
                         if (!OperatingSystem.IsWindows())
                         {
                                 File.SetUnixFileMode(ghScriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);

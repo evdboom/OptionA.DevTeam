@@ -357,7 +357,7 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine("Commands (plain or slash-prefixed, for example `/init`):");
         Console.WriteLine("  start [--keep-awake true|false] [--no-tty] [--output-format plain|jsonl] [--workspace PATH]");
         Console.WriteLine("  init [--force] [--workspace PATH] [--goal TEXT | --goal-file PATH] [--mode SLUG] [--provider NAME] [--keep-awake true|false] [--total-credit-cap N] [--premium-credit-cap N] [--workspace-mcp true|false] [--pipeline-scheduling true|false] [--recon true|false] [--backend sdk|cli] [--timeout-seconds N]");
-        Console.WriteLine("  customize [--force]                Copy default roles, modes, and Skills to .devteam-source/ for editing");
+        Console.WriteLine("  customize [--force] Copy default roles, modes, and skills to .devteam-source/ for editing");
         Console.WriteLine("  export [--output PATH] [--workspace PATH]");
         Console.WriteLine("  import --input PATH [--force] [--workspace PATH]");
         Console.WriteLine("  start-here [new|medior|expert] [--workspace PATH]  Show a persona-based onboarding guide");

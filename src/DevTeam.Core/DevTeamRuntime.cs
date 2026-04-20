@@ -153,7 +153,7 @@ public class DevTeamRuntime
     public RoadmapItem AddRoadmapItem(WorkspaceState state, string title, string detail, int priority) =>
         _roadmapService.AddRoadmapItem(state, title, detail, priority);
 
-    public IssueItem AddIssue(WorkspaceState state, IssueRequest request) => _issueService.AddIssue(state, request);
+    public IssueItem AddIssue(WorkspaceState state, IssueRequest request) => _issueService.CreateIssue(state, request);
 
     public static IssueItem UpdateIssueStatus(WorkspaceState state, int issueId, string status, string? notes = null)
     {
@@ -425,8 +425,10 @@ public class DevTeamRuntime
             throw new InvalidOperationException($"Execution batch can select at most {Math.Max(1, maxSubagents)} issue(s).");
         }
 
-        var invalidIssueId = selected.FirstOrDefault(issueId => !candidateMap.ContainsKey(issueId));
-        if (invalidIssueId != 0)
+        var invalidIssueId = selected
+            .Cast<int?>()
+            .FirstOrDefault(issueId => issueId is not null && !candidateMap.ContainsKey(issueId.Value));
+        if (invalidIssueId is not null)
         {
             throw new InvalidOperationException($"Issue #{invalidIssueId} is not a ready execution candidate.");
         }
@@ -582,7 +584,7 @@ public class DevTeamRuntime
                 ComplexityHint = null
             };
 
-            var issue = _issueService.AddIssue(
+            var issue = _issueService.CreateIssue(
                 state,
                 request);
             created.Add(issue);

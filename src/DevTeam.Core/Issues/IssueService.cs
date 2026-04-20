@@ -34,7 +34,7 @@ public sealed partial class IssueService : IIssueService
         int priority, int? roadmapItemId, IEnumerable<int> dependsOn, string? area = null,
         string? familyKey = null, int? parentIssueId = null, int? pipelineId = null,
         int? pipelineStageIndex = null, int? complexityHint = null)
-        => new IssueService().AddIssue(
+        => CreateIssueCore(
             state,
             new IssueRequest
             {
@@ -52,21 +52,8 @@ public sealed partial class IssueService : IIssueService
                 ComplexityHint = complexityHint
             });
 
-    public IssueItem AddIssue(WorkspaceState state, IssueRequest request)
-        => CreateIssue(
-            state,
-            request.Title,
-            request.Detail,
-            request.RoleSlug,
-            request.Priority,
-            request.RoadmapItemId,
-            request.DependsOn,
-            request.Area,
-            request.FamilyKey,
-            request.ParentIssueId,
-            request.PipelineId,
-            request.PipelineStageIndex,
-            request.ComplexityHint);
+    public IssueItem CreateIssue(WorkspaceState state, IssueRequest request)
+        => CreateIssueCore(state, request);
 
     public IssueItem? FindIssue(WorkspaceState state, int issueId)
         => state.Issues.FirstOrDefault(i => i.Id == issueId);
@@ -199,19 +186,22 @@ public sealed partial class IssueService : IIssueService
             item.PipelineId == pipeline.Id && item.PipelineStageIndex == nextStageIndex);
         if (nextIssue is null)
         {
-            nextIssue = CreateIssue(
+            nextIssue = CreateIssueCore(
                 state,
-                BuildPipelineFollowUpTitle(issue.Title, pipeline.RoleSequence[nextStageIndex]),
-                BuildPipelineFollowUpDetail(issue.Title, issue.Detail, pipeline.RoleSequence[nextStageIndex]),
-                pipeline.RoleSequence[nextStageIndex],
-                Math.Max(1, issue.Priority - 5),
-                issue.RoadmapItemId,
-                [issue.Id],
-                issue.Area,
-                issue.FamilyKey,
-                issue.Id,
-                pipeline.Id,
-                nextStageIndex);
+                new IssueRequest
+                {          
+                    Title = BuildPipelineFollowUpTitle(issue.Title, pipeline.RoleSequence[nextStageIndex]),
+                    Detail= BuildPipelineFollowUpDetail(issue.Title, issue.Detail, pipeline.RoleSequence[nextStageIndex]),
+                    RoleSlug = pipeline.RoleSequence[nextStageIndex],
+                    Priority = Math.Max(1, issue.Priority - 5),
+                    RoadmapItemId = issue.RoadmapItemId,
+                    DependsOn =  [issue.Id],
+                    Area = issue.Area,
+                    FamilyKey =  issue.FamilyKey,
+                    ParentIssueId = issue.Id,
+                    PipelineId = pipeline.Id,
+                    PipelineStageIndex = nextStageIndex
+                });
             pipeline.IssueIds.Add(nextIssue.Id);
         }
 
@@ -320,36 +310,25 @@ public sealed partial class IssueService : IIssueService
         }
     }
 
-    private static IssueItem CreateIssue(
+    private static IssueItem CreateIssueCore(
         WorkspaceState state,
-        string title,
-        string detail,
-        string roleSlug,
-        int priority,
-        int? roadmapItemId,
-        IEnumerable<int> dependsOn,
-        string? area,
-        string? familyKey,
-        int? parentIssueId,
-        int? pipelineId,
-        int? pipelineStageIndex,
-        int? complexityHint = null)
+        IssueRequest request)
     {
         var issue = new IssueItem
         {
             Id = state.NextIssueId++,
-            Title = title.Trim(),
-            Detail = detail.Trim(),
-            Area = NormalizeArea(area),
-            FamilyKey = NormalizeFamilyKey(familyKey, title, area),
-            RoleSlug = ResolveRoleSlugInternal(state, roleSlug),
-            Priority = priority,
-            RoadmapItemId = roadmapItemId,
-            DependsOnIssueIds = dependsOn.Distinct().ToList(),
-            ParentIssueId = parentIssueId,
-            PipelineId = pipelineId,
-            PipelineStageIndex = pipelineStageIndex,
-            ComplexityHint = complexityHint
+            Title = request.Title.Trim(),
+            Detail = request.Detail.Trim(),
+            Area = NormalizeArea(request.Area),
+            FamilyKey = NormalizeFamilyKey(request.FamilyKey, request.Title, request.Area),
+            RoleSlug = ResolveRoleSlugInternal(state, request.RoleSlug),
+            Priority = request.Priority,
+            RoadmapItemId = request.RoadmapItemId,
+            DependsOnIssueIds = request.DependsOn.Distinct().ToList(),
+            ParentIssueId = request.ParentIssueId,
+            PipelineId = request.PipelineId,
+            PipelineStageIndex = request.PipelineStageIndex,
+            ComplexityHint = request.ComplexityHint
         };
         state.Issues.Add(issue);
         return issue;
