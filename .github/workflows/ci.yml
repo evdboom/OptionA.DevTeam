@@ -64,18 +64,17 @@ jobs:
 
           $coverageJson = "./artifacts/coverage/combined/coverage.json"
           $coverageBase = "./artifacts/coverage/combined/coverage"
+          New-Item -ItemType Directory -Path "./artifacts/coverage/combined" -Force | Out-Null
 
           coverlet ./tests/DevTeam.UnitTests/bin/Release/net10.0/DevTeam.UnitTests.dll `
-            --target "dotnet" `
-            --targetargs "run --project ./tests/DevTeam.UnitTests/DevTeam.UnitTests.csproj --configuration Release --no-build" `
+            --target "./tests/DevTeam.UnitTests/bin/Release/net10.0/DevTeam.UnitTests" `
             --format "json" `
             --output $coverageJson `
             --include "[DevTeam.Core]*" `
             --include "[DevTeam.Cli]*"
 
           coverlet ./tests/DevTeam.ShellTests/bin/Release/net10.0/DevTeam.ShellTests.dll `
-            --target "dotnet" `
-            --targetargs "run --project ./tests/DevTeam.ShellTests/DevTeam.ShellTests.csproj --configuration Release --no-build" `
+            --target "./tests/DevTeam.ShellTests/bin/Release/net10.0/DevTeam.ShellTests" `
             --format "json" `
             --output $coverageJson `
             --merge-with $coverageJson `
@@ -83,8 +82,7 @@ jobs:
             --include "[DevTeam.Cli]*"
 
           coverlet ./tests/DevTeam.SmokeTests/bin/Release/net10.0/DevTeam.SmokeTests.dll `
-            --target "dotnet" `
-            --targetargs "run --project ./tests/DevTeam.SmokeTests/DevTeam.SmokeTests.csproj --configuration Release --no-build" `
+            --target "./tests/DevTeam.SmokeTests/bin/Release/net10.0/DevTeam.SmokeTests" `
             --format "json" `
             --format "cobertura" `
             --output $coverageBase `
