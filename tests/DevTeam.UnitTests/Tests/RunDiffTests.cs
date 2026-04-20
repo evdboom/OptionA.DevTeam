@@ -30,7 +30,7 @@ internal static class RunDiffTests
             CreatedQuestionIds = [1]
         });
 
-        var report = runtime.BuildRunDiff(state, 10);
+        var report = DevTeamRuntime.BuildRunDiff(state, 10);
 
         Assert.That(report.PrimaryRun.Id == 10, $"Expected run 10 but got {report.PrimaryRun.Id}");
         Assert.That(report.PrimaryCreatedIssues.Count == 1 && report.PrimaryCreatedIssues[0].Id == 2, "Expected created issue #2 in report.");
@@ -66,7 +66,7 @@ internal static class RunDiffTests
             }
         ]);
 
-        var report = runtime.BuildRunDiff(state, 11, 10);
+        var report = DevTeamRuntime.BuildRunDiff(state, 11, 10);
 
         Assert.That(report.SharedChangedPaths.SequenceEqual(["src/Shared.cs"]), "Expected shared changed path.");
         Assert.That(report.PrimaryOnlyChangedPaths.SequenceEqual(["src/Api.cs"]), "Expected run 11 unique path.");

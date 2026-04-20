@@ -172,7 +172,7 @@ public static class WorkspaceMcpSessionConfigFactory
     {
         var repoRoot = FindRepoRoot(workingDirectory);
         var paths = new List<string>();
-        foreach (var relative in new[] { Path.Combine(".devteam-source", "superpowers") })
+        foreach (var relative in new[] { Path.Combine(".github", "skills"), Path.Combine(".devteam-source", "skills"), Path.Combine(".devteam-source", "superpowers") })
         {
             var fullPath = Path.Combine(repoRoot, relative);
             if (Directory.Exists(fullPath))

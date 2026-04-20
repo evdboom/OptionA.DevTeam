@@ -1,28 +1,30 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace DevTeam.Core;
 
 internal static class SeedData
 {
     private static readonly Dictionary<string, RoleModelPolicy> DefaultPolicies = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["orchestrator"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
-        ["planner"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
-        ["architect"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true, ModelPool = ["claude-opus-4.6", "claude-opus-4.7"] },
-        ["developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gpt-5.4", "claude-sonnet-4.6"] },
-        ["backend-developer"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gpt-5.4", "claude-sonnet-4.6"] },
-        ["frontend-developer"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["claude-sonnet-4.6", "gpt-5.4"] },
-        ["fullstack-developer"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["claude-sonnet-4.6", "gpt-5.4"] },
-        ["tester"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gemini-3.1-pro-preview", "gpt-5.4", "claude-sonnet-4.6"] },
-        ["reviewer"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true, ModelPool = ["claude-opus-4.6", "claude-opus-4.7"] },
-        ["auditor"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true, ModelPool = ["claude-opus-4.6", "claude-opus-4.7"] },
-        ["ux"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
-        ["user"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
+        ["orchestrator"] = new() { PrimaryModel = CoreConstants.Models.ClaudeSonnet46, FallbackModel = CoreConstants.Models.ClaudeHaiku45, AllowPremium = false },
+        ["planner"] = new() { PrimaryModel = CoreConstants.Models.ClaudeSonnet46, FallbackModel = CoreConstants.Models.ClaudeHaiku45, AllowPremium = false },
+        ["architect"] = new() { PrimaryModel = CoreConstants.Models.ClaudeOpus46, FallbackModel = CoreConstants.Models.Gpt54, AllowPremium = true, ModelPool = [CoreConstants.Models.ClaudeOpus46, CoreConstants.Models.ClaudeOpus47] },
+        ["developer"] = new() { PrimaryModel = CoreConstants.Models.Gpt54, FallbackModel = CoreConstants.Models.Gpt54Mini, AllowPremium = false, ModelPool = [CoreConstants.Models.Gpt54, CoreConstants.Models.ClaudeSonnet46] },
+        ["backend-developer"] = new() { PrimaryModel = CoreConstants.Models.Gpt54, FallbackModel = CoreConstants.Models.Gpt54Mini, AllowPremium = false, ModelPool = [CoreConstants.Models.Gpt54, CoreConstants.Models.ClaudeSonnet46] },
+        ["frontend-developer"] = new() { PrimaryModel = CoreConstants.Models.ClaudeSonnet46, FallbackModel = CoreConstants.Models.Gpt54Mini, AllowPremium = false, ModelPool = [CoreConstants.Models.ClaudeSonnet46, CoreConstants.Models.Gpt54] },
+        ["fullstack-developer"] = new() { PrimaryModel = CoreConstants.Models.ClaudeSonnet46, FallbackModel = CoreConstants.Models.Gpt54Mini, AllowPremium = false, ModelPool = [CoreConstants.Models.ClaudeSonnet46, CoreConstants.Models.Gpt54] },
+        ["tester"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = CoreConstants.Models.Gpt54Mini, AllowPremium = false, ModelPool = ["gemini-3.1-pro-preview", CoreConstants.Models.Gpt54, CoreConstants.Models.ClaudeSonnet46] },
+        ["reviewer"] = new() { PrimaryModel = CoreConstants.Models.ClaudeOpus46, FallbackModel = CoreConstants.Models.Gpt54, AllowPremium = true, ModelPool = [CoreConstants.Models.ClaudeOpus46, CoreConstants.Models.ClaudeOpus47] },
+        ["auditor"] = new() { PrimaryModel = CoreConstants.Models.ClaudeOpus46, FallbackModel = CoreConstants.Models.Gpt54, AllowPremium = true, ModelPool = [CoreConstants.Models.ClaudeOpus46, CoreConstants.Models.ClaudeOpus47] },
+        ["ux"] = new() { PrimaryModel = CoreConstants.Models.ClaudeSonnet46, FallbackModel = CoreConstants.Models.ClaudeHaiku45, AllowPremium = false },
+        ["user"] = new() { PrimaryModel = CoreConstants.Models.Gpt5Mini, FallbackModel = CoreConstants.Models.Gpt5Mini, AllowPremium = false },
         ["game-designer"] = new() { PrimaryModel = "gemini-3.1-pro-preview", FallbackModel = "gemini-3-flash-preview", AllowPremium = false },
-        ["navigator"] = new() { PrimaryModel = "claude-opus-4.6", FallbackModel = "gpt-5.4", AllowPremium = true, ModelPool = ["claude-opus-4.6", "claude-opus-4.7"] },
-        ["analyst"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
-        ["security"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "claude-haiku-4.5", AllowPremium = false },
-        ["docs"] = new() { PrimaryModel = "gpt-5-mini", FallbackModel = "gpt-5-mini", AllowPremium = false },
-        ["devops"] = new() { PrimaryModel = "gpt-5.4", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["gpt-5.4", "claude-sonnet-4.6"] },
-        ["refactorer"] = new() { PrimaryModel = "claude-sonnet-4.6", FallbackModel = "gpt-5.4-mini", AllowPremium = false, ModelPool = ["claude-sonnet-4.6", "gpt-5.4"] }
+        ["navigator"] = new() { PrimaryModel = CoreConstants.Models.ClaudeOpus46, FallbackModel = CoreConstants.Models.Gpt54, AllowPremium = true, ModelPool = [CoreConstants.Models.ClaudeOpus46, CoreConstants.Models.ClaudeOpus47] },
+        ["analyst"] = new() { PrimaryModel = CoreConstants.Models.ClaudeSonnet46, FallbackModel = CoreConstants.Models.ClaudeHaiku45, AllowPremium = false },
+        ["security"] = new() { PrimaryModel = CoreConstants.Models.ClaudeSonnet46, FallbackModel = CoreConstants.Models.ClaudeHaiku45, AllowPremium = false },
+        ["docs"] = new() { PrimaryModel = CoreConstants.Models.Gpt5Mini, FallbackModel = CoreConstants.Models.Gpt5Mini, AllowPremium = false },
+        ["devops"] = new() { PrimaryModel = CoreConstants.Models.Gpt54, FallbackModel = CoreConstants.Models.Gpt54Mini, AllowPremium = false, ModelPool = [CoreConstants.Models.Gpt54, CoreConstants.Models.ClaudeSonnet46] },
+        ["refactorer"] = new() { PrimaryModel = CoreConstants.Models.ClaudeSonnet46, FallbackModel = CoreConstants.Models.Gpt54Mini, AllowPremium = false, ModelPool = [CoreConstants.Models.ClaudeSonnet46, CoreConstants.Models.Gpt54] }
     };
 
     public static WorkspaceState BuildInitialState(string repoRoot, double totalCreditCap, double premiumCreditCap,
@@ -45,11 +47,12 @@ internal static class SeedData
         state.Providers = loader.LoadProviders(repoRoot);
         state.Modes = loader.LoadModes(repoRoot);
         state.Roles = loader.LoadRoles(repoRoot);
-        state.Superpowers = loader.LoadSuperpowers(repoRoot);
+        state.Skills = loader.LoadSkills(repoRoot);
         state.McpServers = loader.LoadMcpServers(repoRoot);
         return state;
     }
 
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "Metadata hydration is explicit field-by-field backfill logic.")]
     public static bool HydrateMissingWorkspaceMetadata(WorkspaceState state, IConfigurationLoader? loader = null)
     {
         loader ??= new FileSystemConfigurationLoader();
@@ -86,9 +89,9 @@ internal static class SeedData
             changed = true;
         }
 
-        if (state.Superpowers.Count == 0)
+        if (state.Skills.Count == 0)
         {
-            state.Superpowers = loader.LoadSuperpowers(repoRoot);
+            state.Skills = loader.LoadSkills(repoRoot);
             changed = true;
         }
 
@@ -136,7 +139,7 @@ internal static class SeedData
 
         if (state.Modes.Count > 0 && state.Modes.All(mode => !string.Equals(mode.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase)))
         {
-            state.Runtime.ActiveModeSlug = state.Modes.First().Slug;
+            state.Runtime.ActiveModeSlug = state.Modes[0].Slug;
             changed = true;
         }
 
@@ -145,7 +148,7 @@ internal static class SeedData
 
     public static RoleModelPolicy GetPolicy(WorkspaceState state, string roleSlug)
     {
-        var defaultModel = state.Models.FirstOrDefault(model => model.IsDefault)?.Name ?? "gpt-5-mini";
+        var defaultModel = state.Models.FirstOrDefault(model => model.IsDefault)?.Name ?? CoreConstants.Models.Gpt5Mini;
         var suggested = state.Roles.FirstOrDefault(role => role.Slug == roleSlug)?.SuggestedModel;
         var hasSuggested = !string.IsNullOrWhiteSpace(suggested);
         if (DefaultPolicies.TryGetValue(roleSlug, out var policy))

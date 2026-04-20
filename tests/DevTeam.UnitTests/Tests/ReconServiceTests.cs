@@ -4,6 +4,10 @@ namespace DevTeam.UnitTests.Tests;
 
 internal static class ReconServiceTests
 {
+    private const string RepoRoot = "/repo";
+    private const string WorkspacePath = ".devteam";
+    private const string DefaultModelName = "gpt-5-mini";
+
     public static IEnumerable<TestCase> GetTests() =>
     [
         new("BuildReconPrompt_IncludesGoal_WhenProvided", BuildReconPrompt_IncludesGoal_WhenProvided),
@@ -16,6 +20,7 @@ internal static class ReconServiceTests
         new("BuildPrompt_InjectsCodebaseContext_ForPlannerRole", BuildPrompt_InjectsCodebaseContext_ForPlannerRole),
         new("BuildPrompt_OmitsCodebaseContext_WhenEmpty", BuildPrompt_OmitsCodebaseContext_WhenEmpty),
         new("BuildPrompt_OmitsCodebaseContext_ForTesterRole", BuildPrompt_OmitsCodebaseContext_ForTesterRole),
+        new("BuildPrompt_IncludesScoutSkill_ForNavigatorRole", BuildPrompt_IncludesScoutSkill_ForNavigatorRole),
         new("BuildPrompt_IncludesBrownfieldDeltaInstructions", BuildPrompt_IncludesBrownfieldDeltaInstructions),
         new("ParseResponse_ReadsBrownfieldApproachAndRationale", ParseResponse_ReadsBrownfieldApproachAndRationale),
         new("WorkspaceStore_WritesCodebaseContextFile_WhenPresent", WorkspaceStore_WritesCodebaseContextFile_WhenPresent),
@@ -24,7 +29,7 @@ internal static class ReconServiceTests
 
     private static Task BuildReconPrompt_IncludesGoal_WhenProvided()
     {
-        var prompt = ReconService.BuildReconPrompt("/repo", "Build a REST API");
+        var prompt = ReconService.BuildReconPrompt(RepoRoot, "Build a REST API");
         Assert.Contains("Build a REST API", prompt);
         Assert.Contains("reconnaissance", prompt);
         Assert.Contains("READ-ONLY", prompt);
@@ -33,7 +38,7 @@ internal static class ReconServiceTests
 
     private static Task BuildReconPrompt_OmitsGoalSection_WhenGoalIsNull()
     {
-        var prompt = ReconService.BuildReconPrompt("/repo", null);
+        var prompt = ReconService.BuildReconPrompt(RepoRoot, null);
         Assert.Contains("reconnaissance", prompt);
         Assert.DoesNotContain("Active goal", prompt);
         return Task.CompletedTask;
@@ -41,7 +46,7 @@ internal static class ReconServiceTests
 
     private static Task BuildReconPrompt_OmitsGoalSection_WhenGoalIsEmpty()
     {
-        var prompt = ReconService.BuildReconPrompt("/repo", "   ");
+        var prompt = ReconService.BuildReconPrompt(RepoRoot, "   ");
         Assert.DoesNotContain("Active goal", prompt);
         return Task.CompletedTask;
     }
@@ -55,7 +60,7 @@ internal static class ReconServiceTests
 
     private static Task BuildReconPrompt_ExpectsStructuredResponse()
     {
-        var prompt = ReconService.BuildReconPrompt("/repo", null);
+        var prompt = ReconService.BuildReconPrompt(RepoRoot, null);
         Assert.Contains("OUTCOME:", prompt);
         Assert.Contains("SUMMARY:", prompt);
         return Task.CompletedTask;
@@ -63,17 +68,17 @@ internal static class ReconServiceTests
 
     private static async Task RunAsync_StoresSummaryAsCodebaseContext()
     {
-        var output = "OUTCOME: completed\nSUMMARY:\n## Tech stack\n.NET 10\nISSUES:\n(none)\nSUPERPOWERS_USED:\n(none)\nTOOLS_USED:\n- rg\nQUESTIONS:\n(none)";
+        var output = "OUTCOME: completed\nSUMMARY:\n## Tech stack\n.NET 10\nISSUES:\n(none)\nSKILLS_USED:\n(none)\nTOOLS_USED:\n- rg\nQUESTIONS:\n(none)";
         var agent = new RecordingAgentClient(output);
         var factory = new FuncAgentClientFactory(_ => agent);
         var fs = new InMemoryFileSystem();
         var state = new WorkspaceState
         {
-            RepoRoot = "/repo",
+            RepoRoot = RepoRoot,
             ActiveGoal = new GoalState { GoalText = "Test goal" },
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
-        var store = new WorkspaceStore(".devteam", fs);
+        var store = new WorkspaceStore(WorkspacePath, fs);
 
         var svc = new ReconService(factory);
         var context = await svc.RunAsync(state, store, "fake", TimeSpan.FromSeconds(10), CancellationToken.None);
@@ -89,10 +94,10 @@ internal static class ReconServiceTests
         var fs = new InMemoryFileSystem();
         var state = new WorkspaceState
         {
-            RepoRoot = "/repo",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
-        var store = new WorkspaceStore(".devteam", fs);
+        var store = new WorkspaceStore(WorkspacePath, fs);
 
         var svc = new ReconService(factory);
         var context = await svc.RunAsync(state, store, "fake", TimeSpan.FromSeconds(10), CancellationToken.None);
@@ -104,16 +109,16 @@ internal static class ReconServiceTests
     {
         var state = new WorkspaceState
         {
-            RepoRoot = "/repo",
+            RepoRoot = RepoRoot,
             CodebaseContext = "## Tech stack\nNode.js 20",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
         var issue = new IssueItem { Id = 1, Title = "Plan something", RoleSlug = "planner", Status = ItemStatus.Open };
         state.Issues.Add(issue);
 
         var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
 
-        Assert.Contains("Codebase context", prompt);
+        Assert.Contains("Project map / codebase context", prompt);
         Assert.Contains("Node.js 20", prompt);
         return Task.CompletedTask;
     }
@@ -122,16 +127,16 @@ internal static class ReconServiceTests
     {
         var state = new WorkspaceState
         {
-            RepoRoot = "/repo",
+            RepoRoot = RepoRoot,
             CodebaseContext = "",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
         var issue = new IssueItem { Id = 1, Title = "Plan something", RoleSlug = "planner", Status = ItemStatus.Open };
         state.Issues.Add(issue);
 
         var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
 
-        Assert.DoesNotContain("Codebase context", prompt);
+        Assert.DoesNotContain("Project map / codebase context", prompt);
         return Task.CompletedTask;
     }
 
@@ -139,16 +144,35 @@ internal static class ReconServiceTests
     {
         var state = new WorkspaceState
         {
-            RepoRoot = "/repo",
+            RepoRoot = RepoRoot,
             CodebaseContext = "## Tech stack\nNode.js 20",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
         var issue = new IssueItem { Id = 1, Title = "Test something", RoleSlug = "tester", Status = ItemStatus.Open };
         state.Issues.Add(issue);
 
         var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
 
-        Assert.DoesNotContain("Codebase context", prompt);
+        Assert.DoesNotContain("Project map / codebase context", prompt);
+        return Task.CompletedTask;
+    }
+
+    private static Task BuildPrompt_IncludesScoutSkill_ForNavigatorRole()
+    {
+        var state = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }],
+            Skills = [new SkillDefinition { Slug = "scout", Name = "Scout", Body = "# Skill: Scout\nMap the relevant files.", SourcePath = ".devteam-source/skills/scout/SKILL.md" }]
+        };
+        var issue = new IssueItem { Id = 1, Title = "Map the billing area", RoleSlug = "navigator", Status = ItemStatus.Open };
+        state.Issues.Add(issue);
+
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+
+        Assert.Contains("Relevant skill slugs:", prompt);
+        Assert.Contains("scout", prompt);
+        Assert.Contains("# Skill: Scout", prompt);
         return Task.CompletedTask;
     }
 
@@ -156,9 +180,9 @@ internal static class ReconServiceTests
     {
         var state = new WorkspaceState
         {
-            RepoRoot = "/repo",
+            RepoRoot = RepoRoot,
             CodebaseContext = "## Existing patterns\nMVC controllers",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
         var issue = new IssueItem { Id = 1, Title = "Update controller", RoleSlug = "developer", Status = ItemStatus.Open };
         state.Issues.Add(issue);
@@ -166,6 +190,7 @@ internal static class ReconServiceTests
         var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
 
         Assert.Contains("Brownfield delta", prompt);
+        Assert.Contains("project map/codebase context", prompt);
         Assert.Contains("APPROACH: extend|replace|workaround", prompt);
         Assert.Contains("RATIONALE:", prompt);
         return Task.CompletedTask;
@@ -185,7 +210,7 @@ internal static class ReconServiceTests
                 The existing controller pattern already matches the feature boundary.
                 ISSUES:
                 (none)
-                SUPERPOWERS_USED:
+                SKILLS_USED:
                 (none)
                 TOOLS_USED:
                 (none)
@@ -202,12 +227,12 @@ internal static class ReconServiceTests
     private static Task WorkspaceStore_WritesCodebaseContextFile_WhenPresent()
     {
         var fs = new InMemoryFileSystem();
-        var store = new WorkspaceStore(".devteam", fs);
+        var store = new WorkspaceStore(WorkspacePath, fs);
         var state = new WorkspaceState
         {
-            RepoRoot = "/repo",
+            RepoRoot = RepoRoot,
             CodebaseContext = "## Tech stack\nGo 1.22",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
 
         store.Save(state);
@@ -222,12 +247,12 @@ internal static class ReconServiceTests
     private static Task WorkspaceStore_DoesNotWriteContextFile_WhenEmpty()
     {
         var fs = new InMemoryFileSystem();
-        var store = new WorkspaceStore(".devteam", fs);
+        var store = new WorkspaceStore(WorkspacePath, fs);
         var state = new WorkspaceState
         {
-            RepoRoot = "/repo",
+            RepoRoot = RepoRoot,
             CodebaseContext = "",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
 
         store.Save(state);
@@ -237,4 +262,5 @@ internal static class ReconServiceTests
         return Task.CompletedTask;
     }
 }
+
 

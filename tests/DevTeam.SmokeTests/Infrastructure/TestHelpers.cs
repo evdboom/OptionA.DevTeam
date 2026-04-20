@@ -6,6 +6,9 @@ namespace DevTeam.SmokeTests;
 
 internal static class TestHelpers
 {
+    private static readonly string DotnetPath = ResolveDotnetPath();
+    private static readonly string GitPath = ResolveGitPath();
+
     internal static void AssertEqual<T>(T expected, T actual, string label)
     {
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
@@ -28,7 +31,7 @@ internal static class TestHelpers
         {
             StartInfo = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "git",
+                FileName = GitPath,
                 WorkingDirectory = workingDirectory,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -65,7 +68,7 @@ internal static class TestHelpers
         {
             StartInfo = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "dotnet",
+                FileName = DotnetPath,
                 WorkingDirectory = workingDirectory,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -117,6 +120,39 @@ internal static class TestHelpers
         {
             // Best-effort: on Windows, .git object files can remain locked.
         }
+    }
+
+    private static string ResolveDotnetPath()
+    {
+        var hostPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+        if (!string.IsNullOrWhiteSpace(hostPath) && File.Exists(hostPath))
+        {
+            return hostPath;
+        }
+
+        var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+        if (!string.IsNullOrWhiteSpace(dotnetRoot))
+        {
+            var candidate = Path.Combine(dotnetRoot, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return "dotnet";
+    }
+
+    private static string ResolveGitPath()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return "git";
+        }
+
+        return new[] { "/usr/bin/git", "/usr/local/bin/git" }
+            .FirstOrDefault(File.Exists)
+            ?? "git";
     }
     
 }

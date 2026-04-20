@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using DevTeam.Cli;
 using DevTeam.Core;
@@ -11,17 +12,31 @@ namespace DevTeam.Cli.Shell;
 /// Replaces the old RunInteractiveShellAsync function from Program.cs.
 /// Thread-safe: background loop threads may call Add* methods from any thread.
 /// </summary>
-internal sealed partial class ShellService : IDisposable
+internal sealed partial class ShellService(
+    WorkspaceStore store,
+    DevTeamRuntime runtime,
+    LoopExecutor loopExecutor,
+    ToolUpdateService toolUpdateService,
+    ShellStartOptions startOptions,
+    Action requestExit,
+    ISystemClock? clock = null) : IDisposable
 {
+    private const string EnabledText = "enabled";
+    private const string DisabledText = "disabled";
+    private const string ProviderOption = "provider";
+    private const string MaxIterationsOption = "max-iterations";
+    private const string MaxSubagentsOption = "max-subagents";
+    private const string GreenStyle = "green";
+
     // ── Dependencies ───────────────────────────────────────────────────────────
 
-    private readonly WorkspaceStore _store;
-    private readonly DevTeamRuntime _runtime;
-    private readonly LoopExecutor _loopExecutor;
-    private readonly ToolUpdateService _toolUpdateService;
-    private readonly ShellStartOptions _startOptions;
-    private readonly Action _requestExit;
-    private readonly ISystemClock _clock;
+    private readonly WorkspaceStore _store = store;
+    private readonly DevTeamRuntime _runtime = runtime;
+    private readonly LoopExecutor _loopExecutor = loopExecutor;
+    private readonly ToolUpdateService _toolUpdateService = toolUpdateService;
+    private readonly ShellStartOptions _startOptions = startOptions;
+    private readonly Action _requestExit = requestExit;
+    private readonly ISystemClock _clock = clock ?? new SystemClock();
     private readonly ShellSessionDiagnostics _diagnostics = new();
     private readonly KeepAwakeController _keepAwake = new();
 
@@ -45,11 +60,6 @@ internal sealed partial class ShellService : IDisposable
         get { lock (_gate) return [.. _messages]; }
     }
 
-    public IReadOnlyList<string> CommandHistory
-    {
-        get { lock (_gate) return _history.Select(h => h.Entry).ToList(); }
-    }
-
     public bool IsLoopRunning => _loopTask is { IsCompleted: false };
 
     public string PromptText => IsLoopRunning ? "devteam (running)> " : "devteam> ";
@@ -62,26 +72,12 @@ internal sealed partial class ShellService : IDisposable
 
     private ShellLayoutSnapshot _layoutSnapshot = ShellLayoutSnapshot.Empty;
 
-    // ── Constructor ────────────────────────────────────────────────────────────
 
-    public ShellService(
-        WorkspaceStore store,
-        DevTeamRuntime runtime,
-        LoopExecutor loopExecutor,
-        ToolUpdateService toolUpdateService,
-        ShellStartOptions startOptions,
-        Action requestExit,
-        ISystemClock? clock = null)
+    public IReadOnlyList<string> GetCommandHistory()
     {
-        _store = store;
-        _runtime = runtime;
-        _loopExecutor = loopExecutor;
-        _toolUpdateService = toolUpdateService;
-        _startOptions = startOptions;
-        _requestExit = requestExit;
-        _clock = clock ?? new SystemClock();
-        _adventureModeEnabled = GetBoolOption(startOptions.Options, "adventure", false);
+        lock (_gate) return _history.Select(h => h.Entry).ToList();
     }
+
 
     // ── Initialization ─────────────────────────────────────────────────────────
 
@@ -128,6 +124,8 @@ internal sealed partial class ShellService : IDisposable
 
     // ── Input processing ───────────────────────────────────────────────────────
 
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "Interactive command router intentionally centralizes command handling.")]
+    [SuppressMessage("Major Code Smell", "S1479", Justification = "Single switch keeps command routing explicit and discoverable.")]
     public async Task ProcessInputAsync(string line)
     {
         line = line.Trim();
@@ -151,7 +149,7 @@ internal sealed partial class ShellService : IDisposable
             }
             if (!_runtime.TryResolveRoleSlug(state, roleInput, out var roleSlug))
             {
-                AddWarning($"Unknown role '{Markup.Escape(roleInput)}'. Known roles: {string.Join(", ", _runtime.GetKnownRoleSlugs(state).OrderBy(s => s))}");
+                AddWarning($"Unknown role '{Markup.Escape(roleInput)}'. Known roles: {string.Join(", ", DevTeamRuntime.GetKnownRoleSlugs(state).OrderBy(s => s))}");
                 return;
             }
             AddHint($"[italic]You → {Markup.Escape(roleSlug)}:[/] [dim]{Markup.Escape(userMsg.Length > 120 ? userMsg[..117] + "..." : userMsg)}[/]");
@@ -226,7 +224,7 @@ internal sealed partial class ShellService : IDisposable
                     : "Captured planning feedback. Revising...", "cyan");
                 var bgLogger = MakeBackgroundLogger(state);
                 var report = await RunLoopCoreAsync(state, ParseOptions(["--max-iterations", "2"]), CancellationToken.None, bgLogger);
-                AddEvent("✓", $"Revision complete ({report.IterationsExecuted} iteration(s)). Final state: {Markup.Escape(report.FinalState)}", "green");
+                AddEvent("✓", $"Revision complete ({report.IterationsExecuted} iteration(s)). Final state: {Markup.Escape(report.FinalState)}", GreenStyle);
                 AddHint(state.Phase == WorkflowPhase.ArchitectPlanning
                     ? "Type [bold]approve[/] to begin execution, or use [dim]/plan[/] to review."
                     : "Type [bold]approve[/] to proceed, or use [dim]/plan[/] to review.");
@@ -255,7 +253,10 @@ internal sealed partial class ShellService : IDisposable
             {
                 case "exit":
                 case "quit":
-                    if (IsLoopRunning) _loopCts?.Cancel();
+                    if (IsLoopRunning && _loopCts is not null)
+                    {
+                        await _loopCts.CancelAsync();
+                    }
                     _requestExit();
                     return;
 
@@ -265,7 +266,7 @@ internal sealed partial class ShellService : IDisposable
 
                 case "adventure":
                 {
-                    var requested = GetPositionalValue(options) ?? GetOption(options, "enabled");
+                    var requested = GetPositionalValue(options) ?? GetOption(options, EnabledText);
                     var enable = string.IsNullOrWhiteSpace(requested)
                         ? !IsAdventureModeEnabled
                         : ParseBoolOrThrow(requested, "Usage: /adventure [on|off]");
@@ -288,7 +289,8 @@ internal sealed partial class ShellService : IDisposable
                 {
                     var target = Path.Combine(Environment.CurrentDirectory, ".devteam-source");
                     var force = GetBoolOption(options, "force", false);
-                    CopyPackagedAssets(target, force);
+                    CliWorkspaceHelper.CopyPackagedAssets(target, force);
+                    CliWorkspaceHelper.ExportGitHubSkills(Environment.CurrentDirectory, force, AddSuccess);
                     break;
                 }
 
@@ -331,7 +333,7 @@ internal sealed partial class ShellService : IDisposable
                             : Path.Combine(Environment.CurrentDirectory, savePath));
                         var dir = Path.GetDirectoryName(fullPath);
                         if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
-                        File.WriteAllText(fullPath, report);
+                        await File.WriteAllTextAsync(fullPath, report);
                         AddSuccess($"Saved bug report to {Markup.Escape(fullPath)}");
                     }
                     AddSystem(Markup.Escape(report.TrimEnd()), "bug report");
@@ -360,7 +362,7 @@ internal sealed partial class ShellService : IDisposable
                     var gitInit = GitWorkspace.EnsureRepository(Environment.CurrentDirectory);
                     var initialized = _store.Initialize(Environment.CurrentDirectory, totalCap, premiumCap);
                     var modeName = GetOption(options, "mode");
-                    var providerName = GetOption(options, "provider");
+                    var providerName = GetOption(options, ProviderOption);
                     initialized.Runtime.KeepAwakeEnabled = GetBoolOption(options, "keep-awake", initialized.Runtime.KeepAwakeEnabled);
                     initialized.Runtime.WorkspaceMcpEnabled = GetBoolOption(options, "workspace-mcp", true);
                     initialized.Runtime.PipelineSchedulingEnabled = GetBoolOption(options, "pipeline-scheduling", true);
@@ -368,6 +370,7 @@ internal sealed partial class ShellService : IDisposable
                     if (!string.IsNullOrWhiteSpace(providerName)) ProviderSelectionService.SetDefaultProvider(initialized, providerName);
                     if (!string.IsNullOrWhiteSpace(goal)) _runtime.SetGoal(initialized, goal);
                     _store.Save(initialized);
+                    CliWorkspaceHelper.ExportGitHubSkills(Environment.CurrentDirectory, force, AddSuccess);
                     AddSuccess($"Initialized workspace at {Markup.Escape(_store.WorkspacePath)}");
                     if (gitInit) AddSuccess($"Initialized git repository at {Markup.Escape(Path.GetFullPath(Environment.CurrentDirectory))}");
                     if (!string.IsNullOrWhiteSpace(goal)) AddSuccess($"Active goal saved: {Markup.Escape(goal)}");
@@ -402,14 +405,20 @@ internal sealed partial class ShellService : IDisposable
                 case "add-issue":
                 {
                     var current = _store.Load();
-                    var title = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing issue title.");
-                    var role = GetOption(options, "role") ?? throw new InvalidOperationException($"Missing --role. Valid roles: {string.Join(", ", _runtime.GetKnownRoleSlugs(current))}");
-                    var detail = GetOption(options, "detail") ?? "";
-                    var area = GetOption(options, "area");
-                    var priority = GetIntOption(options, "priority", 50);
-                    var roadmapId = GetNullableIntOption(options, "roadmap-item-id");
-                    var dependsOn = GetMultiIntOption(options, "depends-on");
-                    var issue = _runtime.AddIssue(current, title, detail, role, priority, roadmapId, dependsOn, area);
+
+                    var request = new IssueRequest
+                    {
+                        Title = GetPositionalValue(options) ?? throw new InvalidOperationException("Missing issue title."),
+                        Detail = GetOption(options, "detail") ?? "",
+                        RoleSlug = GetOption(options, "role") ?? throw new InvalidOperationException($"Missing --role. Valid roles: {string.Join(", ", DevTeamRuntime.GetKnownRoleSlugs(current))}"),
+                        Priority = GetIntOption(options, "priority", 50),
+                        RoadmapItemId = GetNullableIntOption(options, "roadmap-item-id"),
+                        DependsOn = GetMultiIntOption(options, "depends-on"),
+                        Area = GetOption(options, "area"),
+
+                    };
+
+                    var issue = _runtime.AddIssue(current, request);
                     _store.Save(current);
                     AddSuccess($"Created issue #{issue.Id}: {Markup.Escape(issue.Title)} ({Markup.Escape(issue.RoleSlug)})");
                     break;
@@ -446,7 +455,7 @@ internal sealed partial class ShellService : IDisposable
                     }
 
                     var compareRunId = values.Count == 2 ? int.Parse(values[1]) : (int?)null;
-                    var report = _runtime.BuildRunDiff(current, runId, compareRunId);
+                    var report = DevTeamRuntime.BuildRunDiff(current, runId, compareRunId);
                     AddSystem(RunDiffPrinter.BuildMarkup(report), "run diff");
                     break;
                 }
@@ -460,7 +469,7 @@ internal sealed partial class ShellService : IDisposable
                         break;
                     }
 
-                    AddSystem(Markup.Escape(File.ReadAllText(path)).TrimEnd(), "brownfield log");
+                    AddSystem(Markup.Escape((await File.ReadAllTextAsync(path)).TrimEnd()), "brownfield log");
                     break;
                 }
 
@@ -568,11 +577,18 @@ internal sealed partial class ShellService : IDisposable
                 case "set-keep-awake":
                 {
                     TryLoadState(out var current);
-                    var requested = GetPositionalValue(options) ?? GetOption(options, "enabled");
+                    var requested = GetPositionalValue(options) ?? GetOption(options, EnabledText);
                     if (string.IsNullOrWhiteSpace(requested))
                     {
-                        AddLine($"Keep-awake for this shell: {(_keepAwakeEnabled ? "enabled" : "disabled")}." +
-                            (current is not null ? $" Workspace default: {(current.Runtime.KeepAwakeEnabled ? "enabled" : "disabled")}." : ""));
+                        var shellState = _keepAwakeEnabled ? EnabledText : DisabledText;
+                        var workspaceSuffix = "";
+                        if (current is not null)
+                        {
+                            var workspaceState = current.Runtime.KeepAwakeEnabled ? EnabledText : DisabledText;
+                            workspaceSuffix = $" Workspace default: {workspaceState}.";
+                        }
+
+                        AddLine($"Keep-awake for this shell: {shellState}.{workspaceSuffix}");
                         break;
                     }
                     var enabled = ParseBoolOrThrow(requested, "Usage: /keep-awake <on|off>");
@@ -582,11 +598,11 @@ internal sealed partial class ShellService : IDisposable
                     {
                         _runtime.SetKeepAwake(current, enabled);
                         _store.Save(current);
-                        AddSuccess($"Keep-awake {(enabled ? "enabled" : "disabled")} for this shell and workspace.");
+                        AddSuccess($"Keep-awake {(enabled ? EnabledText : DisabledText)} for this shell and workspace.");
                     }
                     else
                     {
-                        AddSuccess($"Keep-awake {(enabled ? "enabled" : "disabled")} for this shell session.");
+                        AddSuccess($"Keep-awake {(enabled ? EnabledText : DisabledText)} for this shell session.");
                     }
                     break;
                 }
@@ -629,7 +645,7 @@ internal sealed partial class ShellService : IDisposable
                     var requested = GetPositionalValue(options) ?? GetOption(options, "enabled");
                     if (string.IsNullOrWhiteSpace(requested))
                     {
-                        AddLine($"Auto-approve: {(current?.Runtime.AutoApproveEnabled == true ? "enabled" : "disabled")}.");
+                        AddLine($"Auto-approve: {(current?.Runtime.AutoApproveEnabled == true ? EnabledText : DisabledText)}.");
                         break;
                     }
                     var enabled = ParseBoolOrThrow(requested, "Usage: /auto-approve <on|off>");
@@ -638,12 +654,12 @@ internal sealed partial class ShellService : IDisposable
                         _runtime.SetAutoApprove(current, enabled);
                         _store.Save(current);
                     }
-                    AddSuccess($"Auto-approve {(enabled ? "enabled" : "disabled")}.");
+                    AddSuccess($"Auto-approve {(enabled ? EnabledText : DisabledText)}.");
                     break;
                 }
 
                 case "set-max-iterations":
-                case "max-iterations":
+                case MaxIterationsOption:
                 {
                     TryLoadState(out var current);
                     var requested = GetPositionalValue(options) ?? GetOption(options, "value");
@@ -668,7 +684,7 @@ internal sealed partial class ShellService : IDisposable
                 }
 
                 case "set-max-subagents":
-                case "max-subagents":
+                case MaxSubagentsOption:
                 {
                     TryLoadState(out var current);
                     var requested = GetPositionalValue(options) ?? GetOption(options, "value");
@@ -710,7 +726,7 @@ internal sealed partial class ShellService : IDisposable
                         : "Captured planning feedback. Revising...", "cyan");
                     var bgLogger2 = MakeBackgroundLogger(current);
                     var feedbackReport = await RunLoopCoreAsync(current, ParseOptions(["--max-iterations", "2"]), CancellationToken.None, bgLogger2);
-                    AddEvent("✓", $"Revision complete ({feedbackReport.IterationsExecuted} iteration(s)). Final state: {Markup.Escape(feedbackReport.FinalState)}", "green");
+                    AddEvent("✓", $"Revision complete ({feedbackReport.IterationsExecuted} iteration(s)). Final state: {Markup.Escape(feedbackReport.FinalState)}", GreenStyle);
                     AddHint(current.Phase == WorkflowPhase.ArchitectPlanning
                         ? "Type [bold]approve[/] to begin execution, or use [dim]/plan[/] to review."
                         : "Type [bold]approve[/] to proceed, or use [dim]/plan[/] to review.");
@@ -733,7 +749,7 @@ internal sealed partial class ShellService : IDisposable
                         break;
                     }
 
-                    var usingSubagents = options.ContainsKey("max-subagents") ? int.Parse(options["max-subagents"][0]) : current.Runtime.DefaultMaxSubagents;
+                    var usingSubagents = options.ContainsKey(MaxSubagentsOption) ? int.Parse(options[MaxSubagentsOption][0]) : current.Runtime.DefaultMaxSubagents;
                     AddSystem(RunPreviewPrinter.BuildPreviewMarkup(current, _runtime, usingSubagents), "preview");
                     AddHint("Use [cyan]/run[/] to start the loop, or [cyan]/max-subagents N[/] to change the previewed batch size.");
                     break;
@@ -773,17 +789,17 @@ internal sealed partial class ShellService : IDisposable
                         AddLine("A plan is ready. Use [cyan]/plan[/] to review, type feedback to revise, or [cyan]/approve[/] to continue.");
                         break;
                     }
-                    var usingSubagents = options.ContainsKey("max-subagents") ? int.Parse(options["max-subagents"][0]) : current.Runtime.DefaultMaxSubagents;
+                    var usingSubagents = options.ContainsKey(MaxSubagentsOption) ? int.Parse(options[MaxSubagentsOption][0]) : current.Runtime.DefaultMaxSubagents;
                     if (GetBoolOption(options, "dry-run", false))
                     {
                         AddSystem(RunPreviewPrinter.BuildPreviewMarkup(current, _runtime, usingSubagents), "preview");
                         AddHint("Dry run only — nothing was executed. Use [cyan]/run[/] to start the loop.");
                         break;
                     }
-                    var usingIterations = options.ContainsKey("max-iterations") ? int.Parse(options["max-iterations"][0]) : current.Runtime.DefaultMaxIterations;
+                    var usingIterations = options.ContainsKey(MaxIterationsOption) ? int.Parse(options[MaxIterationsOption][0]) : current.Runtime.DefaultMaxIterations;
                     AddHint($"max-iterations: [bold]{usingIterations}[/] · max-subagents: [bold]{usingSubagents}[/] [dim](change with /max-iterations N or /max-subagents N)[/]");
                     StartLoopInBackground(current, options);
-                    AddEvent("🚀", "Loop started — running in the background. You can type commands while work progresses.", "green");
+                    AddEvent("🚀", "Loop started — running in the background. You can type commands while work progresses.", GreenStyle);
                     AddHint("/stop to cancel · /wait to re-attach · /status to check progress");
                     break;
                 }
@@ -795,7 +811,10 @@ internal sealed partial class ShellService : IDisposable
                         AddHint("No loop is currently running.");
                         break;
                     }
-                    _loopCts?.Cancel();
+                    if (_loopCts is not null)
+                    {
+                        await _loopCts.CancelAsync();
+                    }
                     AddWarning("Stop requested — the loop will finish its current agent call then stop.");
                     break;
                 }
@@ -841,7 +860,7 @@ internal sealed partial class ShellService : IDisposable
                         AddLine("No plan has been written yet. Run [cyan]/plan[/] first.");
                         break;
                     }
-                    var result = _runtime.RunOnce(current, GetIntOption(options, "max-subagents", 3));
+                    var result = _runtime.RunOnce(current, GetIntOption(options, MaxSubagentsOption, 3));
                     _store.Save(current);
                     PrintLoopResult(result);
                     PrintBudget(current.Budget);
@@ -937,7 +956,7 @@ internal sealed partial class ShellService : IDisposable
                             var context = await recon.RunAsync(current, _store, backend, timeout, CancellationToken.None);
                             if (!string.IsNullOrWhiteSpace(context))
                             {
-                                AddSuccess("Codebase context updated and saved to .devteam/codebase-context.md");
+                                AddSuccess("Project map / codebase context updated and saved to .devteam/codebase-context.md");
                             }
                             else
                             {
@@ -1022,9 +1041,9 @@ internal sealed partial class ShellService : IDisposable
         Action<string>? logger = null)
     {
         var backend = GetOption(options, "backend") ?? "sdk";
-        var providerName = GetOption(options, "provider");
-        var maxSubagents = GetIntOption(options, "max-subagents", state.Runtime.DefaultMaxSubagents);
-        var maxIterations = GetIntOption(options, "max-iterations", state.Runtime.DefaultMaxIterations);
+        var providerName = GetOption(options, ProviderOption);
+        var maxSubagents = GetIntOption(options, MaxSubagentsOption, state.Runtime.DefaultMaxSubagents);
+        var maxIterations = GetIntOption(options, MaxIterationsOption, state.Runtime.DefaultMaxIterations);
         var timeoutSeconds = GetIntOption(options, "timeout-seconds", 600);
         var verbosity = ParseVerbosity(GetOption(options, "verbosity"));
         if (!string.IsNullOrWhiteSpace(providerName))
@@ -1060,11 +1079,12 @@ internal sealed partial class ShellService : IDisposable
 
     // ── Plan workflow ──────────────────────────────────────────────────────────
 
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "Flow intentionally mirrors user-facing planning states.")]
     private async Task ShowPlanAsync(WorkspaceState state, Dictionary<string, List<string>> options)
     {
         var planningOptions = options.ToDictionary(p => p.Key, p => p.Value.ToList(), StringComparer.OrdinalIgnoreCase);
-        if (!planningOptions.ContainsKey("max-iterations")) planningOptions["max-iterations"] = ["1"];
-        if (!planningOptions.ContainsKey("max-subagents")) planningOptions["max-subagents"] = ["1"];
+        if (!planningOptions.ContainsKey(MaxIterationsOption)) planningOptions[MaxIterationsOption] = ["1"];
+        if (!planningOptions.ContainsKey(MaxSubagentsOption)) planningOptions[MaxSubagentsOption] = ["1"];
 
         var result = await PlanWorkflow.EnsurePlanAsync(
             _store,
@@ -1105,7 +1125,7 @@ internal sealed partial class ShellService : IDisposable
         // Show plan file
         var planPath = Path.Combine(_store.WorkspacePath, "plan.md");
         if (File.Exists(planPath))
-            AddSystem(Markup.Escape(File.ReadAllText(planPath).TrimEnd()), "plan");
+            AddSystem(Markup.Escape((await File.ReadAllTextAsync(planPath)).TrimEnd()), "plan");
         else
             AddHint("No plan has been written yet.");
 
@@ -1139,9 +1159,10 @@ internal sealed partial class ShellService : IDisposable
 
     // ── Role invocation ────────────────────────────────────────────────────────
 
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "Budget and fallback checks are intentionally explicit for operator clarity.")]
     private async Task InvokeRoleDirectAsync(WorkspaceState state, string roleSlug, string userMessage)
     {
-        var policy = _runtime.GetRoleModelPolicy(state, roleSlug);
+        var policy = DevTeamRuntime.GetRoleModelPolicy(state, roleSlug);
         var model = policy.PrimaryModel;
         var cost = state.Models.FirstOrDefault(m => string.Equals(m.Name, model, StringComparison.OrdinalIgnoreCase))?.Cost ?? 1;
         var remaining = state.Budget.TotalCreditCap - state.Budget.CreditsCommitted;
@@ -1157,8 +1178,8 @@ internal sealed partial class ShellService : IDisposable
             }
             else
             {
-                var freeModel = state.Models.FirstOrDefault(m => m.Cost == 0 && m.IsDefault)
-                    ?? state.Models.FirstOrDefault(m => m.Cost == 0);
+                var freeModel = state.Models.FirstOrDefault(m => Math.Abs(m.Cost) < double.Epsilon && m.IsDefault)
+                    ?? state.Models.FirstOrDefault(m => Math.Abs(m.Cost) < double.Epsilon);
                 if (freeModel is not null)
                 {
                     AddWarning($"Budget exhausted — falling back to free model {Markup.Escape(freeModel.Name)}");
@@ -1216,7 +1237,7 @@ internal sealed partial class ShellService : IDisposable
                 AddWarning($"{parsed.Questions.Count} question(s) added — they'll appear at the prompt.");
             }
 
-            _runtime.MergeWorkspaceAdditions(state, _store.Load());
+            DevTeamRuntime.MergeWorkspaceAdditions(state, _store.Load());
             _store.Save(state);
         }
         catch (Exception ex)
@@ -1249,7 +1270,7 @@ internal sealed partial class ShellService : IDisposable
         if (openQuestions.Count > 0 && !IsLoopRunning)
         {
             var q = openQuestions[0];
-            AddQuestion(q.Text, q.Id, q.IsBlocking, 1, openQuestions.Count);
+            AddQuestion(q.Text, q.IsBlocking, 1, openQuestions.Count);
             AddHint(openQuestions.Count > 1
                 ? $"Type your answer (question 1 of {openQuestions.Count}), or [dim]/questions[/] to see all."
                 : "Type your answer below.");
@@ -1309,6 +1330,7 @@ internal sealed partial class ShellService : IDisposable
 
     // ── Status / budget display ────────────────────────────────────────────────
 
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "Status rendering intentionally keeps all report sections in one method.")]
     private void PrintStatus(WorkspaceState state)
     {
         var report = _runtime.BuildStatusReport(state);

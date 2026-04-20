@@ -10,7 +10,6 @@ internal sealed class GitHubIssueSyncService(ICommandRunner? runner = null)
 
     public async Task<GitHubSyncReport> SyncAsync(WorkspaceState state, DevTeamRuntime runtime, string workingDirectory, CancellationToken cancellationToken = default)
     {
-        await EnsureAuthenticatedAsync(workingDirectory, cancellationToken);
         var payloads = await LoadOpenIssuesAsync(workingDirectory, cancellationToken);
 
         var report = new GitHubSyncReport();
@@ -51,24 +50,6 @@ internal sealed class GitHubIssueSyncService(ICommandRunner? runner = null)
             $"Imported issues: {report.ImportedIssueCount}, updated issues: {report.UpdatedIssueCount}, imported questions: {report.ImportedQuestionCount}, updated questions: {report.UpdatedQuestionCount}, skipped: {report.SkippedCount}.",
             "github-sync");
         return report;
-    }
-
-    private async Task EnsureAuthenticatedAsync(string workingDirectory, CancellationToken cancellationToken)
-    {
-        var authResult = await _runner.RunAsync(
-            new CommandExecutionSpec
-            {
-                FileName = ResolveGitHubCliPath(),
-                Arguments = ["auth", "status"],
-                WorkingDirectory = workingDirectory,
-                Timeout = TimeSpan.FromSeconds(30)
-            },
-            cancellationToken);
-
-        if (authResult.ExitCode != 0)
-        {
-            throw new InvalidOperationException("GitHub CLI authentication is required. Run 'gh auth login' and try again.");
-        }
     }
 
     private async Task<List<GitHubIssuePayload>> LoadOpenIssuesAsync(string workingDirectory, CancellationToken cancellationToken)
@@ -246,7 +227,7 @@ internal sealed class GitHubIssueSyncService(ICommandRunner? runner = null)
         return normalized.Trim('-');
     }
 
-    private void SyncQuestion(WorkspaceState state, DevTeamRuntime runtime, GitHubIssuePayload payload, GitHubSyncReport report)
+    private static void SyncQuestion(WorkspaceState state, DevTeamRuntime runtime, GitHubIssuePayload payload, GitHubSyncReport report)
     {
         var externalReference = BuildExternalReference(payload.Number);
         var existing = state.Questions.FirstOrDefault(item => string.Equals(item.ExternalReference, externalReference, StringComparison.OrdinalIgnoreCase));
@@ -303,7 +284,23 @@ internal sealed class GitHubIssueSyncService(ICommandRunner? runner = null)
             return existing;
         }
 
-        var created = runtime.AddIssue(state, payload.Title, payload.Detail, payload.RoleSlug, payload.Priority, null, [], payload.Area);
+        var created = runtime.AddIssue(
+            state,
+            new IssueRequest
+            {
+                Title = payload.Title,
+                Detail = payload.Detail,
+                RoleSlug = payload.RoleSlug,
+                Priority = payload.Priority,
+                RoadmapItemId = null,
+                DependsOn = [],
+                Area = payload.Area,
+                FamilyKey = null,
+                ParentIssueId = null,
+                PipelineId = null,
+                PipelineStageIndex = null,
+                ComplexityHint = null
+            });
         created.ExternalReference = externalReference;
         report.ImportedIssueCount++;
         return created;

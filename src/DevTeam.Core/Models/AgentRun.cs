@@ -19,7 +19,7 @@ public sealed class AgentRun
     public double? EstimatedCostUsd { get; set; }
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public ItemStatus? ResultingIssueStatus { get; set; }
-    public List<string> SuperpowersUsed { get; set; } = [];
+    public List<string> SkillsUsed { get; set; } = [];
     public List<string> ToolsUsed { get; set; } = [];
     public List<string> ChangedPaths { get; set; } = [];
     public List<int> CreatedIssueIds { get; set; } = [];

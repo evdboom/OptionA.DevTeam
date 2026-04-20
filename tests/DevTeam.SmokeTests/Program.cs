@@ -60,10 +60,10 @@ var tests = new List<(string Name, Action Run)>
     ("Mode guardrails appear in agent prompt", TestModeGuardrailsAppearInPrompt),
     ("Pipeline handoff appears in agent prompt", TestPipelineHandoffAppearsInPrompt),
     ("Collapsed response headers still parse cleanly", TestCollapsedResponseHeadersParseCleanly),
-    ("Run artifacts capture superpowers and tools used", TestRunArtifactsCaptureUsageMetadata),
+    ("Run artifacts capture skills and tools used", TestRunArtifactsCaptureUsageMetadata),
     ("Status command shows role usage telemetry", TestStatusCommandShowsRoleUsage),
     ("Brownfield log captures approach and rationale", TestBrownfieldLogCapturesApproachAndRationale),
-    ("Legacy workspaces hydrate missing roles and superpowers", TestLegacyWorkspaceHydratesMetadata),
+    ("Legacy workspaces hydrate missing roles and skills", TestLegacyWorkspaceHydratesMetadata),
     ("Workspace loads legacy execution selection timestamps", TestWorkspaceLoadsLegacyExecutionSelectionTimestamp),
     ("Friendly role names resolve to canonical roles", TestFriendlyRoleNamesResolve),
     ("External repos fall back to packaged prompt assets", TestExternalReposFallBackToPackagedAssets),
@@ -108,14 +108,15 @@ foreach (var (name, run) in tests)
 
 if (failures.Count > 0)
 {
-    Console.Error.WriteLine("Smoke tests failed:");
+    await Console.Error.WriteLineAsync("Smoke tests failed:");
     foreach (var failure in failures)
     {
-        Console.Error.WriteLine($"  - {failure}");
+        await Console.Error.WriteLineAsync($"  - {failure}");
     }
     return 1;
 }
 
 Console.WriteLine($"All {tests.Count} smoke tests passed.");
 return 0;
+
 

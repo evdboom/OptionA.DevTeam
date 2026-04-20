@@ -6,6 +6,6 @@ public interface IConfigurationLoader
     List<ProviderDefinition> LoadProviders(string repoRoot);
     List<RoleDefinition> LoadRoles(string repoRoot);
     List<ModeDefinition> LoadModes(string repoRoot);
-    List<SuperpowerDefinition> LoadSuperpowers(string repoRoot);
+    List<SkillDefinition> LoadSkills(string repoRoot);
     List<McpServerDefinition> LoadMcpServers(string repoRoot);
 }

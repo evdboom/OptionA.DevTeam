@@ -22,12 +22,12 @@ public sealed class WorkspaceState
     public List<ProviderDefinition> Providers { get; set; } = [];
     public List<ModeDefinition> Modes { get; set; } = [];
     public List<RoleDefinition> Roles { get; set; } = [];
-    public List<SuperpowerDefinition> Superpowers { get; set; } = [];
+    public List<SkillDefinition> Skills { get; set; } = [];
     public List<McpServerDefinition> McpServers { get; set; } = [];
     public List<WorktreeEntry> Worktrees { get; set; } = [];
     /// <summary>
-    /// Markdown codebase context produced by the recon pass (<c>devteam init --recon</c>).
-    /// Injected into every planner and architect prompt.
+    /// Markdown project map / codebase context produced by the recon pass (<c>devteam init --recon</c>).
+    /// Injected into planner, architect, navigator, and implementation prompts that need repository context.
     /// </summary>
     public string CodebaseContext { get; set; } = "";
     public int NextRoadmapId { get; set; } = 1;

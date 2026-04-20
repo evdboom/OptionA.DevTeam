@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 using DevTeam.Core;
 using DevTeam.Cli.Shell;
 
@@ -40,6 +42,7 @@ internal static class CliLoopHandler
         return 0;
     }
 
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "Budget fallback flow is intentionally explicit for CLI readability.")]
     internal static async Task InvokeRoleDirectAsync(
         WorkspaceStore store,
         DevTeamRuntime runtime,
@@ -47,7 +50,7 @@ internal static class CliLoopHandler
         string roleSlug,
         string userMessage)
     {
-        var policy = runtime.GetRoleModelPolicy(state, roleSlug);
+        var policy = DevTeamRuntime.GetRoleModelPolicy(state, roleSlug);
         var model = policy.PrimaryModel;
         var cost = state.Models.FirstOrDefault(m => string.Equals(m.Name, model, StringComparison.OrdinalIgnoreCase))?.Cost ?? 1;
         var remaining = state.Budget.TotalCreditCap - state.Budget.CreditsCommitted;
@@ -63,8 +66,8 @@ internal static class CliLoopHandler
             }
             else
             {
-                var freeModel = state.Models.FirstOrDefault(m => m.Cost == 0 && m.IsDefault)
-                    ?? state.Models.FirstOrDefault(m => m.Cost == 0);
+                var freeModel = state.Models.FirstOrDefault(m => Math.Abs(m.Cost) < double.Epsilon && m.IsDefault)
+                    ?? state.Models.FirstOrDefault(m => Math.Abs(m.Cost) < double.Epsilon);
                 if (freeModel is not null)
                 {
                     Console.WriteLine(ConsoleTheme.Warning($"Budget exhausted — falling back to free model {freeModel.Name}"));
@@ -126,7 +129,7 @@ internal static class CliLoopHandler
                 ChatConsole.WriteWarning($"{parsed.Questions.Count} question(s) added — they'll appear at the prompt.");
             }
 
-            runtime.MergeWorkspaceAdditions(state, store.Load());
+            DevTeamRuntime.MergeWorkspaceAdditions(state, store.Load());
             store.Save(state);
         }
         catch (Exception ex)
@@ -135,6 +138,7 @@ internal static class CliLoopHandler
         }
     }
 
+    [SuppressMessage("Major Code Smell", "S107", Justification = "Legacy CLI entrypoint keeps explicit parameter list for callsite clarity.")]
     internal static async Task<LoopExecutionReport> RunLoopAsync(
         WorkspaceStore store,
         DevTeamRuntime runtime,
@@ -161,13 +165,23 @@ internal static class CliLoopHandler
             ? new LoopConsoleRenderer()
             : null;
         Action<IReadOnlyList<RunProgressSnapshot>>? progressReporter = renderer is null ? null : snapshots => renderer.ReportProgress(snapshots);
-        Action<string> logger = overrideLogger is not null
-            ? overrideLogger
-            : renderer is not null
-                ? message => renderer.Log(message)
-                : chatLogging
-                    ? ChatConsole.WriteLoopLog
-                    : Console.WriteLine;
+        Action<string> logger;
+        if (overrideLogger is not null)
+        {
+            logger = overrideLogger;
+        }
+        else if (renderer is not null)
+        {
+            logger = message => renderer.Log(message);
+        }
+        else if (chatLogging)
+        {
+            logger = ChatConsole.WriteLoopLog;
+        }
+        else
+        {
+            logger = Console.WriteLine;
+        }
         var keepAwakeEnabled = CliWorkspaceHelper.ResolveKeepAwakeEnabled(state, options);
         CliWorkspaceHelper.ApplyKeepAwakeSetting(keepAwakeController, keepAwakeEnabled, interactiveShell, logger);
         var executionOptions = new LoopExecutionOptions
@@ -190,6 +204,7 @@ internal static class CliLoopHandler
         return report;
     }
 
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "Plan display flow mirrors user approval states and prompts.")]
     internal static async Task ShowPlanAsync(
         WorkspaceStore store,
         DevTeamRuntime runtime,

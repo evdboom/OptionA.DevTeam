@@ -25,8 +25,8 @@ internal static class IssueServiceTests
         var svc = new IssueService(new FakeSystemClock());
         var state = new WorkspaceState();
 
-        var i1 = svc.AddIssue(state, "First", "detail", "developer", 50, null, []);
-        var i2 = svc.AddIssue(state, "Second", "detail", "developer", 50, null, []);
+        var i1 = IssueService.AddIssue(state, "First", "detail", "developer", 50, null, []);
+        var i2 = IssueService.AddIssue(state, "Second", "detail", "developer", 50, null, []);
 
         Assert.That(i1.Id == 1, $"Expected id 1 but got {i1.Id}");
         Assert.That(i2.Id == 2, $"Expected id 2 but got {i2.Id}");
@@ -41,7 +41,7 @@ internal static class IssueServiceTests
             Roles = [new RoleDefinition { Slug = "developer", Name = "Developer" }]
         };
 
-        var issue = svc.AddIssue(state, "Do work", "detail", "engineer", 50, null, []);
+        var issue = IssueService.AddIssue(state, "Do work", "detail", "engineer", 50, null, []);
 
         Assert.That(issue.RoleSlug == "developer", $"Expected 'developer' but got '{issue.RoleSlug}'");
         return Task.CompletedTask;
@@ -52,8 +52,8 @@ internal static class IssueServiceTests
         var svc = new IssueService(new FakeSystemClock());
         var state = new WorkspaceState();
 
-        var dep = svc.AddIssue(state, "Dependency", "detail", "developer", 50, null, []);
-        var issue = svc.AddIssue(state, "Dependent", "detail", "developer", 50, null, [dep.Id]);
+        var dep = IssueService.AddIssue(state, "Dependency", "detail", "developer", 50, null, []);
+        var issue = IssueService.AddIssue(state, "Dependent", "detail", "developer", 50, null, [dep.Id]);
 
         Assert.That(issue.DependsOnIssueIds.Contains(dep.Id),
             $"Expected DependsOnIssueIds to contain {dep.Id}");
@@ -73,8 +73,8 @@ internal static class IssueServiceTests
             Phase = WorkflowPhase.Execution
         };
 
-        var dep = svc.AddIssue(state, "Dependency", "detail", "developer", 40, null, []);
-        var issue = svc.AddIssue(state, "Original title", "Original detail", "developer", 50, null, []);
+        var dep = IssueService.AddIssue(state, "Dependency", "detail", "developer", 40, null, []);
+        var issue = IssueService.AddIssue(state, "Original title", "Original detail", "developer", 50, null, []);
 
         var edited = svc.EditIssue(state, new IssueEditRequest
         {
@@ -113,7 +113,7 @@ internal static class IssueServiceTests
             Phase = WorkflowPhase.Execution
         };
 
-        var issue = svc.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
+        var issue = IssueService.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
         svc.EnsurePipelineAssignments(state);
 
         Assert.Throws<InvalidOperationException>(
@@ -130,7 +130,7 @@ internal static class IssueServiceTests
     {
         var svc = new IssueService(new FakeSystemClock());
         var state = new WorkspaceState { Phase = WorkflowPhase.Execution };
-        var issue = svc.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
+        var issue = IssueService.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
         state.AgentRuns.Add(new AgentRun
         {
             Id = 1,
@@ -155,7 +155,7 @@ internal static class IssueServiceTests
         var state = new WorkspaceState();
         state.Runtime.PipelineSchedulingEnabled = false;
 
-        var issue = svc.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
+        var issue = IssueService.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
         var pipeline = new PipelineState
         {
             Id = state.NextPipelineId++,
@@ -184,7 +184,7 @@ internal static class IssueServiceTests
         var state = new WorkspaceState();
         state.Runtime.PipelineSchedulingEnabled = false;
 
-        var issue = svc.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
+        var issue = IssueService.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
         var pipeline = new PipelineState
         {
             Id = state.NextPipelineId++,
@@ -216,7 +216,7 @@ internal static class IssueServiceTests
         state.Runtime.PipelineSchedulingEnabled = false;
 
         // Single-role pipeline: completing the only stage finishes the pipeline
-        var issue = svc.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
+        var issue = IssueService.AddIssue(state, "Feature", "detail", "developer", 50, null, []);
         var pipeline = new PipelineState
         {
             Id = state.NextPipelineId++,
@@ -252,7 +252,7 @@ internal static class IssueServiceTests
     {
         var svc = new IssueService(new FakeSystemClock());
         var state = new WorkspaceState();
-        var issue = svc.AddIssue(state, "Find Me", "detail", "developer", 50, null, []);
+        var issue = IssueService.AddIssue(state, "Find Me", "detail", "developer", 50, null, []);
 
         var found = svc.FindIssue(state, issue.Id);
 
@@ -267,8 +267,8 @@ internal static class IssueServiceTests
         var state = new WorkspaceState { Phase = WorkflowPhase.Execution };
         state.Runtime.PipelineSchedulingEnabled = false;
 
-        var blocker = svc.AddIssue(state, "Blocker", "detail", "developer", 50, null, []);
-        var dependent = svc.AddIssue(state, "Dependent", "detail", "developer", 50, null, [blocker.Id]);
+        var blocker = IssueService.AddIssue(state, "Blocker", "detail", "developer", 50, null, []);
+        var dependent = IssueService.AddIssue(state, "Dependent", "detail", "developer", 50, null, [blocker.Id]);
 
         var ready = svc.GetReadyIssues(state, 10);
 
@@ -284,10 +284,10 @@ internal static class IssueServiceTests
         var state = new WorkspaceState { Phase = WorkflowPhase.Execution };
         state.Runtime.PipelineSchedulingEnabled = false;
 
-        var done = svc.AddIssue(state, "Done Work", "detail", "developer", 50, null, []);
+        var done = IssueService.AddIssue(state, "Done Work", "detail", "developer", 50, null, []);
         done.Status = ItemStatus.Done;
 
-        var ready = svc.AddIssue(state, "Ready Work", "detail", "developer", 50, null, [done.Id]);
+        var ready = IssueService.AddIssue(state, "Ready Work", "detail", "developer", 50, null, [done.Id]);
 
         var result = svc.GetReadyIssues(state, 10);
 
@@ -302,9 +302,9 @@ internal static class IssueServiceTests
         var state = new WorkspaceState { Phase = WorkflowPhase.Execution };
         state.Runtime.PipelineSchedulingEnabled = false;
 
-        svc.AddIssue(state, "Issue 1", "detail", "developer", 50, null, []);
-        svc.AddIssue(state, "Issue 2", "detail", "developer", 50, null, []);
-        svc.AddIssue(state, "Issue 3", "detail", "developer", 50, null, []);
+        IssueService.AddIssue(state, "Issue 1", "detail", "developer", 50, null, []);
+        IssueService.AddIssue(state, "Issue 2", "detail", "developer", 50, null, []);
+        IssueService.AddIssue(state, "Issue 3", "detail", "developer", 50, null, []);
 
         var result = svc.GetReadyIssues(state, 1);
 

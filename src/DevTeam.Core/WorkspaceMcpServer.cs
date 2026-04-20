@@ -1,9 +1,11 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace DevTeam.Core;
 
+[SuppressMessage("Major Code Smell", "S1192", Justification = "JSON-RPC and schema property names are protocol literals.")]
 public sealed class WorkspaceMcpServer(
     string workspacePath,
     Func<int, string?, CancellationToken, Task<string>>? subAgentRunner = null)
@@ -119,18 +121,21 @@ public sealed class WorkspaceMcpServer(
             {
                 var issue = runtime.AddIssue(
                     state,
-                    GetRequiredString(arguments, "title"),
-                    GetString(arguments, "detail"),
-                    GetString(arguments, "roleSlug", "developer"),
-                    GetInt(arguments, "priority", 50),
-                    GetNullableInt(arguments, "roadmapItemId"),
-                    GetIntList(arguments, "dependsOn"),
-                    GetOptionalString(arguments, "area"),
-                    GetOptionalString(arguments, "familyKey"),
-                    GetNullableInt(arguments, "parentIssueId"),
-                    GetNullableInt(arguments, "pipelineId"),
-                    GetNullableInt(arguments, "pipelineStageIndex"),
-                    GetNullableInt(arguments, "complexityHint"));
+                    new IssueRequest
+                    {
+                        Title = GetRequiredString(arguments, "title"),
+                        Detail = GetString(arguments, "detail"),
+                        RoleSlug = GetString(arguments, "roleSlug", "developer"),
+                        Priority = GetInt(arguments, "priority", 50),
+                        RoadmapItemId = GetNullableInt(arguments, "roadmapItemId"),
+                        DependsOn = GetIntList(arguments, "dependsOn"),
+                        Area = GetOptionalString(arguments, "area"),
+                        FamilyKey = GetOptionalString(arguments, "familyKey"),
+                        ParentIssueId = GetNullableInt(arguments, "parentIssueId"),
+                        PipelineId = GetNullableInt(arguments, "pipelineId"),
+                        PipelineStageIndex = GetNullableInt(arguments, "pipelineStageIndex"),
+                        ComplexityHint = GetNullableInt(arguments, "complexityHint")
+                    });
                 return new { issue.Id, issue.Title, issue.RoleSlug, issue.Area, issue.Priority, issue.ComplexityHint };
             }, save: true)),
             "create_question" => BuildToolResult(WithWorkspace((runtime, state) =>
@@ -161,7 +166,7 @@ public sealed class WorkspaceMcpServer(
             "get_runtime_capabilities" => BuildToolResult(BuildRuntimeCapabilities()),
             "update_issue_status" => BuildToolResult(WithWorkspace((runtime, state) =>
             {
-                var issue = runtime.UpdateIssueStatus(
+                var issue = DevTeamRuntime.UpdateIssueStatus(
                     state,
                     GetInt(arguments, "issueId", 0),
                     GetRequiredString(arguments, "status"),

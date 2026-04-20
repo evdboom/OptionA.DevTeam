@@ -2,14 +2,18 @@ namespace DevTeam.UnitTests.Tests;
 
 internal static class WorkspaceStoreTests
 {
+    private const string RepoRoot = "C:\\test-repo";
+    private const string DefaultModelName = "gpt-5-mini";
+    private const double Tolerance = 0.0001;
+
     private sealed class EmptyConfigurationLoader : IConfigurationLoader
     {
-        public List<ModelDefinition> LoadModels(string r) => [];
-        public List<ProviderDefinition> LoadProviders(string r) => [];
-        public List<RoleDefinition> LoadRoles(string r) => [];
-        public List<ModeDefinition> LoadModes(string r) => [];
-        public List<SuperpowerDefinition> LoadSuperpowers(string r) => [];
-        public List<McpServerDefinition> LoadMcpServers(string r) => [];
+        public List<ModelDefinition> LoadModels(string repoRoot) => [];
+        public List<ProviderDefinition> LoadProviders(string repoRoot) => [];
+        public List<RoleDefinition> LoadRoles(string repoRoot) => [];
+        public List<ModeDefinition> LoadModes(string repoRoot) => [];
+        public List<SkillDefinition> LoadSkills(string repoRoot) => [];
+        public List<McpServerDefinition> LoadMcpServers(string repoRoot) => [];
     }
 
     public static IEnumerable<TestCase> GetTests() =>
@@ -40,8 +44,8 @@ internal static class WorkspaceStoreTests
         var store = CreateStore(fs);
         var state = new WorkspaceState
         {
-            RepoRoot = "C:\\test-repo",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
         state.Issues.Add(new IssueItem { Id = state.NextIssueId++, Title = "Issue Alpha", RoleSlug = "developer" });
         state.Issues.Add(new IssueItem { Id = state.NextIssueId++, Title = "Issue Beta", RoleSlug = "tester" });
@@ -61,8 +65,8 @@ internal static class WorkspaceStoreTests
         var store = CreateStore(fs);
         var state = new WorkspaceState
         {
-            RepoRoot = "C:\\test-repo",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
         state.Questions.Add(new QuestionItem { Id = state.NextQuestionId++, Text = "What is the plan?", IsBlocking = true });
         state.Questions.Add(new QuestionItem { Id = state.NextQuestionId++, Text = "Which library?", IsBlocking = false });
@@ -72,7 +76,7 @@ internal static class WorkspaceStoreTests
 
         Assert.That(loaded.Questions.Count == 2, $"Expected 2 questions but got {loaded.Questions.Count}");
         Assert.That(loaded.Questions.Any(q => q.Text == "What is the plan?"), "Expected first question");
-        Assert.That(loaded.Questions.Any(q => q.IsBlocking == false), "Expected non-blocking question");
+        Assert.That(loaded.Questions.Any(q => !q.IsBlocking), "Expected non-blocking question");
         return Task.CompletedTask;
     }
 
@@ -82,8 +86,8 @@ internal static class WorkspaceStoreTests
         var store = CreateStore(fs);
         var state = new WorkspaceState
         {
-            RepoRoot = "C:\\test-repo",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }],
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }],
             Budget = new BudgetState
             {
                 TotalCreditCap = 50.0,
@@ -95,9 +99,9 @@ internal static class WorkspaceStoreTests
         store.Save(state);
         var loaded = store.Load();
 
-        Assert.That(loaded.Budget.TotalCreditCap == 50.0, $"Expected TotalCreditCap=50 but got {loaded.Budget.TotalCreditCap}");
-        Assert.That(loaded.Budget.PremiumCreditCap == 10.0, $"Expected PremiumCreditCap=10 but got {loaded.Budget.PremiumCreditCap}");
-        Assert.That(loaded.Budget.CreditsCommitted == 3.5, $"Expected CreditsCommitted=3.5 but got {loaded.Budget.CreditsCommitted}");
+        Assert.That(Math.Abs(loaded.Budget.TotalCreditCap - 50.0) <= Tolerance, $"Expected TotalCreditCap=50 but got {loaded.Budget.TotalCreditCap}");
+        Assert.That(Math.Abs(loaded.Budget.PremiumCreditCap - 10.0) <= Tolerance, $"Expected PremiumCreditCap=10 but got {loaded.Budget.PremiumCreditCap}");
+        Assert.That(Math.Abs(loaded.Budget.CreditsCommitted - 3.5) <= Tolerance, $"Expected CreditsCommitted=3.5 but got {loaded.Budget.CreditsCommitted}");
         return Task.CompletedTask;
     }
 
@@ -107,8 +111,8 @@ internal static class WorkspaceStoreTests
         var store = CreateStore(fs);
         var state = new WorkspaceState
         {
-            RepoRoot = "C:\\test-repo",
-            Models = [new ModelDefinition { Name = "gpt-5-mini", Cost = 0, IsDefault = true }]
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
         };
         state.Issues.Add(new IssueItem
         {
@@ -153,10 +157,11 @@ internal static class WorkspaceStoreTests
         var fs = new InMemoryFileSystem();
         var store = CreateStore(fs);
 
-        store.Initialize("C:\\test-repo", totalCreditCap: 25, premiumCreditCap: 6);
+        store.Initialize(RepoRoot, totalCreditCap: 25, premiumCreditCap: 6);
 
         Assert.That(fs.FileExists(store.StatePath),
             $"Expected workspace.json to exist at '{store.StatePath}'");
         return Task.CompletedTask;
     }
 }
+

@@ -1,3 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Text;
+
 using DevTeam.Cli;
 using DevTeam.Core;
 using DevTeam.TestInfrastructure;
@@ -5,8 +8,13 @@ using static DevTeam.SmokeTests.TestHelpers;
 
 namespace DevTeam.SmokeTests;
 
+[SuppressMessage("Major Code Smell", "S1192", Justification = "Smoke scenarios intentionally repeat literals for readability and traceability.")]
 internal static class SmokeTestFunctions
 {
+    private static readonly string TestCliDllPath = Path.Combine("tools", "DevTeam.Cli.dll");
+    private const string Context7ServerName = "context7";
+    private const string AzureFoundryHost = "example.openai.azure.com";
+
     internal static void TestRunOnceBootstrapsAndQueues()
     {
         using var harness = new TestHarness();
@@ -273,7 +281,7 @@ internal static class SmokeTestFunctions
             WorkspacePath = harness.Store.WorkspacePath,
             EnableWorkspaceMcp = true,
             WorkspaceMcpServerName = "devteam-workspace",
-            ToolHostPath = @"C:\tools\DevTeam.Cli.dll"
+            ToolHostPath = TestCliDllPath
         };
     
         var sessionConfig = WorkspaceMcpSessionConfigFactory.BuildSessionConfig(request);
@@ -300,7 +308,7 @@ internal static class SmokeTestFunctions
             [
                 new McpServerDefinition
                 {
-                    Name = "context7",
+                    Name = Context7ServerName,
                     Command = "npx",
                     Args = ["-y", "@upstash/context7-mcp@latest"],
                     Enabled = true
@@ -317,9 +325,9 @@ internal static class SmokeTestFunctions
     
         var sessionConfig = WorkspaceMcpSessionConfigFactory.BuildSessionConfig(request);
         var mcpServers = sessionConfig.McpServers ?? throw new InvalidOperationException("Session config should include external MCP servers.");
-        AssertTrue(mcpServers.ContainsKey("context7"), "Context7 MCP server should be registered.");
+        AssertTrue(mcpServers.ContainsKey(Context7ServerName), "Context7 MCP server should be registered.");
         AssertTrue(!mcpServers.ContainsKey("disabled-server"), "Disabled MCP server should not be registered.");
-        var context7 = mcpServers["context7"] as GitHub.Copilot.SDK.McpLocalServerConfig;
+        var context7 = mcpServers[Context7ServerName] as GitHub.Copilot.SDK.McpLocalServerConfig;
         AssertTrue(context7 is not null, "Context7 config should be a local MCP server.");
         AssertEqual("npx", context7!.Command, "Context7 should launch via npx.");
         AssertTrue(context7.Args.Contains("@upstash/context7-mcp@latest"), "Context7 should reference the correct package.");
@@ -343,7 +351,7 @@ internal static class SmokeTestFunctions
                 {
                     Name = "azure-foundry",
                     Type = "azure",
-                    BaseUrl = "https://example.openai.azure.com/openai",
+                    BaseUrl = $"https://{AzureFoundryHost}/openai",
                     ApiKeyEnvVar = providerEnvVar,
                     WireApi = "responses",
                     AzureApiVersion = "2024-10-21"
@@ -354,7 +362,7 @@ internal static class SmokeTestFunctions
             var provider = sessionConfig.Provider ?? throw new InvalidOperationException("Session config should include a provider.");
 
             AssertEqual("azure", provider.Type, "Provider type should map into the SDK session config.");
-            AssertEqual("https://example.openai.azure.com/openai", provider.BaseUrl, "Provider base URL should be preserved.");
+            AssertEqual($"https://{AzureFoundryHost}/openai", provider.BaseUrl, "Provider base URL should be preserved.");
             AssertEqual("test-key", provider.ApiKey, "Provider API key should be resolved from the environment.");
             AssertEqual("responses", provider.WireApi, "Provider wire API should be preserved.");
             AssertEqual("2024-10-21", provider.Azure?.ApiVersion, "Azure provider should carry its API version.");
@@ -543,25 +551,48 @@ internal static class SmokeTestFunctions
         var originalGitHubCliPath = Environment.GetEnvironmentVariable("DEVTEAM_GH_PATH");
         try
         {
-            var ghScriptPath = Path.Combine(tempRoot, "gh.cmd");
-            File.WriteAllText(ghScriptPath, """
-@echo off
-if "%1 %2"=="auth status" exit /b 0
-if "%1 %2"=="issue list" (
-  echo [{"number":101,"title":"Review queue import","body":"---\nrole: reviewer\npriority: 90\narea: repo sync\n---\nReview the imported GitHub issue.","labels":[{"name":"devteam:ready"}]},{"number":102,"title":"Clarify the release workflow","body":"Please confirm the release checklist.","labels":[{"name":"devteam:question"},{"name":"devteam:blocking"}]}]
-  exit /b 0
-)
-echo Unexpected gh arguments 1>&2
-exit /b 1
-""");
-            Environment.SetEnvironmentVariable("PATH", tempRoot + ";" + originalPath);
+            var ghScriptPath = Path.Combine(tempRoot, OperatingSystem.IsWindows() ? "gh.cmd" : "gh");
+            var ghScriptContent = OperatingSystem.IsWindows() ? """
+            @echo off
+            if "%1 %2"=="auth status" exit /b 0
+            if "%1 %2"=="issue list" (
+            echo [{"number":101,"title":"Review queue import","body":"---\nrole: reviewer\npriority: 90\narea: repo sync\n---\nReview the imported GitHub issue.","labels":[{"name":"devteam:ready"}]},{"number":102,"title":"Clarify the release workflow","body":"Please confirm the release checklist.","labels":[{"name":"devteam:question"},{"name":"devteam:blocking"}]}]
+            exit /b 0
+            )
+            echo Unexpected gh arguments 1>&2
+            exit /b 1
+            """ : "#!/bin/sh\n"
+            + "set -eu\n"
+            + "if [ \"${1:-} ${2:-}\" = \"auth status\" ]; then\n"
+            + "  exit 0\n"
+            + "fi\n"
+            + "if [ \"${1:-} ${2:-}\" = \"issue list\" ]; then\n"
+            + "  printf '%s\\n' '[{\"number\":101,\"title\":\"Review queue import\",\"body\":\"---\\nrole: reviewer\\npriority: 90\\narea: repo sync\\n---\\nReview the imported GitHub issue.\",\"labels\":[{\"name\":\"devteam:ready\"}]},{\"number\":102,\"title\":\"Clarify the release workflow\",\"body\":\"Please confirm the release checklist.\",\"labels\":[{\"name\":\"devteam:question\"},{\"name\":\"devteam:blocking\"}]}]'\n"
+            + "  exit 0\n"
+            + "fi\n"
+            + "echo \"Unexpected gh arguments: $*\" 1>&2\n"
+            + "exit 1\n";
+            File.WriteAllText(ghScriptPath, ghScriptContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(ghScriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            var separator = Path.PathSeparator;
+            var mergedPath = string.IsNullOrWhiteSpace(originalPath)
+                ? tempRoot
+                : tempRoot + separator + originalPath;
+            Environment.SetEnvironmentVariable("PATH", mergedPath);
             Environment.SetEnvironmentVariable("DEVTEAM_GH_PATH", ghScriptPath);
 
             var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--mode", "github", "--recon", "false");
             AssertEqual(0, initResult.ExitCode, "GitHub mode init exit code");
 
             var syncResult = RunDevTeamCli(tempRoot, "github-sync", "--workspace", workspacePath);
-            AssertEqual(0, syncResult.ExitCode, "GitHub sync exit code");
+            AssertEqual(
+                0,
+                syncResult.ExitCode,
+                $"GitHub sync exit code (stdout: {syncResult.StdOut.Trim()} | stderr: {syncResult.StdErr.Trim()})");
             AssertTrue(syncResult.StdOut.Contains("GitHub sync complete:", StringComparison.Ordinal), "GitHub sync should print a summary.");
 
             var store = new WorkspaceStore(workspacePath);
@@ -686,13 +717,13 @@ exit /b 1
         using var harness = new TestHarness();
         var role = harness.State.Roles.FirstOrDefault(item => item.Slug == "developer")
             ?? throw new InvalidOperationException("Developer role should be present.");
-        var superpower = harness.State.Superpowers.FirstOrDefault(item => item.Slug == "verify")
-            ?? throw new InvalidOperationException("Verify superpower should be present.");
+        var skill = harness.State.Skills.FirstOrDefault(item => item.Slug == "verify")
+            ?? throw new InvalidOperationException("Verify skill should be present.");
     
         AssertTrue(role.SourcePath.StartsWith(".devteam-source", StringComparison.OrdinalIgnoreCase),
             "Roles should load from .devteam-source when present.");
-        AssertTrue(superpower.SourcePath.StartsWith(".devteam-source", StringComparison.OrdinalIgnoreCase),
-            "Superpowers should load from .devteam-source when present.");
+        AssertTrue(skill.SourcePath.StartsWith(".devteam-source", StringComparison.OrdinalIgnoreCase),
+            "Skills should load from .devteam-source when present.");
     }
     
     internal static void TestRunLoopExecutesWork()
@@ -756,7 +787,7 @@ exit /b 1
     - {selectedIssue.Id}
     ISSUES:
     (none)
-    SUPERPOWERS_USED:
+    SKILLS_USED:
     - plan
     TOOLS_USED:
     - list_ready_issues
@@ -769,7 +800,7 @@ exit /b 1
     Done.
     ISSUES:
     (none)
-    SUPERPOWERS_USED:
+    SKILLS_USED:
     (none)
     TOOLS_USED:
     (none)
@@ -1036,7 +1067,7 @@ exit /b 1
     {
         using var harness = new TestHarness();
         harness.Runtime.SetGoal(harness.State, "Build a flappy bird game.");
-        var issue = harness.Runtime.AddIssue(
+        harness.Runtime.AddIssue(
             harness.State,
             "Create HTML5 Canvas game scaffold",
             "Create the scaffold and render loop.",
@@ -1086,7 +1117,7 @@ exit /b 1
         using var harness = new TestHarness();
     
         var aliases = harness.Runtime.GetKnownRoleAliases(harness.State);
-        var knownRoles = harness.Runtime.GetKnownRoleSlugs(harness.State);
+        var knownRoles = DevTeamRuntime.GetKnownRoleSlugs(harness.State);
         var exactResolved = harness.Runtime.TryResolveRoleSlug(harness.State, "developer", out var exactRole);
         var aliasResolved = harness.Runtime.TryResolveRoleSlug(harness.State, "engineer", out var aliasRole);
     
@@ -1301,7 +1332,7 @@ exit /b 1
     Implemented the game loop.
     ISSUES:
     (none)
-    SUPERPOWERS_USED:
+    SKILLS_USED:
     - plan
     - verify
     TOOLS_USED:
@@ -1325,15 +1356,15 @@ exit /b 1
         var runArtifact = File.ReadAllText(Path.Combine(harness.Store.WorkspacePath, "runs", "run-001.md"));
         var issueArtifact = File.ReadAllText(Path.Combine(harness.Store.WorkspacePath, "issues", "0001-implement-game-loop.md"));
     
-        AssertTrue(run.SuperpowersUsed.SequenceEqual(["plan", "verify"]), "Run should capture used superpowers.");
+        AssertTrue(run.SkillsUsed.SequenceEqual(["plan", "verify"]), "Run should capture used skills.");
         AssertTrue(run.ToolsUsed.SequenceEqual(["dotnet", "node"]), "Run should capture used tools.");
-        AssertTrue(runArtifact.Contains("## Superpowers Used", StringComparison.Ordinal), "Run artifact should include superpowers.");
-        AssertTrue(runArtifact.Contains("- plan", StringComparison.Ordinal), "Run artifact should list used superpowers.");
+        AssertTrue(runArtifact.Contains("## Skills Used", StringComparison.Ordinal), "Run artifact should include skills.");
+        AssertTrue(runArtifact.Contains("- plan", StringComparison.Ordinal), "Run artifact should list used skills.");
         AssertTrue(runArtifact.Contains("## Tools Used", StringComparison.Ordinal), "Run artifact should include tools.");
         AssertTrue(runArtifact.Contains("## Usage", StringComparison.Ordinal), "Run artifact should include usage telemetry.");
         AssertTrue(runArtifact.Contains("Committed credits: 1", StringComparison.Ordinal), "Run artifact should include committed credits.");
         AssertTrue(runArtifact.Contains("Tokens: unavailable from backend", StringComparison.Ordinal), "Run artifact should explain when token telemetry is unavailable.");
-        AssertTrue(issueArtifact.Contains("Superpowers Used: plan, verify", StringComparison.Ordinal), "Issue mirror should include superpower usage.");
+        AssertTrue(issueArtifact.Contains("Skills Used: plan, verify", StringComparison.Ordinal), "Issue mirror should include skill usage.");
         AssertTrue(issueArtifact.Contains("Tools Used: dotnet, node", StringComparison.Ordinal), "Issue mirror should include tool usage.");
     }
 
@@ -1381,7 +1412,7 @@ exit /b 1
     The current MVC controller pattern already matches the billing area and keeps the change local.
     ISSUES:
     (none)
-    SUPERPOWERS_USED:
+    SKILLS_USED:
     (none)
     TOOLS_USED:
     - dotnet
@@ -1420,7 +1451,7 @@ exit /b 1
             var store = new WorkspaceStore(Path.Combine(tempRoot, ".devteam"));
             var state = store.Initialize(repoRoot, 25, 6);
             state.Roles = [];
-            state.Superpowers = [];
+            state.Skills = [];
             File.WriteAllText(
                 store.StatePath,
                 System.Text.Json.JsonSerializer.Serialize(
@@ -1431,7 +1462,7 @@ exit /b 1
             var persistedJson = File.ReadAllText(store.StatePath);
     
             AssertTrue(loaded.Roles.Count > 0, "Legacy workspace should rehydrate roles on load.");
-            AssertTrue(loaded.Superpowers.Count > 0, "Legacy workspace should rehydrate superpowers on load.");
+            AssertTrue(loaded.Skills.Count > 0, "Legacy workspace should rehydrate skills on load.");
             AssertTrue(persistedJson.Contains("\"FormatVersion\": 4", StringComparison.Ordinal), "Hydrated workspace should be migrated to the current manifest format.");
             AssertTrue(!File.Exists(Path.Combine(store.StateDirectoryPath, "roles.json")), "Derived role assets should not be persisted into state files.");
         }
@@ -1498,7 +1529,7 @@ exit /b 1
             var state = store.Initialize(repoRoot, 25, 6);
     
             AssertTrue(state.Roles.Count > 0, "External repos without local .devteam-source should still load roles.");
-            AssertTrue(state.Superpowers.Count > 0, "External repos without local .devteam-source should still load superpowers.");
+            AssertTrue(state.Skills.Count > 0, "External repos without local .devteam-source should still load skills.");
         }
         finally
         {
@@ -1720,13 +1751,13 @@ exit /b 1
     
         var manifestJson = File.ReadAllText(harness.Store.StatePath);
         var rolesPath = Path.Combine(harness.Store.StateDirectoryPath, "roles.json");
-        var superpowersPath = Path.Combine(harness.Store.StateDirectoryPath, "superpowers.json");
+        var skillsPath = Path.Combine(harness.Store.StateDirectoryPath, "skills.json");
     
         AssertTrue(harness.State.Roles.Count > 0, "Roles should still be available in memory for prompt building.");
-        AssertTrue(harness.State.Superpowers.Count > 0, "Superpowers should still be available in memory for prompt building.");
+        AssertTrue(harness.State.Skills.Count > 0, "Skills should still be available in memory for prompt building.");
         AssertTrue(!manifestJson.Contains("## Suggested Model", StringComparison.Ordinal), "Manifest should not inline prompt markdown bodies.");
         AssertTrue(!File.Exists(rolesPath), "Roles should not be persisted into the state directory.");
-        AssertTrue(!File.Exists(superpowersPath), "Superpowers should not be persisted into the state directory.");
+        AssertTrue(!File.Exists(skillsPath), "Skills should not be persisted into the state directory.");
     }
     
     internal static void TestExecutionOrchestratorEmitsHeartbeat()
@@ -1747,7 +1778,7 @@ exit /b 1
     - ISSUE_ID
     ISSUES:
     (none)
-    SUPERPOWERS_USED:
+    SKILLS_USED:
     (none)
     TOOLS_USED:
     (none)
@@ -1851,7 +1882,7 @@ exit /b 1
             new FuncAgentClientFactory(_ => new FakeAgentClient("OUTCOME: completed\nSUMMARY:\nDone.")));
     
         var messages = new List<string>();
-        var report = executor.RunAsync(
+        executor.RunAsync(
             harness.State,
             new LoopExecutionOptions
             {
@@ -1888,7 +1919,7 @@ exit /b 1
         harness.Runtime.ApprovePlan(harness.State, "Approve.");
     
         // Architect should get file boundary enforcement
-        var architectIssue = harness.Runtime.AddIssue(harness.State, "Design the architecture", "Choose patterns.", "architect", 100, null, []);
+        harness.Runtime.AddIssue(harness.State, "Design the architecture", "Choose patterns.", "architect", 100, null, []);
         harness.Store.Save(harness.State);
         var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDesigned.");
         var executor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => agent));
@@ -1914,7 +1945,7 @@ exit /b 1
             "Auditor prompt should define boundaries against reviewer, navigator, and security.");
     
         // Developer should NOT get file boundary enforcement
-        var devIssue = harness.Runtime.AddIssue(harness.State, "Build the game loop", "Implement it.", "developer", 80, null, []);
+        harness.Runtime.AddIssue(harness.State, "Build the game loop", "Implement it.", "developer", 80, null, []);
         harness.Store.Save(harness.State);
         var devAgent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nBuilt.");
         var devExecutor = new LoopExecutor(harness.Runtime, harness.Store, new FuncAgentClientFactory(_ => devAgent));
@@ -2204,3 +2235,4 @@ exit /b 1
     }
     
 }
+
