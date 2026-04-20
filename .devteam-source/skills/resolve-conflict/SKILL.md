@@ -1,4 +1,8 @@
-# Superpower: Resolve Merge Conflict
+---
+name: resolve-conflict
+description: Resolve git merge conflicts safely and completely.
+---
+# Skill: Resolve Merge Conflict
 
 You have been spawned to resolve a git merge conflict. This is your ONLY task.
 
@@ -77,3 +81,4 @@ Conflict Resolver
 # Handoff
 All conflicts resolved. Merge committed.
 ```
+

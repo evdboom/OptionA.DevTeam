@@ -209,6 +209,7 @@ public class WorkspaceStore
         DeleteCollection("models.json");
         DeleteCollection("providers.json");
         DeleteCollection("roles.json");
+        DeleteCollection("skills.json");
         DeleteCollection("superpowers.json");
     }
 
@@ -335,6 +336,15 @@ public class WorkspaceStore
         var roadmap = issue.RoadmapItemId is null ? "none" : issue.RoadmapItemId.Value.ToString();
         var pipeline = issue.PipelineId is null ? "none" : issue.PipelineId.Value.ToString();
         var externalReference = string.IsNullOrWhiteSpace(issue.ExternalReference) ? "none" : issue.ExternalReference;
+        var latestSkillsUsed = latestRun is null || latestRun.SkillsUsed.Count == 0
+            ? "none"
+            : string.Join(", ", latestRun.SkillsUsed);
+        var latestToolsUsed = latestRun is null || latestRun.ToolsUsed.Count == 0
+            ? "none"
+            : string.Join(", ", latestRun.ToolsUsed);
+        var latestChangedPaths = latestRun is null || latestRun.ChangedPaths.Count == 0
+            ? "none"
+            : string.Join(", ", latestRun.ChangedPaths);
         var latestRunBlock = latestRun is null
             ? "(none)"
             : $"""
@@ -344,9 +354,9 @@ public class WorkspaceStore
             - Session: {latestRun.SessionId}
             - Updated: {latestRun.UpdatedAtUtc:O}
             - Summary: {latestRun.Summary}
-            - Superpowers Used: {(latestRun.SuperpowersUsed.Count == 0 ? "none" : string.Join(", ", latestRun.SuperpowersUsed))}
-            - Tools Used: {(latestRun.ToolsUsed.Count == 0 ? "none" : string.Join(", ", latestRun.ToolsUsed))}
-            - Changed Files: {(latestRun.ChangedPaths.Count == 0 ? "none" : string.Join(", ", latestRun.ChangedPaths))}
+            - Skills Used: {latestSkillsUsed}
+            - Tools Used: {latestToolsUsed}
+            - Changed Files: {latestChangedPaths}
             """;
         var decisionBlock = relatedDecisions.Count == 0
             ? "(none)"
@@ -520,9 +530,6 @@ public class WorkspaceStore
         public int SessionCount { get; init; }
         public int DecisionCount { get; init; }
         public int PipelineCount { get; init; }
-        public int ModelCount { get; init; }
-        public int RoleCount { get; init; }
-        public int SuperpowerCount { get; init; }
         public int NextRoadmapId { get; init; } = 1;
         public int NextIssueId { get; init; } = 1;
         public int NextQuestionId { get; init; } = 1;

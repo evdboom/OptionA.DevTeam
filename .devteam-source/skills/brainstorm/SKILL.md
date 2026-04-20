@@ -1,4 +1,8 @@
-# Superpower: Brainstorm
+---
+name: brainstorm
+description: Explore approaches and trade-offs before implementation.
+---
+# Skill: Brainstorm
 
 Explore approaches before committing to implementation.
 Use this when designing features, making architectural decisions, or starting new work.
@@ -44,3 +48,4 @@ Break the chosen approach into implementable issues:
 - "This is too simple to need design" — simple decisions still benefit from 30 seconds of thought
 - Designing everything upfront — design just enough for the next 2-3 issues
 - Ignoring existing patterns in the codebase
+

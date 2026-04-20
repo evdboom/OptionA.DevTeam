@@ -1,4 +1,8 @@
-# Superpower: Plan
+---
+name: plan
+description: Break work into small, verifiable implementation tasks.
+---
+# Skill: Plan
 
 Break work into bite-sized, verifiable tasks before touching code.
 Use this when you have an issue to implement and need a clear execution path.
@@ -71,3 +75,4 @@ Follow the natural TDD rhythm:
 - Plans with no verification steps ("implement X" with no way to check)
 - Tasks too large to verify independently
 - Skipping file mapping (leads to forgotten changes)
+

@@ -1,4 +1,8 @@
-# Superpower: Scout
+---
+name: scout
+description: Run a read-only reconnaissance pass and produce a file manifest.
+---
+# Skill: Scout
 
 ## Purpose
 Perform a fast, read-only preflight scan of the codebase to produce a focused file manifest
@@ -31,3 +35,4 @@ Merge risk areas: [list areas or "none"]
 - Keep the manifest short: ≤ 15 files unless the issue explicitly spans the whole codebase
 - If blast radius is HIGH, consider creating a navigator issue as a prerequisite (via create_issue MCP tool)
   instead of proceeding blindly
+

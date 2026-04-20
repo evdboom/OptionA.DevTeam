@@ -7,6 +7,6 @@ public sealed record ParsedAgentResponse(
     string Rationale,
     IReadOnlyList<int> SelectedIssueIds,
     IReadOnlyList<GeneratedIssueProposal> Issues,
-    IReadOnlyList<string> SuperpowersUsed,
+    IReadOnlyList<string> SkillsUsed,
     IReadOnlyList<string> ToolsUsed,
     IReadOnlyList<ProposedQuestion> Questions);

@@ -45,7 +45,7 @@ internal static class SeedData
         state.Providers = loader.LoadProviders(repoRoot);
         state.Modes = loader.LoadModes(repoRoot);
         state.Roles = loader.LoadRoles(repoRoot);
-        state.Superpowers = loader.LoadSuperpowers(repoRoot);
+        state.Skills = loader.LoadSkills(repoRoot);
         state.McpServers = loader.LoadMcpServers(repoRoot);
         return state;
     }
@@ -86,9 +86,9 @@ internal static class SeedData
             changed = true;
         }
 
-        if (state.Superpowers.Count == 0)
+        if (state.Skills.Count == 0)
         {
-            state.Superpowers = loader.LoadSuperpowers(repoRoot);
+            state.Skills = loader.LoadSkills(repoRoot);
             changed = true;
         }
 

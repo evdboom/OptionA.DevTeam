@@ -639,7 +639,7 @@ public class DevTeamRuntime
         int runId,
         string outcome,
         string summary,
-        IEnumerable<string>? superpowersUsed = null,
+        IEnumerable<string>? skillsUsed = null,
         IEnumerable<string>? toolsUsed = null,
         IEnumerable<string>? changedPaths = null,
         IEnumerable<int>? createdIssueIds = null,
@@ -656,7 +656,7 @@ public class DevTeamRuntime
 
         run.Summary = summary.Trim();
         run.ResultingIssueStatus = resultingIssueStatus;
-        run.SuperpowersUsed = superpowersUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+        run.SkillsUsed = skillsUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
         run.ToolsUsed = toolsUsed?.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
         run.ChangedPaths = changedPaths?
             .Where(item => !string.IsNullOrWhiteSpace(item))
@@ -749,7 +749,7 @@ public class DevTeamRuntime
                 ["runs"] = state.AgentRuns.Count,
                 ["decisions"] = state.Decisions.Count,
                 ["roles"] = state.Roles.Count,
-                ["superpowers"] = state.Superpowers.Count
+                ["skills"] = state.Skills.Count
             },
             LoopState = loopState,
             Budget = state.Budget,

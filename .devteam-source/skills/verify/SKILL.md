@@ -1,4 +1,8 @@
-# Superpower: Verify Before Completion
+---
+name: verify
+description: Verify claims with fresh execution evidence before completion.
+---
+# Skill: Verify Before Completion
 
 Evidence before claims. Run the command, read the output, THEN claim the result.
 
@@ -67,3 +71,4 @@ All of these mean: STOP → run the verification command → report actual resul
 - Trusting that code changes = working code
 - "Just this once" skipping verification
 - Marking issue as done without evidence
+

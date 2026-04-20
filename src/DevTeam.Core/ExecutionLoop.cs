@@ -176,7 +176,7 @@ public class LoopExecutor(
                     completed.Run.RunId,
                     completed.Outcome,
                     completed.Summary,
-                    completed.SuperpowersUsed,
+                    completed.SkillsUsed,
                     completed.ToolsUsed,
                     changedPaths,
                     createdIssueIds,
@@ -329,7 +329,7 @@ public class LoopExecutor(
             result.Run.RunId,
             result.Outcome,
             result.Summary,
-            result.SuperpowersUsed,
+            result.SkillsUsed,
             result.ToolsUsed,
             changedPaths,
             createdIssueIds,
@@ -477,9 +477,9 @@ public class LoopExecutor(
 
         {summary}
 
-        ## Superpowers Used
+        ## Skills Used
 
-        {(persistedRun.SuperpowersUsed.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.SuperpowersUsed.Select(item => $"- {item}")))}
+        {(persistedRun.SkillsUsed.Count == 0 ? "(none)" : string.Join(Environment.NewLine, persistedRun.SkillsUsed.Select(item => $"- {item}")))}
 
         ## Tools Used
 
@@ -678,7 +678,7 @@ public class LoopExecutor(
                 ExternalMcpServers = state.McpServers
             }, cancellationToken);
             var parsed = AgentPromptBuilder.ParseResponse(response);
-            return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Approach, parsed.Rationale, parsed.Issues, parsed.SuperpowersUsed, parsed.ToolsUsed, parsed.Questions);
+            return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Approach, parsed.Rationale, parsed.Issues, parsed.SkillsUsed, parsed.ToolsUsed, parsed.Questions);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

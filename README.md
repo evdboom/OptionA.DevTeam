@@ -733,9 +733,9 @@ Each entry supports:
 
 Context7 ships as a default entry, giving every agent access to up-to-date library documentation.
 
-## Customizing roles, modes, and superpowers
+## Customizing roles, modes, and skills
 
-DevTeam ships with built-in roles, modes, superpowers, and model policies. To customize them for your project, copy the defaults into your repo:
+DevTeam ships with built-in roles, modes, skills, and model policies. To customize them for your project, copy the defaults into your repo:
 
 ```powershell
 devteam /customize
@@ -762,17 +762,20 @@ This creates a `.devteam-source/` directory containing all packaged assets:
 │   ├── creative-writing.md
 │   ├── github.md
 │   └── autopilot.md
-├── superpowers/        Reusable skill prompts
-│   ├── tdd.md
-│   ├── review.md
-│   ├── debug.md
+├── skills/             Reusable skill prompts
+│   ├── plan/
+│   │   └── SKILL.md
+│   ├── tdd/
+│   │   └── SKILL.md
 │   └── ...
 ├── MODELS.json         Model selection per role
 ├── PROVIDERS.json      Optional BYOK provider profiles for SDK sessions
 └── MCP_SERVERS.json    External MCP servers for agents
 ```
 
-Edit the markdown files to adjust behavior. Roles and superpowers can declare tool expectations in frontmatter:
+DevTeam also exports repository-native Copilot skills under `.github/skills/` during `/init` and `/customize` so plain Copilot sessions can discover them directly.
+
+Edit the markdown files to adjust behavior. Roles and skills can declare tool expectations in frontmatter:
 
 ```markdown
 ---

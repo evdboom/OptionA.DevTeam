@@ -4,27 +4,54 @@ namespace DevTeam.Core;
 
 public static class AgentPromptBuilder
 {
-    private static readonly Dictionary<string, string[]> RoleSuperpowerMap = new(StringComparer.OrdinalIgnoreCase)
+    private const string NoneLiteral = "(none)";
+    private const string OutcomeCompleted = "completed";
+    private const string OutcomeBlocked = "blocked";
+    private const string OutcomeFailed = "failed";
+    private const string NoSummaryProvided = "No summary provided.";
+    private const string AgentInvocationFailed = "Agent invocation failed.";
+    private const string AgentReturnedNoSummary = "Agent returned no summary.";
+    private const string RoleOrchestrator = "orchestrator";
+    private const string RolePlanner = "planner";
+    private const string RoleArchitect = "architect";
+    private const string RoleNavigator = "navigator";
+    private const string RoleDeveloper = "developer";
+    private const string SkillBrainstorm = "brainstorm";
+    private const string SkillPlan = "plan";
+    private const string SkillScout = "scout";
+    private const string SkillVerify = "verify";
+    private const string HeaderOutcome = "OUTCOME:";
+    private const string HeaderSummary = "SUMMARY:";
+    private const string HeaderApproach = "APPROACH:";
+    private const string HeaderRationale = "RATIONALE:";
+    private const string HeaderSelectedIssues = "SELECTED_ISSUES:";
+    private const string HeaderIssues = "ISSUES:";
+    private const string HeaderSkillsUsed = "SKILLS_USED:";
+    private const string HeaderToolsUsed = "TOOLS_USED:";
+    private const string HeaderQuestions = "QUESTIONS:";
+
+    private static readonly Dictionary<string, string[]> RoleSkillMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["orchestrator"] = ["brainstorm", "plan"],
-        ["planner"] = ["brainstorm", "plan"],
-        ["architect"] = ["brainstorm", "plan"],
-        ["developer"] = ["plan", "tdd", "verify"],
-        ["backend-developer"] = ["plan", "tdd", "verify"],
-        ["frontend-developer"] = ["plan", "tdd", "verify"],
-        ["fullstack-developer"] = ["plan", "tdd", "verify"],
-        ["tester"] = ["tdd", "debug", "verify"],
-        ["reviewer"] = ["review", "verify"],
-        ["auditor"] = ["scout", "review", "verify", "hygiene"],
-        ["ux"] = ["verify"],
-        ["user"] = ["verify"],
-        ["game-designer"] = ["brainstorm", "review", "verify"],
+        [RoleOrchestrator] = [SkillBrainstorm, SkillPlan],
+        [RolePlanner] = [SkillBrainstorm, SkillPlan],
+        [RoleArchitect] = [SkillBrainstorm, SkillPlan],
+        [RoleNavigator] = [SkillScout],
+        [RoleDeveloper] = [SkillPlan, "tdd", SkillVerify],
+        ["backend-developer"] = [SkillPlan, "tdd", SkillVerify],
+        ["frontend-developer"] = [SkillPlan, "tdd", SkillVerify],
+        ["fullstack-developer"] = [SkillPlan, "tdd", SkillVerify],
+        ["tester"] = ["tdd", "debug", SkillVerify],
+        ["reviewer"] = ["review", SkillVerify],
+        ["auditor"] = [SkillScout, "review", SkillVerify, "hygiene"],
+        ["ux"] = [SkillVerify],
+        ["user"] = [SkillVerify],
+        ["game-designer"] = [SkillBrainstorm, "review", SkillVerify],
         ["conflict-resolver"] = ["resolve-conflict"]
     };
 
     private static readonly HashSet<string> DesignOnlyRoles = new(StringComparer.OrdinalIgnoreCase)
     {
-        "planner", "orchestrator", "architect", "navigator", "analyst", "security", "reviewer", "auditor"
+        RolePlanner, RoleOrchestrator, RoleArchitect, RoleNavigator, "analyst", "security", "reviewer", "auditor"
     };
 
     private static string BuildFileBoundaryBlock(string roleSlug)
@@ -50,20 +77,20 @@ public static class AgentPromptBuilder
             ?? state.Modes.FirstOrDefault();
         var roleBody = role?.Body ?? $"# Role: {issue.RoleSlug}";
         var roleTools = role?.RequiredTools ?? [];
-        var superpowers = ResolveSuperpowers(state, issue.RoleSlug);
+        var skills = ResolveSkills(state, issue.RoleSlug);
         var questionBlock = BuildQuestionBlock(state);
         var tools = roleTools
-            .Concat(superpowers.SelectMany(item => item.RequiredTools))
+            .Concat(skills.SelectMany(item => item.RequiredTools))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var superpowerBlock = string.Join(
+        var skillBlock = string.Join(
             "\n\n---\n\n",
-            superpowers.Select(item => item.Body.Trim()));
+            skills.Select(item => item.Body.Trim()));
         var availableRoles = string.Join(", ", state.Roles.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
-        var availableSuperpowers = superpowers.Count == 0
-            ? "(none)"
-            : string.Join(", ", superpowers.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
+        var availableSkills = skills.Count == 0
+            ? NoneLiteral
+            : string.Join(", ", skills.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
 
         return $"""
         You are working inside the DevTeam runtime.
@@ -78,23 +105,23 @@ public static class AgentPromptBuilder
         {(activeMode is null ? state.Runtime.ActiveModeSlug : $"{activeMode.Slug} ({activeMode.Name})")}
 
         Mode guardrails:
-        {(activeMode?.Body.Trim() ?? "(none)")}
+        {(activeMode?.Body.Trim() ?? NoneLiteral)}
         {BuildCodebaseContextBlock(state, issue.RoleSlug)}
         Current issue:
         - Id: {issue.Id}
         - Title: {issue.Title}
         - Detail: {issue.Detail}
         - Role: {issue.RoleSlug}
-        - Area: {(string.IsNullOrWhiteSpace(issue.Area) ? "(none)" : issue.Area)}
+        - Area: {(string.IsNullOrWhiteSpace(issue.Area) ? NoneLiteral : issue.Area)}
 
         Role instructions:
         {roleBody.Trim()}
 
-        Relevant superpowers:
-        {superpowerBlock}
+        Relevant skills:
+        {skillBlock}
 
-        Relevant superpower slugs:
-        {availableSuperpowers}
+        Relevant skill slugs:
+        {availableSkills}
 
         Declared tool expectations:
         {(tools.Count == 0 ? "(none declared)" : string.Join(", ", tools))}
@@ -140,9 +167,9 @@ public static class AgentPromptBuilder
         ISSUES:
         - role=<role>; area=<shared-work-area-or-none>; priority=<1-100>; depends=<comma-separated existing issue ids or none>; title=<title>; detail=<detail>
         If no issues should be created, write `(none)` under ISSUES.
-        SUPERPOWERS_USED:
-        - <superpower slug>
-        List only the superpowers you actually used from the provided guidance. If none, write `(none)`.
+        SKILLS_USED:
+        - <skill slug>
+        List only the skills you actually used from the provided guidance. If none, write `(none)`.
         TOOLS_USED:
         - <tool name or command>
         List the concrete tools or commands you actually used. If none, write `(none)`.
@@ -159,10 +186,10 @@ public static class AgentPromptBuilder
         var activeMode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase))
             ?? state.Modes.FirstOrDefault();
         var roleBody = role?.Body ?? $"# Role: {roleSlug}";
-        var superpowers = ResolveSuperpowers(state, roleSlug);
-        var superpowerBlock = superpowers.Count == 0
-            ? "(none)"
-            : string.Join("\n\n---\n\n", superpowers.Select(item => item.Body.Trim()));
+        var skills = ResolveSkills(state, roleSlug);
+        var skillBlock = skills.Count == 0
+            ? NoneLiteral
+            : string.Join("\n\n---\n\n", skills.Select(item => item.Body.Trim()));
         var availableRoles = string.Join(", ", state.Roles.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
 
         return $"""
@@ -178,13 +205,13 @@ public static class AgentPromptBuilder
         {(activeMode is null ? state.Runtime.ActiveModeSlug : $"{activeMode.Slug} ({activeMode.Name})")}
 
         Mode guardrails:
-        {(activeMode?.Body.Trim() ?? "(none)")}
+        {(activeMode?.Body.Trim() ?? NoneLiteral)}
 
         Role instructions:
         {roleBody.Trim()}
 
-        Relevant superpowers:
-        {superpowerBlock}
+        Relevant skills:
+        {skillBlock}
 
         Workspace MCP:
         {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Use it to inspect current workspace state and to persist newly discovered issues, questions, and decisions. Use update_issue_status to set issue status. Call get_runtime_capabilities to see what the runtime manages automatically." : "No workspace MCP server is available in this session.")}
@@ -222,12 +249,12 @@ public static class AgentPromptBuilder
 
     public static string BuildOrchestratorPrompt(WorkspaceState state, IReadOnlyList<IssueItem> candidates, int maxSubagents)
     {
-        var role = state.Roles.FirstOrDefault(item => string.Equals(item.Slug, "orchestrator", StringComparison.OrdinalIgnoreCase));
+        var role = state.Roles.FirstOrDefault(item => string.Equals(item.Slug, RoleOrchestrator, StringComparison.OrdinalIgnoreCase));
         var roleBody = role?.Body ?? "# Role: Orchestrator";
-        var superpowers = ResolveSuperpowers(state, "orchestrator");
-        var superpowerBlock = string.Join(
+        var skills = ResolveSkills(state, RoleOrchestrator);
+        var skillBlock = string.Join(
             "\n\n---\n\n",
-            superpowers.Select(item => item.Body.Trim()));
+            skills.Select(item => item.Body.Trim()));
 
         return $"""
         You are working inside the DevTeam runtime.
@@ -244,8 +271,8 @@ public static class AgentPromptBuilder
         Role instructions:
         {roleBody.Trim()}
 
-        Relevant superpowers:
-        {superpowerBlock}
+        Relevant skills:
+        {skillBlock}
 
         Execution candidates:
         {BuildCandidateBlock(candidates)}
@@ -266,8 +293,8 @@ public static class AgentPromptBuilder
         ISSUES:
         - role=<role>; area=<shared-work-area-or-none>; priority=<1-100>; depends=<comma-separated existing issue ids or none>; title=<title>; detail=<detail>
         If no issues should be created, write `(none)` under ISSUES.
-        SUPERPOWERS_USED:
-        - <superpower slug>
+        SKILLS_USED:
+        - <skill slug>
         If none, write `(none)`.
         TOOLS_USED:
         - <tool name or command>
@@ -283,76 +310,37 @@ public static class AgentPromptBuilder
     {
         if (!response.Success)
         {
-            var error = string.IsNullOrWhiteSpace(response.StdErr) ? "Agent invocation failed." : response.StdErr.Trim();
-            return new ParsedAgentResponse("failed", error, "", "", [], [], [], [], []);
+            var error = string.IsNullOrWhiteSpace(response.StdErr) ? AgentInvocationFailed : response.StdErr.Trim();
+            return new ParsedAgentResponse(OutcomeFailed, error, "", "", [], [], [], [], []);
         }
 
         var text = NormalizeStructuredResponse(response.StdOut).Trim();
         if (string.IsNullOrWhiteSpace(text))
         {
-            return new ParsedAgentResponse("completed", "Agent returned no summary.", "", "", [], [], [], [], []);
+            return new ParsedAgentResponse(OutcomeCompleted, AgentReturnedNoSummary, "", "", [], [], [], [], []);
         }
 
         var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        var outcomeLine = lines.FirstOrDefault(line => line.StartsWith("OUTCOME:", StringComparison.OrdinalIgnoreCase));
-        var summaryIndex = Array.FindIndex(lines, line => line.StartsWith("SUMMARY:", StringComparison.OrdinalIgnoreCase));
-        var approachIndex = Array.FindIndex(lines, line => line.StartsWith("APPROACH:", StringComparison.OrdinalIgnoreCase));
-        var rationaleIndex = Array.FindIndex(lines, line => line.StartsWith("RATIONALE:", StringComparison.OrdinalIgnoreCase));
-        var selectedIssuesIndex = Array.FindIndex(lines, line => line.StartsWith("SELECTED_ISSUES:", StringComparison.OrdinalIgnoreCase));
-        var issuesIndex = Array.FindIndex(lines, line => line.StartsWith("ISSUES:", StringComparison.OrdinalIgnoreCase));
-        var superpowersIndex = Array.FindIndex(lines, line => line.StartsWith("SUPERPOWERS_USED:", StringComparison.OrdinalIgnoreCase));
-        var toolsIndex = Array.FindIndex(lines, line => line.StartsWith("TOOLS_USED:", StringComparison.OrdinalIgnoreCase));
-        var questionsIndex = Array.FindIndex(lines, line => line.StartsWith("QUESTIONS:", StringComparison.OrdinalIgnoreCase));
-
-        var outcome = "completed";
-        if (!string.IsNullOrWhiteSpace(outcomeLine))
-        {
-            outcome = outcomeLine["OUTCOME:".Length..].Trim().ToLowerInvariant();
-            if (outcome is not ("completed" or "blocked" or "failed"))
-            {
-                outcome = "completed";
-            }
-        }
-
-        string summary;
-        if (summaryIndex >= 0)
-        {
-            var summaryEndIndexCandidates = new[] { approachIndex, rationaleIndex, issuesIndex, superpowersIndex, toolsIndex, questionsIndex }
-                .Where(index => index >= 0 && index > summaryIndex)
-                .ToList();
-            var summaryEndIndex = summaryEndIndexCandidates.Count > 0 ? summaryEndIndexCandidates.Min() : lines.Length;
-            var tail = lines.Skip(summaryIndex + 1).Take(summaryEndIndex - summaryIndex - 1).ToList();
-            if (tail.Count == 0)
-            {
-                summary = "No summary provided.";
-            }
-            else
-            {
-                summary = string.Join('\n', tail).Trim();
-            }
-        }
-        else
-        {
-            summary = text;
-        }
-
-        var approach = approachIndex >= 0
-            ? lines[approachIndex]["APPROACH:".Length..].Trim().ToLowerInvariant()
+        var sectionIndexes = FindSectionIndexes(lines);
+        var outcome = ParseOutcome(sectionIndexes.OutcomeLine);
+        var summary = ParseSummary(text, lines, sectionIndexes);
+        var approach = sectionIndexes.ApproachIndex >= 0
+            ? lines[sectionIndexes.ApproachIndex][HeaderApproach.Length..].Trim().ToLowerInvariant()
             : "";
-        var rationale = ParseSection(lines, rationaleIndex, issuesIndex, superpowersIndex, toolsIndex, questionsIndex);
-        var selectedIssueIds = ParseSelectedIssueIds(lines, selectedIssuesIndex, issuesIndex, superpowersIndex, toolsIndex, questionsIndex);
-        var issues = ParseIssues(lines, issuesIndex, questionsIndex);
-        var superpowersUsed = ParseSimpleList(lines, superpowersIndex, toolsIndex, questionsIndex);
-        var toolsUsed = ParseSimpleList(lines, toolsIndex, questionsIndex);
-        var questions = ParseQuestions(lines, questionsIndex);
+        var rationale = ParseSection(lines, sectionIndexes.RationaleIndex, sectionIndexes.IssuesIndex, sectionIndexes.SkillsIndex, sectionIndexes.ToolsIndex, sectionIndexes.QuestionsIndex);
+        var selectedIssueIds = ParseSelectedIssueIds(lines, sectionIndexes.SelectedIssuesIndex, sectionIndexes.IssuesIndex, sectionIndexes.SkillsIndex, sectionIndexes.ToolsIndex, sectionIndexes.QuestionsIndex);
+        var issues = ParseIssues(lines, sectionIndexes.IssuesIndex, sectionIndexes.QuestionsIndex);
+        var skillsUsed = ParseSimpleList(lines, sectionIndexes.SkillsIndex, sectionIndexes.ToolsIndex, sectionIndexes.QuestionsIndex);
+        var toolsUsed = ParseSimpleList(lines, sectionIndexes.ToolsIndex, sectionIndexes.QuestionsIndex);
+        var questions = ParseQuestions(lines, sectionIndexes.QuestionsIndex);
         return new ParsedAgentResponse(
             outcome,
-            string.IsNullOrWhiteSpace(summary) ? "No summary provided." : summary,
+            string.IsNullOrWhiteSpace(summary) ? NoSummaryProvided : summary,
             approach,
             rationale,
             selectedIssueIds,
             issues,
-            superpowersUsed,
+            skillsUsed,
             toolsUsed,
             questions);
     }
@@ -365,7 +353,7 @@ public static class AgentPromptBuilder
         }
 
         var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
-        foreach (var header in new[] { "OUTCOME:", "SUMMARY:", "APPROACH:", "RATIONALE:", "SELECTED_ISSUES:", "ISSUES:", "SUPERPOWERS_USED:", "TOOLS_USED:", "QUESTIONS:" })
+        foreach (var header in StructuredHeaders)
         {
             normalized = Regex.Replace(
                 normalized,
@@ -377,14 +365,14 @@ public static class AgentPromptBuilder
         return normalized;
     }
 
-    private static List<SuperpowerDefinition> ResolveSuperpowers(WorkspaceState state, string roleSlug)
+    private static List<SkillDefinition> ResolveSkills(WorkspaceState state, string roleSlug)
     {
-        if (!RoleSuperpowerMap.TryGetValue(roleSlug, out var slugs))
+        if (!RoleSkillMap.TryGetValue(roleSlug, out var slugs))
         {
             return [];
         }
 
-        return state.Superpowers
+        return state.Skills
             .Where(item => slugs.Contains(item.Slug, StringComparer.OrdinalIgnoreCase))
             .ToList();
     }
@@ -394,7 +382,7 @@ public static class AgentPromptBuilder
         var openQuestions = state.Questions.Where(item => item.Status == QuestionStatus.Open).ToList();
         if (openQuestions.Count == 0)
         {
-            return "(none)";
+            return NoneLiteral;
         }
 
         return string.Join(
@@ -412,7 +400,7 @@ public static class AgentPromptBuilder
         return """
 
         Brownfield delta:
-        You are working in an existing codebase with prior patterns and constraints. In addition to the summary, explain how you handled the existing code:
+        You are working in an existing codebase with prior patterns and constraints. Use the project map/codebase context as the baseline for what already exists. In addition to the summary, explain how you handled the existing code:
         - APPROACH must be one of: extend, replace, workaround
         - RATIONALE should explain why that approach fit the existing codebase
         Keep this decision scoped to the current issue only.
@@ -441,7 +429,7 @@ public static class AgentPromptBuilder
             .ToList();
         if (recentDecisions.Count == 0)
         {
-            return "(none)";
+            return NoneLiteral;
         }
 
         return string.Join(
@@ -476,7 +464,7 @@ public static class AgentPromptBuilder
     {
         if (candidates.Count == 0)
         {
-            return "(none)";
+            return NoneLiteral;
         }
 
         return string.Join(
@@ -504,7 +492,7 @@ public static class AgentPromptBuilder
 
         var lines = new List<string>
         {
-            $"Pipeline #{issue.PipelineId} for family {(string.IsNullOrWhiteSpace(issue.FamilyKey) ? "(none)" : issue.FamilyKey)}."
+            $"Pipeline #{issue.PipelineId} for family {(string.IsNullOrWhiteSpace(issue.FamilyKey) ? NoneLiteral : issue.FamilyKey)}."
         };
 
         foreach (var relatedIssue in relatedIssues)
@@ -526,9 +514,71 @@ public static class AgentPromptBuilder
 
     private static readonly HashSet<string> ContextAwareRoles = new(StringComparer.OrdinalIgnoreCase)
     {
-        "planner", "architect", "orchestrator", "navigator", "developer",
+        RolePlanner, RoleArchitect, RoleOrchestrator, RoleNavigator, RoleDeveloper,
         "backend-developer", "frontend-developer", "fullstack-developer"
     };
+
+    private static readonly string[] StructuredHeaders =
+    [
+        HeaderOutcome,
+        HeaderSummary,
+        HeaderApproach,
+        HeaderRationale,
+        HeaderSelectedIssues,
+        HeaderIssues,
+        HeaderSkillsUsed,
+        HeaderToolsUsed,
+        HeaderQuestions
+    ];
+
+    private static StructuredSectionIndexes FindSectionIndexes(string[] lines) => new(
+        lines.FirstOrDefault(line => line.StartsWith(HeaderOutcome, StringComparison.OrdinalIgnoreCase)),
+        FindHeaderIndex(lines, HeaderSummary),
+        FindHeaderIndex(lines, HeaderApproach),
+        FindHeaderIndex(lines, HeaderRationale),
+        FindHeaderIndex(lines, HeaderSelectedIssues),
+        FindHeaderIndex(lines, HeaderIssues),
+        FindHeaderIndex(lines, HeaderSkillsUsed),
+        FindHeaderIndex(lines, HeaderToolsUsed),
+        FindHeaderIndex(lines, HeaderQuestions));
+
+    private static int FindHeaderIndex(string[] lines, string header) =>
+        Array.FindIndex(lines, line => line.StartsWith(header, StringComparison.OrdinalIgnoreCase));
+
+    private static string ParseOutcome(string? outcomeLine)
+    {
+        if (string.IsNullOrWhiteSpace(outcomeLine))
+        {
+            return OutcomeCompleted;
+        }
+
+        var outcome = outcomeLine[HeaderOutcome.Length..].Trim().ToLowerInvariant();
+        return outcome is OutcomeCompleted or OutcomeBlocked or OutcomeFailed
+            ? outcome
+            : OutcomeCompleted;
+    }
+
+    private static string ParseSummary(string text, string[] lines, StructuredSectionIndexes sectionIndexes)
+    {
+        if (sectionIndexes.SummaryIndex < 0)
+        {
+            return text;
+        }
+
+        var summaryEndIndex = GetSectionEndIndex(
+            sectionIndexes.SummaryIndex,
+            lines.Length,
+            sectionIndexes.ApproachIndex,
+            sectionIndexes.RationaleIndex,
+            sectionIndexes.IssuesIndex,
+            sectionIndexes.SkillsIndex,
+            sectionIndexes.ToolsIndex,
+            sectionIndexes.QuestionsIndex);
+        var tail = lines.Skip(sectionIndexes.SummaryIndex + 1).Take(summaryEndIndex - sectionIndexes.SummaryIndex - 1).ToList();
+        return tail.Count == 0
+            ? NoSummaryProvided
+            : string.Join('\n', tail).Trim();
+    }
 
     private static string BuildCodebaseContextBlock(WorkspaceState state, string roleSlug)
     {
@@ -538,7 +588,7 @@ public static class AgentPromptBuilder
         return $"""
 
 
-        Codebase context (produced by automatic reconnaissance — treat as factual):
+        Project map / codebase context (produced by automatic reconnaissance — treat as factual):
         {state.CodebaseContext.Trim()}
 
         """;
@@ -554,7 +604,7 @@ public static class AgentPromptBuilder
         foreach (var rawLine in lines.Skip(questionsIndex + 1))
         {
             var line = rawLine.Trim();
-            if (string.IsNullOrWhiteSpace(line) || string.Equals(line, "(none)", StringComparison.OrdinalIgnoreCase))
+            if (IsNoneOrBlank(line))
             {
                 continue;
             }
@@ -593,15 +643,12 @@ public static class AgentPromptBuilder
             return [];
         }
 
-        var endIndex = otherSectionIndexes
-            .Where(index => index >= 0 && index > sectionIndex)
-            .DefaultIfEmpty(lines.Length)
-            .Min();
+        var endIndex = GetSectionEndIndex(sectionIndex, lines.Length, otherSectionIndexes);
         var result = new List<string>();
         foreach (var rawLine in lines.Skip(sectionIndex + 1).Take(endIndex - sectionIndex - 1))
         {
             var line = rawLine.Trim();
-            if (string.IsNullOrWhiteSpace(line) || string.Equals(line, "(none)", StringComparison.OrdinalIgnoreCase))
+            if (IsNoneOrBlank(line))
             {
                 continue;
             }
@@ -625,15 +672,12 @@ public static class AgentPromptBuilder
             return [];
         }
 
-        var endIndex = otherSectionIndexes
-            .Where(index => index >= 0 && index > sectionIndex)
-            .DefaultIfEmpty(lines.Length)
-            .Min();
+        var endIndex = GetSectionEndIndex(sectionIndex, lines.Length, otherSectionIndexes);
         var result = new List<int>();
         foreach (var rawLine in lines.Skip(sectionIndex + 1).Take(endIndex - sectionIndex - 1))
         {
             var line = rawLine.Trim();
-            if (string.IsNullOrWhiteSpace(line) || string.Equals(line, "(none)", StringComparison.OrdinalIgnoreCase))
+            if (IsNoneOrBlank(line))
             {
                 continue;
             }
@@ -663,72 +707,105 @@ public static class AgentPromptBuilder
             return [];
         }
 
-        var sectionIndexes = new[]
-        {
-            Array.FindIndex(lines, line => line.StartsWith("SUPERPOWERS_USED:", StringComparison.OrdinalIgnoreCase)),
-            Array.FindIndex(lines, line => line.StartsWith("TOOLS_USED:", StringComparison.OrdinalIgnoreCase)),
-            questionsIndex
-        };
-        var endIndex = sectionIndexes
-            .Where(index => index >= 0 && index > issuesIndex)
-            .DefaultIfEmpty(lines.Length)
-            .Min();
+        var endIndex = GetSectionEndIndex(
+            issuesIndex,
+            lines.Length,
+            FindHeaderIndex(lines, HeaderSkillsUsed),
+            FindHeaderIndex(lines, HeaderToolsUsed),
+            questionsIndex);
         var result = new List<GeneratedIssueProposal>();
         foreach (var rawLine in lines.Skip(issuesIndex + 1).Take(endIndex - issuesIndex - 1))
         {
             var line = rawLine.Trim();
-            if (string.IsNullOrWhiteSpace(line) || string.Equals(line, "(none)", StringComparison.OrdinalIgnoreCase))
+            if (IsNoneOrBlank(line) || !line.StartsWith("-", StringComparison.Ordinal))
             {
                 continue;
             }
 
-            if (!line.StartsWith("-", StringComparison.Ordinal))
+            var proposal = ParseIssueProposal(line[1..].Trim());
+            if (proposal is not null)
             {
-                continue;
+                result.Add(proposal);
             }
-
-            var fields = line[1..].Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var field in fields)
-            {
-                var separatorIndex = field.IndexOf('=');
-                if (separatorIndex <= 0)
-                {
-                    continue;
-                }
-
-                values[field[..separatorIndex].Trim()] = field[(separatorIndex + 1)..].Trim();
-            }
-
-            if (!values.TryGetValue("title", out var title) || string.IsNullOrWhiteSpace(title))
-            {
-                continue;
-            }
-
-            values.TryGetValue("role", out var role);
-            values.TryGetValue("area", out var area);
-            values.TryGetValue("detail", out var detail);
-            var priority = values.TryGetValue("priority", out var priorityText) && int.TryParse(priorityText, out var parsedPriority)
-                ? parsedPriority
-                : 50;
-            var depends = values.TryGetValue("depends", out var dependsText)
-                ? dependsText.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-                    .Select(value => int.TryParse(value, out var parsed) ? parsed : 0)
-                    .Where(value => value > 0)
-                    .ToList()
-                : [];
-
-            result.Add(new GeneratedIssueProposal
-            {
-                Title = title.Trim(),
-                Detail = detail?.Trim() ?? "",
-                RoleSlug = string.IsNullOrWhiteSpace(role) ? "developer" : role.Trim(),
-                Area = string.Equals(area, "none", StringComparison.OrdinalIgnoreCase) ? "" : area?.Trim() ?? "",
-                Priority = priority,
-                DependsOnIssueIds = depends
-            });
         }
 
         return result;
     }
+
+    private static GeneratedIssueProposal? ParseIssueProposal(string body)
+    {
+        var values = ParseIssueFields(body);
+        if (!values.TryGetValue("title", out var title) || string.IsNullOrWhiteSpace(title))
+        {
+            return null;
+        }
+
+        values.TryGetValue("role", out var role);
+        values.TryGetValue("area", out var area);
+        values.TryGetValue("detail", out var detail);
+        var priority = values.TryGetValue("priority", out var priorityText) && int.TryParse(priorityText, out var parsedPriority)
+            ? parsedPriority
+            : 50;
+
+        return new GeneratedIssueProposal
+        {
+            Title = title.Trim(),
+            Detail = detail?.Trim() ?? "",
+            RoleSlug = string.IsNullOrWhiteSpace(role) ? RoleDeveloper : role.Trim(),
+            Area = string.Equals(area, "none", StringComparison.OrdinalIgnoreCase) ? "" : area?.Trim() ?? "",
+            Priority = priority,
+            DependsOnIssueIds = ParseDependencyIds(values)
+        };
+    }
+
+    private static Dictionary<string, string> ParseIssueFields(string body)
+    {
+        var fields = body.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in fields)
+        {
+            var separatorIndex = field.IndexOf('=');
+            if (separatorIndex <= 0)
+            {
+                continue;
+            }
+
+            values[field[..separatorIndex].Trim()] = field[(separatorIndex + 1)..].Trim();
+        }
+
+        return values;
+    }
+
+    private static List<int> ParseDependencyIds(IReadOnlyDictionary<string, string> values)
+    {
+        if (!values.TryGetValue("depends", out var dependsText))
+        {
+            return [];
+        }
+
+        return dependsText.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => int.TryParse(value, out var parsed) ? parsed : 0)
+            .Where(value => value > 0)
+            .ToList();
+    }
+
+    private static bool IsNoneOrBlank(string line) =>
+        string.IsNullOrWhiteSpace(line) || string.Equals(line, NoneLiteral, StringComparison.OrdinalIgnoreCase);
+
+    private static int GetSectionEndIndex(int startIndex, int defaultEndIndex, params int[] candidateIndexes) =>
+        candidateIndexes
+            .Where(index => index >= 0 && index > startIndex)
+            .DefaultIfEmpty(defaultEndIndex)
+            .Min();
+
+    private readonly record struct StructuredSectionIndexes(
+        string? OutcomeLine,
+        int SummaryIndex,
+        int ApproachIndex,
+        int RationaleIndex,
+        int SelectedIssuesIndex,
+        int IssuesIndex,
+        int SkillsIndex,
+        int ToolsIndex,
+        int QuestionsIndex);
 }

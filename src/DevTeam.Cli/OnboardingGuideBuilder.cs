@@ -122,7 +122,7 @@ internal static class OnboardingGuideBuilder
             ],
             "expert" =>
             [
-                "1. [cyan]/init[/], then optionally [cyan]/customize[/] to edit roles and superpowers.",
+                "1. [cyan]/init[/], then optionally [cyan]/customize[/] to edit roles and Skills.",
                 "2. Review the default flow with [cyan]/plan[/] and [cyan]/preview[/] before turning autonomy up.",
                 "3. Enable [cyan]/worktrees on[/] when you want safer parallel isolation.",
                 "4. Use [cyan]/run[/] with higher concurrency once you trust the current batch selection.",

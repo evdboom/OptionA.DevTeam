@@ -1,8 +1,12 @@
-# Superpower: Hygiene
+---
+name: hygiene
+description: Enforce file-size, separation-of-concerns, and maintainability hygiene.
+---
+# Skill: Hygiene
 
 ## Purpose
 Apply project hygiene rules consistently across all code you produce or review.
-Load this superpower when reviewing or scaffolding new files.
+Load this Skill when reviewing or scaffolding new files.
 
 ## Rules
 
@@ -30,3 +34,4 @@ Load this superpower when reviewing or scaffolding new files.
 - [ ] No `.razor` file has a meaningful `@code { }` block — use `.razor.cs` instead
 - [ ] `Program.cs` (or equivalent) is still ≤ ~30 lines
 - [ ] Each new class/file owns exactly one concern
+

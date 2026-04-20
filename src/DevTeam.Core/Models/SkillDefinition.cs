@@ -1,6 +1,6 @@
 namespace DevTeam.Core;
 
-public sealed class SuperpowerDefinition
+public sealed class SkillDefinition
 {
     public string Slug { get; set; } = "";
     public string Name { get; set; } = "";

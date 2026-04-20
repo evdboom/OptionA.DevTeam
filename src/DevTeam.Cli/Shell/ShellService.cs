@@ -288,7 +288,8 @@ internal sealed partial class ShellService : IDisposable
                 {
                     var target = Path.Combine(Environment.CurrentDirectory, ".devteam-source");
                     var force = GetBoolOption(options, "force", false);
-                    CopyPackagedAssets(target, force);
+                    CliWorkspaceHelper.CopyPackagedAssets(target, force);
+                    CliWorkspaceHelper.ExportGitHubSkills(Environment.CurrentDirectory, force, AddSuccess);
                     break;
                 }
 
@@ -368,6 +369,7 @@ internal sealed partial class ShellService : IDisposable
                     if (!string.IsNullOrWhiteSpace(providerName)) ProviderSelectionService.SetDefaultProvider(initialized, providerName);
                     if (!string.IsNullOrWhiteSpace(goal)) _runtime.SetGoal(initialized, goal);
                     _store.Save(initialized);
+                    CliWorkspaceHelper.ExportGitHubSkills(Environment.CurrentDirectory, force, AddSuccess);
                     AddSuccess($"Initialized workspace at {Markup.Escape(_store.WorkspacePath)}");
                     if (gitInit) AddSuccess($"Initialized git repository at {Markup.Escape(Path.GetFullPath(Environment.CurrentDirectory))}");
                     if (!string.IsNullOrWhiteSpace(goal)) AddSuccess($"Active goal saved: {Markup.Escape(goal)}");
@@ -937,7 +939,7 @@ internal sealed partial class ShellService : IDisposable
                             var context = await recon.RunAsync(current, _store, backend, timeout, CancellationToken.None);
                             if (!string.IsNullOrWhiteSpace(context))
                             {
-                                AddSuccess("Codebase context updated and saved to .devteam/codebase-context.md");
+                                AddSuccess("Project map / codebase context updated and saved to .devteam/codebase-context.md");
                             }
                             else
                             {

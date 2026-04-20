@@ -2,7 +2,7 @@ namespace DevTeam.Core;
 
 /// <summary>
 /// One-shot codebase reconnaissance. Runs a read-only Navigator-style agent pass against
-/// the repository and produces a <c>CODEBASE_CONTEXT.md</c> that gets injected into every
+/// the repository and produces a project map / codebase context document that gets injected into every
 /// subsequent planner/architect prompt so the AI avoids duplicating existing patterns.
 /// </summary>
 public sealed class ReconService(IAgentClientFactory agentClientFactory)
@@ -50,7 +50,7 @@ public sealed class ReconService(IAgentClientFactory agentClientFactory)
 
         return $"""
         You are a codebase reconnaissance agent. Your mission is to explore the repository and produce
-        a concise, structured codebase context document that will be used to guide an AI development team.
+        a concise, structured project map / codebase context document that will be used to guide an AI development team.
         This is a READ-ONLY pass — do NOT create, edit, or delete any files.
 
         Repository root: {repoRoot}{goalSection}
@@ -63,16 +63,16 @@ public sealed class ReconService(IAgentClientFactory agentClientFactory)
         5. **Coding conventions** — naming patterns (PascalCase/camelCase), error handling style, file size norms, DI patterns
         6. **Fragile areas** — any files >400 LOC, directories without tests, obvious tech debt markers
 
-        Write your findings as a concise markdown document (300–500 words). Use headers. Be specific and factual.
+        Write your findings as a concise markdown document (300–500 words). Treat it as a project map for later agents. Use headers. Be specific and factual.
         Avoid guessing — if you cannot determine something from the files, say "not found".
 
         Reply in exactly this shape:
         OUTCOME: completed|failed
         SUMMARY:
-        <your codebase context markdown document>
+        <your project map / codebase context markdown document>
         ISSUES:
         (none)
-        SUPERPOWERS_USED:
+        SKILLS_USED:
         (none)
         TOOLS_USED:
         - <tools you actually used>

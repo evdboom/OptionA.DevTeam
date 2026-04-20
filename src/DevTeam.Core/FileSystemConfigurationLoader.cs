@@ -7,7 +7,8 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
 {
     private static readonly string[] RoleDirectoryCandidates = [Path.Combine(".devteam-source", "roles")];
     private static readonly string[] ModeDirectoryCandidates = [Path.Combine(".devteam-source", "modes")];
-    private static readonly string[] SuperpowerDirectoryCandidates = [Path.Combine(".devteam-source", "superpowers")];
+    private static readonly string[] SkillDirectoryCandidates = [Path.Combine(".devteam-source", "skills")];
+    private static readonly string[] LegacySuperpowerDirectoryCandidates = [Path.Combine(".devteam-source", "superpowers")];
     private static readonly string[] ModelFileCandidates = [Path.Combine(".devteam-source", "MODELS.json")];
     private static readonly string[] ProviderFileCandidates = [Path.Combine(".devteam-source", "PROVIDERS.json")];
     private static readonly string[] McpServerFileCandidates = [Path.Combine(".devteam-source", "MCP_SERVERS.json")];
@@ -191,24 +192,57 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
         return modes;
     }
 
-    public List<SuperpowerDefinition> LoadSuperpowers(string repoRoot)
+    public List<SkillDefinition> LoadSkills(string repoRoot)
     {
-        var directory = ResolveFirstDirectory(repoRoot, SuperpowerDirectoryCandidates);
-        if (!_fs.DirectoryExists(directory))
+        var directory = ResolveFirstDirectory(repoRoot, SkillDirectoryCandidates);
+        if (_fs.DirectoryExists(directory))
+        {
+            return LoadStructuredSkills(repoRoot, directory);
+        }
+
+        var legacyDirectory = ResolveFirstDirectory(repoRoot, LegacySuperpowerDirectoryCandidates);
+        if (!_fs.DirectoryExists(legacyDirectory))
         {
             return [];
         }
 
-        var items = new List<SuperpowerDefinition>();
-        foreach (var path in _fs.GetFiles(directory, "*.md").OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        var items = new List<SkillDefinition>();
+        foreach (var path in _fs.GetFiles(legacyDirectory, "*.md").OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             var asset = ParseMarkdownAsset(path);
             var firstLine = asset.Body.Split('\n', StringSplitOptions.None).FirstOrDefault()?.Trim() ?? "";
-            items.Add(new SuperpowerDefinition
+            items.Add(new SkillDefinition
             {
                 Slug = Path.GetFileNameWithoutExtension(path),
                 Name = firstLine.TrimStart('#', ' ').Trim(),
                 SourcePath = Path.GetRelativePath(repoRoot, path),
+                Body = asset.Body,
+                RequiredTools = asset.RequiredTools
+            });
+        }
+
+        return items;
+    }
+
+    private List<SkillDefinition> LoadStructuredSkills(string repoRoot, string skillsRoot)
+    {
+        var items = new List<SkillDefinition>();
+        foreach (var skillPath in _fs.EnumerateFiles(skillsRoot, "SKILL.md", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var skillDirectory = Path.GetDirectoryName(skillPath);
+            if (string.IsNullOrWhiteSpace(skillDirectory))
+            {
+                continue;
+            }
+
+            var asset = ParseMarkdownAsset(skillPath);
+            var firstLine = asset.Body.Split('\n', StringSplitOptions.None).FirstOrDefault()?.Trim() ?? "";
+            items.Add(new SkillDefinition
+            {
+                Slug = Path.GetFileName(skillDirectory),
+                Name = firstLine.TrimStart('#', ' ').Trim(),
+                SourcePath = Path.GetRelativePath(repoRoot, skillPath),
                 Body = asset.Body,
                 RequiredTools = asset.RequiredTools
             });

@@ -1,4 +1,8 @@
-# Superpower: Systematic Debugging
+---
+name: debug
+description: Perform systematic root-cause debugging before proposing fixes.
+---
+# Skill: Systematic Debugging
 
 Find the root cause before attempting fixes. Random fixes waste time and create new bugs.
 
@@ -76,7 +80,7 @@ If you haven't completed Phase 1, you cannot propose fixes.
 
 ### Phase 4: Implementation
 
-1. **Write Failing Test** (see `tdd.md` superpower)
+1. **Write Failing Test** (see `tdd.md` Skill)
    - Simplest possible reproduction of the bug
    - MUST have this before fixing
 
@@ -111,3 +115,4 @@ If you haven't completed Phase 1, you cannot propose fixes.
 - Proposing solutions before understanding the problem
 - "One more fix attempt" after 2+ failures
 - Multiple changes bundled into one attempt
+

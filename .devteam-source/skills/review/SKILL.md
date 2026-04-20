@@ -1,4 +1,8 @@
-# Superpower: Self-Review
+---
+name: review
+description: Self-review completed work before handoff.
+---
+# Skill: Self-Review
 
 Review your own work before handoff. Catch issues before the next iteration has to.
 
@@ -28,7 +32,7 @@ Go through each item. If any fails, fix it before claiming done.
 ### 3. Tests
 - [ ] New code has tests
 - [ ] Tests actually test behavior (not just "runs without crashing")
-- [ ] All tests pass (run them — see `verify.md` superpower)
+- [ ] All tests pass (run them — see `verify.md` Skill)
 - [ ] Edge case tests exist
 
 ### 4. Scope
@@ -61,3 +65,4 @@ Ask yourself:
 3. Did I actually verify my claims, or am I assuming?
 
 If the answer to any is "no" or "I think so" — fix it first.
+

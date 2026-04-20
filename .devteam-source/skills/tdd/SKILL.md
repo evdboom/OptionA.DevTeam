@@ -1,4 +1,8 @@
-# Superpower: Test-Driven Development (TDD)
+---
+name: tdd
+description: Apply red-green-refactor test-driven development.
+---
+# Skill: Test-Driven Development (TDD)
 
 Write the test first. Watch it fail. Write minimal code to pass. Refactor.
 
@@ -108,3 +112,4 @@ Found a bug? The cycle is:
 - Multiple fixes bundled together
 - "I'll write tests after" (tests-after prove nothing)
 - "Too simple to test" (simple code breaks too)
+

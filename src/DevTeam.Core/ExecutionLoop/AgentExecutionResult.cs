@@ -8,6 +8,6 @@ internal sealed record AgentExecutionResult(
     string Approach,
     string Rationale,
     IReadOnlyList<GeneratedIssueProposal> Issues,
-    IReadOnlyList<string> SuperpowersUsed,
+    IReadOnlyList<string> SkillsUsed,
     IReadOnlyList<string> ToolsUsed,
     IReadOnlyList<ProposedQuestion> Questions);
