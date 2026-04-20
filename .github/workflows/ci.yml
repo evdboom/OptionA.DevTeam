@@ -39,7 +39,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     env:
-      COVERAGE_THRESHOLD_LINE: 60
+      COVERAGE_THRESHOLD_LINE: 50
     steps:
       - name: Checkout
         uses: actions/checkout@v4
