@@ -550,8 +550,8 @@ internal static class SmokeTestFunctions
         var originalGitHubCliPath = Environment.GetEnvironmentVariable("DEVTEAM_GH_PATH");
         try
         {
-                        var ghScriptPath = Path.Combine(tempRoot, OperatingSystem.IsWindows() ? "gh.cmd" : "gh");
-                        File.WriteAllText(ghScriptPath, OperatingSystem.IsWindows() ? """
+            var ghScriptPath = Path.Combine(tempRoot, OperatingSystem.IsWindows() ? "gh.cmd" : "gh");
+            File.WriteAllText(ghScriptPath, OperatingSystem.IsWindows() ? """
             @echo off
             if "%1 %2"=="auth status" exit /b 0
             if "%1 %2"=="issue list" (
@@ -561,32 +561,38 @@ internal static class SmokeTestFunctions
             echo Unexpected gh arguments 1>&2
             exit /b 1
             """ : "#!/usr/bin/env sh\n"
-            + "if [ \"$1 $2\" = \"auth status\" ]; then\n"
-                + "  exit 0\n"
-                + "fi\n"
-                + "if [ \"$1 $2\" = \"issue list\" ]; then\n"
-                + "  printf '%s\\n' '[{\"number\":101,\"title\":\"Review queue import\",\"body\":\"---\\nrole: reviewer\\npriority: 90\\narea: repo sync\\n---\\nReview the imported GitHub issue.\",\"labels\":[{\"name\":\"devteam:ready\"}]},{\"number\":102,\"title\":\"Clarify the release workflow\",\"body\":\"Please confirm the release checklist.\",\"labels\":[{\"name\":\"devteam:question\"},{\"name\":\"devteam:blocking\"}]}]'\n"
-                + "  exit 0\n"
-                + "fi\n"
-                + "echo Unexpected gh arguments 1>&2\n"
-                + "exit 1\n");
-                        if (!OperatingSystem.IsWindows())
-                        {
-                                File.SetUnixFileMode(ghScriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-                        }
+            + "set -eu\n"
+            + "if [ \"${1:-} ${2:-}\" = \"auth status\" ]; then\n"
+            + "  exit 0\n"
+            + "fi\n"
+            + "if [ \"${1:-} ${2:-}\" = \"issue list\" ]; then\n"
+            + "  cat <<'JSON'\n"
+            + "[{\"number\":101,\"title\":\"Review queue import\",\"body\":\"---\\nrole: reviewer\\npriority: 90\\narea: repo sync\\n---\\nReview the imported GitHub issue.\",\"labels\":[{\"name\":\"devteam:ready\"}]},{\"number\":102,\"title\":\"Clarify the release workflow\",\"body\":\"Please confirm the release checklist.\",\"labels\":[{\"name\":\"devteam:question\"},{\"name\":\"devteam:blocking\"}]}]\n"
+            + "JSON\n"
+            + "  exit 0\n"
+            + "fi\n"
+            + "echo \"Unexpected gh arguments: $*\" 1>&2\n"
+            + "exit 1\n");
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(ghScriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
 
-                        var separator = Path.PathSeparator;
-                        var mergedPath = string.IsNullOrWhiteSpace(originalPath)
-                                ? tempRoot
-                                : tempRoot + separator + originalPath;
-                        Environment.SetEnvironmentVariable("PATH", mergedPath);
+            var separator = Path.PathSeparator;
+            var mergedPath = string.IsNullOrWhiteSpace(originalPath)
+                ? tempRoot
+                : tempRoot + separator + originalPath;
+            Environment.SetEnvironmentVariable("PATH", mergedPath);
             Environment.SetEnvironmentVariable("DEVTEAM_GH_PATH", ghScriptPath);
 
             var initResult = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--mode", "github", "--recon", "false");
             AssertEqual(0, initResult.ExitCode, "GitHub mode init exit code");
 
             var syncResult = RunDevTeamCli(tempRoot, "github-sync", "--workspace", workspacePath);
-            AssertEqual(0, syncResult.ExitCode, "GitHub sync exit code");
+            AssertEqual(
+                0,
+                syncResult.ExitCode,
+                $"GitHub sync exit code (stdout: {syncResult.StdOut.Trim()} | stderr: {syncResult.StdErr.Trim()})");
             AssertTrue(syncResult.StdOut.Contains("GitHub sync complete:", StringComparison.Ordinal), "GitHub sync should print a summary.");
 
             var store = new WorkspaceStore(workspacePath);
