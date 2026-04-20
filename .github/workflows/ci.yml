@@ -39,7 +39,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     env:
-      COVERAGE_THRESHOLD_LINE: 30
+      COVERAGE_THRESHOLD_LINE: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,14 +58,37 @@ jobs:
       - name: Install coverlet console
         run: dotnet tool install --global coverlet.console
 
-      - name: Run unit tests with coverage
+      - name: Run unit, shell, and smoke tests with combined coverage
         run: |
           $env:PATH = "$env:PATH:$HOME/.dotnet/tools"
+
+          $coverageJson = "./artifacts/coverage/combined/coverage.json"
+          $coverageBase = "./artifacts/coverage/combined/coverage"
+
           coverlet ./tests/DevTeam.UnitTests/bin/Release/net10.0/DevTeam.UnitTests.dll `
             --target "dotnet" `
             --targetargs "run --project ./tests/DevTeam.UnitTests/DevTeam.UnitTests.csproj --configuration Release --no-build" `
+            --format "json" `
+            --output $coverageJson `
+            --include "[DevTeam.Core]*" `
+            --include "[DevTeam.Cli]*"
+
+          coverlet ./tests/DevTeam.ShellTests/bin/Release/net10.0/DevTeam.ShellTests.dll `
+            --target "dotnet" `
+            --targetargs "run --project ./tests/DevTeam.ShellTests/DevTeam.ShellTests.csproj --configuration Release --no-build" `
+            --format "json" `
+            --output $coverageJson `
+            --merge-with $coverageJson `
+            --include "[DevTeam.Core]*" `
+            --include "[DevTeam.Cli]*"
+
+          coverlet ./tests/DevTeam.SmokeTests/bin/Release/net10.0/DevTeam.SmokeTests.dll `
+            --target "dotnet" `
+            --targetargs "run --project ./tests/DevTeam.SmokeTests/DevTeam.SmokeTests.csproj --configuration Release --no-build" `
+            --format "json" `
             --format "cobertura" `
-            --output "./artifacts/coverage/unit-tests/" `
+            --output $coverageBase `
+            --merge-with $coverageJson `
             --include "[DevTeam.Core]*" `
             --include "[DevTeam.Cli]*" `
             --threshold $env:COVERAGE_THRESHOLD_LINE `
@@ -75,8 +98,8 @@ jobs:
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-coverage
-          path: artifacts/coverage/unit-tests/coverage.cobertura.xml
+          name: combined-test-coverage
+          path: artifacts/coverage/combined/coverage.cobertura.xml
           if-no-files-found: error
 
   shell-tests:
