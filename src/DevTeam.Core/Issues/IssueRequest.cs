@@ -1,6 +1,8 @@
 namespace DevTeam.Core;
+
 public class IssueRequest
-{       public required string Title { get ; set; }
+{        
+        public required string Title { get ; set; }
         public required string Detail { get ; set; }
         public required string RoleSlug { get ; set; }
         public int Priority { get ; set; }
