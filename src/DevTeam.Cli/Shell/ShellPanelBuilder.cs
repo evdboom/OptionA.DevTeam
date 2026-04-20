@@ -127,7 +127,7 @@ internal static class ShellPanelBuilder
 
         if (allLines.Length == 0)
         {
-            content = new Markup("[grey]No events yet[/]");
+            content = CreateMarkupSafe("[grey]No events yet[/]");
         }
         else
         {
@@ -171,11 +171,11 @@ internal static class ShellPanelBuilder
 
             var rendered = new List<IRenderable>();
             if (linesAbove > 0)
-                rendered.Add(new Markup($"[dim]▲ {linesAbove} lines above  ·  PgUp for more[/]"));
+                rendered.Add(CreateMarkupSafe($"[dim]▲ {linesAbove} lines above  ·  PgUp for more[/]"));
             foreach (var line in selectedLines)
-                rendered.Add(new Markup(line));
+                rendered.Add(CreateMarkupSafe(line));
             if (linesBelow > 0)
-                rendered.Add(new Markup($"[dim]▼ {linesBelow} lines below  ·  PgDn or End to follow[/]"));
+                rendered.Add(CreateMarkupSafe($"[dim]▼ {linesBelow} lines below  ·  PgDn or End to follow[/]"));
 
             content = new Rows(rendered);
         }
@@ -341,15 +341,30 @@ internal static class ShellPanelBuilder
     {
         if (msg.Kind == ShellMessageKind.Panel)
         {
-            var panel = new Panel(new Markup(msg.Markup));
+            var panel = new Panel(CreateMarkupSafe(msg.Markup));
             if (msg.Title is not null)
+            {
+                var escapedTitle = Markup.Escape(msg.Title);
                 panel.Header = msg.TitleJustify.HasValue
-                    ? new PanelHeader(msg.Title, msg.TitleJustify.Value)
-                    : new PanelHeader(msg.Title);
+                    ? new PanelHeader(escapedTitle, msg.TitleJustify.Value)
+                    : new PanelHeader(escapedTitle);
+            }
             if (msg.BorderColor is not null) panel.BorderStyle = new Style(foreground: msg.BorderColor.Value);
             return panel;
         }
-        return new Markup(msg.Markup);
+        return CreateMarkupSafe(msg.Markup);
+    }
+
+    private static Markup CreateMarkupSafe(string markup)
+    {
+        try
+        {
+            return new Markup(markup);
+        }
+        catch (InvalidOperationException)
+        {
+            return new Markup(Markup.Escape(markup));
+        }
     }
 
     internal static string FormatAgentSlot(AgentSlot slot)

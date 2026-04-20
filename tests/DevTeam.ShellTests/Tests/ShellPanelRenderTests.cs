@@ -23,6 +23,8 @@ internal static class ShellPanelRenderTests
         new("StripMarkup_RemovesTags", StripMarkup_RemovesTags),
         new("StripMarkup_ClosingTag_Removed", StripMarkup_ClosingTag_Removed),
         new("StripMarkup_EscapedBrackets_Preserved", StripMarkup_EscapedBrackets_Preserved),
+        new("ProgressPanel_MalformedMarkup_DoesNotThrow", ProgressPanel_MalformedMarkup_DoesNotThrow),
+        new("PanelHeader_WithBrackets_EscapedSafely", PanelHeader_WithBrackets_EscapedSafely),
     ];
 
     private static TestConsole CreateConsole()
@@ -162,6 +164,42 @@ internal static class ShellPanelRenderTests
     {
         var result = NonInteractiveShellHost.StripMarkup("[[bold]]");
         Assert.That(result == "[bold]", $"Expected '[bold]' but got '{result}'");
+        return Task.CompletedTask;
+    }
+
+    private static Task ProgressPanel_MalformedMarkup_DoesNotThrow()
+    {
+        var console = CreateConsole();
+        var messages = new List<ShellMessage>
+        {
+            new(ShellMessageKind.Line, "[dim]ok[/]"),
+            new(ShellMessageKind.Line, "[/boom] this used to crash markup parsing")
+        };
+
+        console.Write(ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset: 0, termHeightOverride: 40));
+        var output = console.Output;
+
+        Assert.That(output.Contains("this used to crash markup parsing", StringComparison.Ordinal),
+            $"Expected malformed-markup message to render safely, but got: {output}");
+        return Task.CompletedTask;
+    }
+
+    private static Task PanelHeader_WithBrackets_EscapedSafely()
+    {
+        // Verify that panel titles with unescaped brackets (from issue titles containing code patterns)
+        // are properly escaped and don't crash the Spectre.Console Markup parser
+        var console = CreateConsole();
+        var message = new ShellMessage(
+            ShellMessageKind.Panel,
+            "Panel content here",
+            Title: "architect — Implement [DllImport] rules (AOT040)");
+
+        var renderable = ShellPanelBuilder.RenderMessage(message);
+        console.Write(renderable);
+        var output = console.Output;
+
+        // Should render without throwing InvalidOperationException
+        Assert.That(output.Length > 0, "Expected panel to render with bracketed title");
         return Task.CompletedTask;
     }
 }
