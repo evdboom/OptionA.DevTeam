@@ -424,19 +424,26 @@ internal static class ProgressPanelScrollTests
         var messages = Enumerable.Range(1, 40).Select(i => Line($"msg-{i:D3}")).ToArray();
         var termH = ShellPanelBuilder.FallbackTerminalHeight;
         var maxOffset = ShellPanelBuilder.MaxScrollOffset(messages, termH);
+        var beyondMax = maxOffset + 100;
 
         // Clamping in ReadInput: min(scrollOffset + step, maxOffset)
         // Verify that the clamped value equals maxOffset when we exceed it.
-        var clampedAt100 = Math.Min(maxOffset + 100, maxOffset);
+        var clampedAt100 = Math.Min(beyondMax, maxOffset);
         Assert.That(clampedAt100 == maxOffset,
             $"Clamping scrollOffset+100 should produce maxOffset={maxOffset}, got {clampedAt100}");
 
-        // And that both produce the same rendered panel.
+        // And that the clamped value produces the same rendered panel as maxOffset.
         var c1 = CreateConsole();
         c1.Write(ShellPanelBuilder.BuildProgressPanel(messages, maxOffset, termHeightOverride: termH));
         var c2 = CreateConsole();
-        c2.Write(ShellPanelBuilder.BuildProgressPanel(messages, maxOffset, termHeightOverride: termH));
-        Assert.That(c1.Output == c2.Output, "Same offset must produce same output");
+        c2.Write(ShellPanelBuilder.BuildProgressPanel(messages, clampedAt100, termHeightOverride: termH));
+        Assert.That(c1.Output == c2.Output, "Clamped offset should match max offset output");
+
+        // This is the beyond-cap case that would occur without clamping.
+        var unclamped = CreateConsole();
+        unclamped.Write(ShellPanelBuilder.BuildProgressPanel(messages, beyondMax, termHeightOverride: termH));
+        Assert.That(unclamped.Output != c1.Output,
+            "Unclamped beyond-max offset should not match max offset output.");
         return Task.CompletedTask;
     }
 

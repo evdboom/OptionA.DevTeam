@@ -29,10 +29,12 @@ internal static class SpectreShellHost
         var historyCursor = -1; // -1 = not navigating history
         var savedDraft = string.Empty; // preserves unsent input while browsing history
         var scrollOffset = 0;  // 0 = auto-follow latest; N = scrolled N lines up
-        const int spinnerTick = 0;
+        var adventureSession = new AdventureSessionState();
+        var adventureLayout = AdventureShellHost.BuildLayoutTree();
         var lastUiVersion = -1L;
         var lastCursor = -1;
         var lastScrollOffset = -1;
+        var lastAdventureMode = false;
 
         await shell.InitializeAsync();
 
@@ -48,7 +50,7 @@ internal static class SpectreShellHost
 
         try
         {
-            var liveFrame = BuildFrame(shell, string.Empty, 0, scrollOffset, spinnerTick: 0);
+            var liveFrame = BuildFrame(shell, string.Empty, 0, scrollOffset);
             lastUiVersion = -1L;  // Force rebuild on first loop iteration once terminal is measured
             lastCursor = 0;
             lastScrollOffset = scrollOffset;
@@ -63,26 +65,46 @@ internal static class SpectreShellHost
                     {
                         var inputText = inputBuffer.ToString();
                         var beforeScrollOffset = scrollOffset;
-                        ReadInput(inputBuffer, shell, commandChannel.Writer, ref cursorPosition, ref historyCursor, ref savedDraft, ref scrollOffset);
+                        AdventureShellHost.SyncModeState(shell, adventureSession, inputBuffer, ref cursorPosition, ref historyCursor, ref savedDraft);
+
+                        if (shell.IsAdventureModeEnabled)
+                        {
+                            AdventureShellHost.ReadInput(adventureSession, inputBuffer, shell, commandChannel.Writer, ref cursorPosition, ref historyCursor, ref savedDraft, ref scrollOffset);
+                        }
+                        else
+                        {
+                            ReadInput(inputBuffer, shell, commandChannel.Writer, ref cursorPosition, ref historyCursor, ref savedDraft, ref scrollOffset);
+                        }
 
                         var inputChanged = !string.Equals(inputText, inputBuffer.ToString(), StringComparison.Ordinal)
                             || cursorPosition != lastCursor
                             || beforeScrollOffset != scrollOffset;
 
                         var uiVersion = shell.UiVersion;
+                        var adventureMode = shell.IsAdventureModeEnabled;
                         var shouldRender = uiVersion != lastUiVersion
                             || inputChanged
-                            || scrollOffset != lastScrollOffset;
+                            || scrollOffset != lastScrollOffset
+                            || adventureMode != lastAdventureMode;
 
                         if (shouldRender)
                         {
-                            liveFrame = BuildFrame(shell, inputBuffer.ToString(), cursorPosition, scrollOffset, spinnerTick);
+                            if (adventureMode)
+                            {
+                                AdventureShellHost.UpdateLayout(adventureLayout, shell, adventureSession, inputBuffer.ToString(), cursorPosition, scrollOffset);
+                                liveFrame = adventureLayout;
+                            }
+                            else
+                            {
+                                liveFrame = BuildFrame(shell, inputBuffer.ToString(), cursorPosition, scrollOffset);
+                            }
 
                             context.UpdateTarget(liveFrame);
 
                             lastUiVersion = uiVersion;
                             lastCursor = cursorPosition;
                             lastScrollOffset = scrollOffset;
+                            lastAdventureMode = adventureMode;
                         }
 
                         try { await Task.Delay(RefreshMs, cancellationToken); }
@@ -119,7 +141,7 @@ internal static class SpectreShellHost
     }
 
     /// <summary>Builds the full stacked frame for the current shell state.</summary>
-    private static IRenderable BuildFrame(ShellService shell, string activeInput, int cursorPosition, int scrollOffset, int spinnerTick)
+    private static IRenderable BuildFrame(ShellService shell, string activeInput, int cursorPosition, int scrollOffset)
     {
         var snapshot = shell.LayoutSnapshot;
         var messages = shell.Messages;

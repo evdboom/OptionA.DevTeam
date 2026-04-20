@@ -70,7 +70,7 @@ test.describe("execution scenario", () => {
     await expect(terminal.getByText("Execution")).toBeVisible();
   });
 
-  test("agents panel shows the running architect agent", async ({
+  test("progress panel includes execution workflow guide", async ({
     terminal,
   }) => {
     await waitForReady(terminal);
@@ -80,14 +80,14 @@ test.describe("execution scenario", () => {
     await expect(terminal.getByText("workflow guide")).toBeVisible();
   });
 
-  test("roadmap panel shows issue titles", async ({ terminal }) => {
+  test("progress panel shows ready-issues summary", async ({ terminal }) => {
     await waitForReady(terminal);
     // In 3-panel layout, the progress panel shows ready issues hint during execution.
     // Verify "4 issue(s) are ready" text from the workflow guide.
     await expect(terminal.getByText("are ready")).toBeVisible();
   });
 
-  test("roadmap shows done indicator for completed issues", async ({
+  test("progress panel shows workflow step indicator", async ({
     terminal,
   }) => {
     await waitForReady(terminal);

@@ -116,6 +116,9 @@ internal sealed partial class ShellService(
             }
         }
 
+        var adventureModeEnabled = GetNullableBoolOption(_startOptions.Options, "adventure") ?? false;
+        SetAdventureMode(adventureModeEnabled);
+
         if (initialState is not null)
         {
             CheckAndUpdateContext(initialState);
