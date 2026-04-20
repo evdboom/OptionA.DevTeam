@@ -11,6 +11,8 @@ public sealed class GitStatusSnapshot
 
 public static class GitWorkspace
 {
+    private static readonly string GitExecutablePath = ResolveGitExecutablePath();
+
     public static bool IsGitRepository(string workingDirectory)
     {
         try
@@ -93,7 +95,10 @@ public static class GitWorkspace
 
         if (stagePaths)
         {
-            RunGit(afterSnapshot.RepositoryRoot, ["add", "--all", "--", .. pathsToStage]);
+            var addArguments = new[] { "add", "--all", "--" }
+                .Concat(pathsToStage)
+                .ToArray();
+            RunGit(afterSnapshot.RepositoryRoot, addArguments);
         }
 
         return pathsToStage;
@@ -160,17 +165,42 @@ public static class GitWorkspace
                     conflictSummary = conflictFiles.StdOut.Trim();
                 }
             }
-            catch { }
+            catch
+            {
+                // Keep the original merge failure message when conflict file listing fails.
+            }
 
-            try { RunGit(repoRoot, "merge", "--abort"); } catch { }
+            try
+            {
+                RunGit(repoRoot, "merge", "--abort");
+            }
+            catch
+            {
+                // Best-effort cleanup; merge state might already be closed.
+            }
             return new WorktreeMergeResult(true, conflictSummary);
         }
     }
 
     public static void RemoveWorktree(string repoRoot, string worktreePath, string branchName)
     {
-        try { RunGit(repoRoot, "worktree", "remove", "--force", worktreePath); } catch { }
-        try { RunGit(repoRoot, "branch", "-D", branchName); } catch { }
+        try
+        {
+            RunGit(repoRoot, "worktree", "remove", "--force", worktreePath);
+        }
+        catch
+        {
+            // Best-effort cleanup in teardown paths.
+        }
+
+        try
+        {
+            RunGit(repoRoot, "branch", "-D", branchName);
+        }
+        catch
+        {
+            // Best-effort cleanup in teardown paths.
+        }
     }
 
     private static Dictionary<string, string> ParsePorcelain(string stdout)
@@ -210,7 +240,7 @@ public static class GitWorkspace
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = "git",
+                FileName = GitExecutablePath,
                 WorkingDirectory = Path.GetFullPath(workingDirectory),
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -248,7 +278,14 @@ public static class GitWorkspace
         process.BeginErrorReadLine();
         if (!process.WaitForExit(30_000))
         {
-            try { process.Kill(); } catch { }
+            try
+            {
+                process.Kill();
+            }
+            catch
+            {
+                // Process may have exited between timeout check and kill attempt.
+            }
             throw new InvalidOperationException("Git command timed out after 30 seconds.");
         }
         process.WaitForExit();
@@ -263,6 +300,27 @@ public static class GitWorkspace
     }
 
     private sealed record GitCommandResult(int ExitCode, string StdOut, string StdErr);
+
+    private static string ResolveGitExecutablePath()
+    {
+        var configured = Environment.GetEnvironmentVariable("DEVTEAM_GIT_PATH");
+        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+        {
+            return configured;
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            var discovered = new[] { "/usr/bin/git", "/usr/local/bin/git" }
+                .FirstOrDefault(File.Exists);
+            if (!string.IsNullOrWhiteSpace(discovered))
+            {
+                return discovered;
+            }
+        }
+
+        return "git";
+    }
 }
 
 public sealed class ProcessGitRepository : IGitRepository
