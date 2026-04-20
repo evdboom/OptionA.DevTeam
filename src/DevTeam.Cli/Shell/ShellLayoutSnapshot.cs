@@ -5,8 +5,18 @@ namespace DevTeam.Cli.Shell;
 /// <summary>Active agent slots shown in the agent panel during execution.</summary>
 internal sealed record AgentSlot(int RunId, int IssueId, string RoleSlug, string Title, AgentRunStatus Status);
 
-/// <summary>Issue slots shown in the roadmap panel during execution.</summary>
+/// <summary>Issue slots used by the adventure map renderer.</summary>
 internal sealed record RoadmapSlot(int Id, string Title, string RoleSlug, ItemStatus Status);
+
+/// <summary>Pinned cycle status lines shown in the shell cycle panel.</summary>
+internal sealed record CycleSlot(
+    string RoleSlug,
+    int? IssueId,
+    string Title,
+    TimeSpan Elapsed,
+    bool IsRunning,
+    bool IsCompleted,
+    DateTimeOffset UpdatedAtUtc);
 
 /// <summary>
 /// Immutable snapshot of layout data consumed by the shell component.
@@ -14,10 +24,10 @@ internal sealed record RoadmapSlot(int Id, string Title, string RoleSlug, ItemSt
 /// </summary>
 internal sealed record ShellLayoutSnapshot(
     WorkflowPhase Phase,
-    bool ShowMiddleRow,
-    IReadOnlyList<AgentSlot> Agents,
-    IReadOnlyList<RoadmapSlot> Roadmap)
+    IReadOnlyList<AgentSlot> Agents)
 {
+    public IReadOnlyList<CycleSlot> CurrentCycle { get; init; } = [];
+
     public static readonly ShellLayoutSnapshot Empty =
-        new(WorkflowPhase.Planning, false, [], []);
+        new(WorkflowPhase.Planning, []);
 }

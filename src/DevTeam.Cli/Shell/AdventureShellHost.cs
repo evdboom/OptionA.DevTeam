@@ -76,7 +76,11 @@ internal static class AdventureShellHost
         root["Map"].Update(AdventureMapRenderer.BuildMapPanel(snapshot, session.PlayerPosition));
         root["Status"].Update(AdventureMapRenderer.BuildStatusPanel(snapshot, session.PlayerPosition, session.StatusMessage, session.ComposeRole));
         root["Input"].Update(AdventureMapRenderer.BuildInputPanel(activeInput, cursorPosition, session.ComposeRole));
-        root["Right"].Update(ShellPanelBuilder.BuildProgressPanel(shell.Messages, scrollOffset));
+        root["Right"].Update(ShellPanelBuilder.BuildProgressPanel(
+            shell.Messages,
+            scrollOffset,
+            termHeightOverride: 0,
+            contentWidthOverride: ProgressWidth()));
     }
 
     internal static void ReadInput(

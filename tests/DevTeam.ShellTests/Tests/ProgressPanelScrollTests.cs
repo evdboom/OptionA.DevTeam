@@ -12,14 +12,14 @@ namespace DevTeam.ShellTests.Tests;
 ///   FallbackTerminalHeight = 40, termWidth = 120
 ///   budget  = max(4, 40 - 4 - 6 - 3) = 27
 ///   contentRows = budget - 2 = 25
-///   progressWidth = 120 - 60 - 4 = 56
+///   progressWidth = 120 - 4 = 116
 /// </summary>
 internal static class ProgressPanelScrollTests
 {
     // Derived constants matching ShellPanelBuilder behaviour in redirected-output mode.
     private const int Budget = 27;
     private const int ContentRows = Budget - 2; // 25
-    private const int ProgressWidth = 56;
+    private const int ProgressWidth = 116;
 
     public static IEnumerable<TestCase> GetTests() =>
     [
@@ -407,7 +407,7 @@ internal static class ProgressPanelScrollTests
         var maxOffset = ShellPanelBuilder.MaxScrollOffset(messages, termH);
 
         var console = CreateConsole();
-        console.Write(ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset: maxOffset, termH));
+        console.Write(ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset: maxOffset, termHeightOverride: termH));
         var output = console.Output;
 
         Assert.That(output.Contains("msg-001"),
@@ -433,9 +433,9 @@ internal static class ProgressPanelScrollTests
 
         // And that both produce the same rendered panel.
         var c1 = CreateConsole();
-        c1.Write(ShellPanelBuilder.BuildProgressPanel(messages, maxOffset, termH));
+        c1.Write(ShellPanelBuilder.BuildProgressPanel(messages, maxOffset, termHeightOverride: termH));
         var c2 = CreateConsole();
-        c2.Write(ShellPanelBuilder.BuildProgressPanel(messages, maxOffset, termH));
+        c2.Write(ShellPanelBuilder.BuildProgressPanel(messages, maxOffset, termHeightOverride: termH));
         Assert.That(c1.Output == c2.Output, "Same offset must produce same output");
         return Task.CompletedTask;
     }

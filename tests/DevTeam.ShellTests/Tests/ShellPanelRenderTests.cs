@@ -11,10 +11,8 @@ internal static class ShellPanelRenderTests
     [
         new("HeaderPanel_PlanningPhase_ContainsPhaseLabel", HeaderPanel_PlanningPhase_ContainsPhaseLabel),
         new("HeaderPanel_ExecutionPhase_Running_ContainsRunningLabel", HeaderPanel_ExecutionPhase_Running_ContainsRunningLabel),
-        new("AgentsPanel_NoAgents_ContainsNoActiveAgents", AgentsPanel_NoAgents_ContainsNoActiveAgents),
-        new("AgentsPanel_WithRunningAgent_ContainsAgentInfo", AgentsPanel_WithRunningAgent_ContainsAgentInfo),
-        new("RoadmapPanel_WithIssues_ContainsIssueInfo", RoadmapPanel_WithIssues_ContainsIssueInfo),
-        new("RoadmapPanel_DoneIssue_ContainsDoneIndicator", RoadmapPanel_DoneIssue_ContainsDoneIndicator),
+        new("HeaderPanel_WithCycleStatus_ShowsRunningAndDone", HeaderPanel_WithCycleStatus_ShowsRunningAndDone),
+        new("ProgressPanel_NoEvents_ContainsPlaceholder", ProgressPanel_NoEvents_ContainsPlaceholder),
         new("EmptyPanel_ContainsTitle", EmptyPanel_ContainsTitle),
         new("VisibleLength_PlainText_ReturnsCorrectCount", VisibleLength_PlainText_ReturnsCorrectCount),
         new("VisibleLength_MarkupStripped_ReturnsVisibleOnly", VisibleLength_MarkupStripped_ReturnsVisibleOnly),
@@ -53,59 +51,33 @@ internal static class ShellPanelRenderTests
         return Task.CompletedTask;
     }
 
-    private static Task AgentsPanel_NoAgents_ContainsNoActiveAgents()
+    private static Task HeaderPanel_WithCycleStatus_ShowsRunningAndDone()
     {
         var console = CreateConsole();
-        var snapshot = new ShellLayoutSnapshot(WorkflowPhase.Execution, false, [], []);
-        console.Write(ShellPanelBuilder.BuildAgentsPanel(snapshot));
+        var now = DateTimeOffset.UtcNow;
+        var cycle = new List<CycleSlot>
+        {
+            new("orchestrator", null, "Selecting next execution batch", TimeSpan.FromSeconds(74), IsRunning: true, IsCompleted: false, now),
+            new("developer", 4, "Implement rules", TimeSpan.FromSeconds(45), IsRunning: true, IsCompleted: false, now),
+            new("tester", 6, "Verify issue", TimeSpan.FromSeconds(65), IsRunning: false, IsCompleted: true, now),
+        };
+
+        console.Write(ShellPanelBuilder.BuildHeader(WorkflowPhase.Execution, isRunning: true, cycle));
         var output = console.Output;
-        Assert.That(output.Contains("No active agents"), $"Expected 'No active agents' but got: {output}");
+
+        Assert.That(output.Contains("Execution"), $"Expected execution phase in header but got: {output}");
+        Assert.That(output.Contains("Orchestrator"), $"Expected orchestrator line but got: {output}");
+        Assert.That(output.Contains("issue #4"), $"Expected issue #4 line in header but got: {output}");
+        Assert.That(output.Contains("done"), $"Expected completed marker but got: {output}");
         return Task.CompletedTask;
     }
 
-    private static Task AgentsPanel_WithRunningAgent_ContainsAgentInfo()
+    private static Task ProgressPanel_NoEvents_ContainsPlaceholder()
     {
         var console = CreateConsole();
-        var snapshot = new ShellLayoutSnapshot(
-            WorkflowPhase.Execution,
-            ShowMiddleRow: true,
-            Agents: [new AgentSlot(1, 5, "developer", "Build API", AgentRunStatus.Running)],
-            Roadmap: []);
-        console.Write(ShellPanelBuilder.BuildAgentsPanel(snapshot));
+        console.Write(ShellPanelBuilder.BuildProgressPanel([], 0));
         var output = console.Output;
-        Assert.That(output.Contains("developer"), $"Expected 'developer' in output but got: {output}");
-        Assert.That(output.Contains("#5"), $"Expected '#5' in output but got: {output}");
-        Assert.That(output.Contains("Build API"), $"Expected 'Build API' in output but got: {output}");
-        return Task.CompletedTask;
-    }
-
-    private static Task RoadmapPanel_WithIssues_ContainsIssueInfo()
-    {
-        var console = CreateConsole();
-        var snapshot = new ShellLayoutSnapshot(
-            WorkflowPhase.Execution,
-            ShowMiddleRow: true,
-            Agents: [],
-            Roadmap: [new RoadmapSlot(5, "Build API", "developer", ItemStatus.Open)]);
-        console.Write(ShellPanelBuilder.BuildRoadmapPanel(snapshot, 10));
-        var output = console.Output;
-        Assert.That(output.Contains("Build API"), $"Expected 'Build API' in output but got: {output}");
-        Assert.That(output.Contains("developer"), $"Expected 'developer' in output but got: {output}");
-        return Task.CompletedTask;
-    }
-
-    private static Task RoadmapPanel_DoneIssue_ContainsDoneIndicator()
-    {
-        var console = CreateConsole();
-        var snapshot = new ShellLayoutSnapshot(
-            WorkflowPhase.Execution,
-            ShowMiddleRow: true,
-            Agents: [],
-            Roadmap: [new RoadmapSlot(5, "Build API", "developer", ItemStatus.Done)]);
-        console.Write(ShellPanelBuilder.BuildRoadmapPanel(snapshot, 10));
-        var output = console.Output;
-        Assert.That(output.Contains("✓") || output.Contains("done") || output.Contains("Done"),
-            $"Expected done indicator in output but got: {output}");
+        Assert.That(output.Contains("No events yet"), $"Expected 'No events yet' placeholder but got: {output}");
         return Task.CompletedTask;
     }
 

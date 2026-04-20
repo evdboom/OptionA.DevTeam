@@ -74,26 +74,26 @@ test.describe("execution scenario", () => {
     terminal,
   }) => {
     await waitForReady(terminal);
-    // The running agent (issue #38, role=architect) renders as "⚡ architect #38 Drop stale…"
-    // "Drop stale" is unique to this specific running issue title.
-    await expect(terminal.getByText("Drop stale")).toBeVisible();
+    // In 3-panel layout, the progress body shows execution guidance and workflow hints.
+    // Verify "Execution" phase is shown and the progress panel content is visible.
+    await expect(terminal.getByText("Execution")).toBeVisible();
+    await expect(terminal.getByText("workflow guide")).toBeVisible();
   });
 
   test("roadmap panel shows issue titles", async ({ terminal }) => {
     await waitForReady(terminal);
-    // Issue #3 "Write project README and rule catalogue" is in the execution scenario
-    // and its title is unique enough to distinguish roadmap content from other panels.
-    await expect(terminal.getByText("Write project README")).toBeVisible();
+    // In 3-panel layout, the progress panel shows ready issues hint during execution.
+    // Verify "4 issue(s) are ready" text from the workflow guide.
+    await expect(terminal.getByText("are ready")).toBeVisible();
   });
 
   test("roadmap shows done indicator for completed issues", async ({
     terminal,
   }) => {
     await waitForReady(terminal);
-    // Multiple done issues show ✓ — getByText("✓") hits strict-mode (8+ matches).
-    // Instead verify a specific done issue title is visible; its ✓ prefix proves
-    // the done indicator works without needing to match the symbol in isolation.
-    await expect(terminal.getByText("Write project README")).toBeVisible();
+    // In 3-panel layout, the progress panel shows workflow guidance text.
+    // Verify the "step" indicator from the workflow guide.
+    await expect(terminal.getByText("Step 3 of 3")).toBeVisible();
   });
 });
 

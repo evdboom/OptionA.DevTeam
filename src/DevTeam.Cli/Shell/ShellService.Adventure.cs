@@ -4,8 +4,9 @@ namespace DevTeam.Cli.Shell;
 
 internal sealed partial class ShellService
 {
-    private bool _adventureModeEnabled = GetBoolOption(startOptions.Options, "adventure", false);
+    private bool _adventureModeEnabled;
     private List<AdventureRoleSlot> _adventureRoles = [];
+    private List<RoadmapSlot> _adventureRoadmap = [];
     private readonly Dictionary<string, string> _adventureSpeechBubbles = new(StringComparer.OrdinalIgnoreCase);
 
     public bool IsAdventureModeEnabled
@@ -24,7 +25,7 @@ internal sealed partial class ShellService
                     _layoutSnapshot.Phase,
                     [.. _adventureRoles],
                     [.. _layoutSnapshot.Agents],
-                    [.. _layoutSnapshot.Roadmap],
+                    [.. _adventureRoadmap],
                     new Dictionary<string, string>(_adventureSpeechBubbles, StringComparer.OrdinalIgnoreCase));
             }
         }

@@ -1,4 +1,4 @@
-//# hash=1753cce1cb8546bef82c75d9a4786e6d
+//# hash=f047ab389657d19f639cfc4ac4b4546a
 //# sourceMappingURL=help-scroll.test.js.map
 
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
@@ -135,6 +135,7 @@ import { cliArgs } from "./helpers.js";
 var HELP_COMMANDS = [
     "/init",
     "/customize",
+    "/start-here",
     "/bug",
     "/status",
     "/history",

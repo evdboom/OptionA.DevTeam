@@ -420,42 +420,82 @@ public class DevTeamRuntime
         var candidates = _issueService.GetReadyIssueCandidates(state);
         var candidateMap = candidates.ToDictionary(item => item.Id);
         var selected = issueIds.Distinct().ToList();
-        if (selected.Count > Math.Max(1, maxSubagents))
+        var notes = new List<string>();
+        var maxAllowed = Math.Max(1, maxSubagents);
+
+        if (selected.Count > maxAllowed)
         {
-            throw new InvalidOperationException($"Execution batch can select at most {Math.Max(1, maxSubagents)} issue(s).");
+            selected = selected.Take(maxAllowed).ToList();
+            notes.Add($"Trimmed selection to first {maxAllowed} issue(s) to match max-subagents.");
         }
 
-        var invalidIssueId = selected
-            .Cast<int?>()
-            .FirstOrDefault(issueId => issueId is not null && !candidateMap.ContainsKey(issueId.Value));
-        if (invalidIssueId is not null)
+        var invalidIssueIds = selected
+            .Where(issueId => !candidateMap.ContainsKey(issueId))
+            .ToList();
+        if (invalidIssueIds.Count > 0)
         {
-            throw new InvalidOperationException($"Issue #{invalidIssueId} is not a ready execution candidate.");
+            selected = selected.Where(issueId => candidateMap.ContainsKey(issueId)).ToList();
+            notes.Add($"Dropped non-ready issue(s): {string.Join(", ", invalidIssueIds.Select(id => $"#{id}"))}.");
         }
 
-        var selectedIssues = selected.Select(id => candidateMap[id]).ToList();
-        var duplicateAreas = selectedIssues
-            .Where(item => !string.IsNullOrWhiteSpace(item.Area))
-            .GroupBy(item => item.Area, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault(group => group.Count() > 1);
-        if (duplicateAreas is not null)
+        if (selected.Count == 0)
         {
-            throw new InvalidOperationException($"Execution batch cannot select multiple issues in area '{duplicateAreas.Key}'.");
+            throw new InvalidOperationException("Execution batch did not include any ready issue candidates.");
         }
 
-        var duplicatePipelines = selectedIssues
-            .Where(item => item.PipelineId is not null)
-            .GroupBy(item => item.PipelineId!.Value)
-            .FirstOrDefault(group => group.Count() > 1);
-        if (duplicatePipelines is not null)
+        var filtered = new List<int>();
+        var seenAreas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenPipelines = new HashSet<int>();
+        var droppedAreas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var droppedPipelines = new HashSet<int>();
+
+        foreach (var issueId in selected)
         {
-            throw new InvalidOperationException($"Execution batch cannot select multiple leads from pipeline #{duplicatePipelines.Key}.");
+            var issue = candidateMap[issueId];
+
+            if (!string.IsNullOrWhiteSpace(issue.Area) && !seenAreas.Add(issue.Area))
+            {
+                droppedAreas.Add(issue.Area);
+                continue;
+            }
+
+            if (issue.PipelineId is int pipelineId && !seenPipelines.Add(pipelineId))
+            {
+                droppedPipelines.Add(pipelineId);
+                continue;
+            }
+
+            filtered.Add(issueId);
+        }
+
+        if (droppedAreas.Count > 0)
+        {
+            notes.Add($"Dropped area-conflicting issue(s) for area(s): {string.Join(", ", droppedAreas.Select(area => $"'{area}'"))}.");
+        }
+
+        if (droppedPipelines.Count > 0)
+        {
+            notes.Add($"Dropped pipeline-conflicting lead issue(s) for pipeline(s): {string.Join(", ", droppedPipelines.Select(id => $"#{id}"))}.");
+        }
+
+        if (filtered.Count == 0)
+        {
+            throw new InvalidOperationException("Execution batch did not contain a conflict-free issue selection.");
+        }
+
+        var sanitizedRationale = rationale.Trim();
+        if (notes.Count > 0)
+        {
+            var note = "Auto-sanitized selection: " + string.Join(" ", notes);
+            sanitizedRationale = string.IsNullOrWhiteSpace(sanitizedRationale)
+                ? note
+                : sanitizedRationale + "\n\n" + note;
         }
 
         state.ExecutionSelection = new ExecutionSelectionState
         {
-            SelectedIssueIds = selected,
-            Rationale = rationale.Trim(),
+            SelectedIssueIds = filtered,
+            Rationale = sanitizedRationale,
             SessionId = sessionId?.Trim() ?? "",
             UpdatedAtUtc = _clock.UtcNow
         };

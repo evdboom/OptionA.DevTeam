@@ -13,15 +13,12 @@ internal static class UiHarnessScenarioTests
         new("EmptyScenario_RendersWithoutError", EmptyScenario_RendersWithoutError),
         new("PlanningScenario_HeaderContainsPlanning", PlanningScenario_HeaderContainsPlanning),
         new("ArchitectScenario_HeaderContainsArchitect", ArchitectScenario_HeaderContainsArchitect),
-        new("ExecutionScenario_AgentsPanelContainsArchitect", ExecutionScenario_AgentsPanelContainsArchitect),
-        new("ExecutionScenario_RoadmapPanelContainsIssueTitles", ExecutionScenario_RoadmapPanelContainsIssueTitles),
+        new("ExecutionScenario_HeaderContainsArchitect", ExecutionScenario_HeaderContainsArchitect),
         new("QuestionsScenario_RendersWithoutError", QuestionsScenario_RendersWithoutError),
         new("RunningAgents_DisplayedWhenLoopIsRunning", RunningAgents_DisplayedWhenLoopIsRunning),
         new("RunningAgents_HiddenWhenLoopNotRunning", RunningAgents_HiddenWhenLoopNotRunning),
-        new("LongRoadmapTitles_TruncatedWithoutFlicker", LongRoadmapTitles_TruncatedWithoutOverflow),
-        new("MalformedMarkupInRoadmapTitle_EscapedSafely", MalformedMarkupInRoadmapTitle_EscapedSafely),
-        new("RoadmapRenderingIsConsistent_OnMultiplePasses", RoadmapRenderingIsConsistent_OnMultiplePasses),
-        new("RoadmapAndProgressPanels_DoNotOverflowTerminalWidth", RoadmapAndProgressPanels_DoNotOverflowTerminalWidth),
+        new("ProgressPanel_WithLongMessages_RendersWithoutOverflow", ProgressPanel_WithLongMessages_RendersWithoutOverflow),
+        new("ProgressPanel_WithMalformedMarkup_EscapedSafely", ProgressPanel_WithMalformedMarkup_EscapedSafely),
     ];
 
     private static string WorkspacePath => Path.Combine(Path.GetTempPath(), $"devteam-shelltest-{Guid.NewGuid():N}");
@@ -38,15 +35,21 @@ internal static class UiHarnessScenarioTests
             })
             .ToList();
 
-        var roadmap = state.Issues
-            .Where(i => !i.IsPlanningIssue)
-            .OrderByDescending(i => i.Priority).ThenBy(i => i.Id)
-            .Select(i => new RoadmapSlot(i.Id, i.Title, i.RoleSlug, i.Status))
+        var cycle = agents
+            .Select(a => new CycleSlot(
+                a.RoleSlug,
+                a.IssueId,
+                a.Title,
+                TimeSpan.FromSeconds(12),
+                IsRunning: a.Status == AgentRunStatus.Running,
+                IsCompleted: a.Status != AgentRunStatus.Running,
+                DateTimeOffset.UtcNow))
             .ToList();
 
-        var phase = state.Phase;
-        var showMiddle = agents.Count > 0 || (phase == WorkflowPhase.Execution && roadmap.Count > 0);
-        return new ShellLayoutSnapshot(phase, showMiddle, agents, roadmap);
+        return new ShellLayoutSnapshot(state.Phase, agents)
+        {
+            CurrentCycle = cycle,
+        };
     }
 
     private static TestConsole CreateConsole()
@@ -66,8 +69,7 @@ internal static class UiHarnessScenarioTests
             var snapshot = BuildSnapshot(state);
             var console = CreateConsole();
             console.Write(ShellPanelBuilder.BuildHeader(snapshot.Phase, false));
-            console.Write(ShellPanelBuilder.BuildEmptyPanel("Agents"));
-            console.Write(ShellPanelBuilder.BuildEmptyPanel("Roadmap"));
+            console.Write(ShellPanelBuilder.BuildProgressPanel([], 0));
             // No assertion needed — just verify it doesn't throw
         }
         finally { try { Directory.Delete(wp, recursive: true); } catch { } }
@@ -109,7 +111,7 @@ internal static class UiHarnessScenarioTests
         return Task.CompletedTask;
     }
 
-    private static Task ExecutionScenario_AgentsPanelContainsArchitect()
+    private static Task ExecutionScenario_HeaderContainsArchitect()
     {
         var wp = WorkspacePath;
         try
@@ -119,28 +121,9 @@ internal static class UiHarnessScenarioTests
             // The execution scenario has a Running architect run; loopRunning=true to show it
             var snapshot = BuildSnapshot(state, loopRunning: true);
             var console = CreateConsole();
-            console.Write(ShellPanelBuilder.BuildAgentsPanel(snapshot));
+            console.Write(ShellPanelBuilder.BuildHeader(snapshot.Phase, isRunning: true, snapshot.CurrentCycle));
             var output = console.Output;
-            Assert.That(output.Contains("architect"), $"Expected 'architect' in agents panel but got: {output}");
-        }
-        finally { try { Directory.Delete(wp, recursive: true); } catch { } }
-        return Task.CompletedTask;
-    }
-
-    private static Task ExecutionScenario_RoadmapPanelContainsIssueTitles()
-    {
-        var wp = WorkspacePath;
-        try
-        {
-            Directory.CreateDirectory(wp);
-            var state = UiHarness.BuildExecutionScenario(wp);
-            var snapshot = BuildSnapshot(state, loopRunning: true);
-            var console = CreateConsole();
-            console.Write(ShellPanelBuilder.BuildRoadmapPanel(snapshot, 10));
-            var output = console.Output;
-            // Just assert that some issue titles from the execution scenario appear
-            Assert.That(output.Length > 0, "Expected non-empty roadmap output");
-            Assert.That(snapshot.Roadmap.Count > 0, "Expected roadmap to have issues");
+            Assert.That(output.Contains("Architect"), $"Expected 'Architect' in header cycle status but got: {output}");
         }
         finally { try { Directory.Delete(wp, recursive: true); } catch { } }
         return Task.CompletedTask;
@@ -155,9 +138,8 @@ internal static class UiHarnessScenarioTests
             var state = UiHarness.BuildQuestionsScenario(wp);
             var snapshot = BuildSnapshot(state, loopRunning: true);
             var console = CreateConsole();
-            console.Write(ShellPanelBuilder.BuildHeader(snapshot.Phase, true));
-            console.Write(ShellPanelBuilder.BuildAgentsPanel(snapshot));
-            console.Write(ShellPanelBuilder.BuildRoadmapPanel(snapshot, 10));
+            console.Write(ShellPanelBuilder.BuildHeader(snapshot.Phase, true, snapshot.CurrentCycle));
+            console.Write(ShellPanelBuilder.BuildProgressPanel([], 0));
             // Just verify it renders without throwing
         }
         finally { try { Directory.Delete(wp, recursive: true); } catch { } }
@@ -180,10 +162,10 @@ internal static class UiHarnessScenarioTests
             Assert.That(runningAgent != null, $"Expected at least one Running agent; got {snapshot.Agents.Count} agents");
             
             var console = CreateConsole();
-            console.Write(ShellPanelBuilder.BuildAgentsPanel(snapshot));
+            console.Write(ShellPanelBuilder.BuildHeader(snapshot.Phase, isRunning: true, snapshot.CurrentCycle));
             var output = console.Output;
-            Assert.That(output.Contains("Running") || output.Contains("architect"), 
-                $"Expected 'Running' or 'architect' in agents panel output");
+            Assert.That(output.Contains("Architect"),
+                $"Expected 'Architect' in header output but got: {output}");
         }
         finally { try { Directory.Delete(wp, recursive: true); } catch { } }
         return Task.CompletedTask;
@@ -208,131 +190,29 @@ internal static class UiHarnessScenarioTests
         return Task.CompletedTask;
     }
 
-    private static Task LongRoadmapTitles_TruncatedWithoutOverflow()
+    private static Task ProgressPanel_WithLongMessages_RendersWithoutOverflow()
     {
-        // Verify that long roadmap titles are truncated to fit terminal width
-        // and do not cause the layout to overflow
-        var wp = WorkspacePath;
-        try
+        var messages = new List<ShellMessage>
         {
-            Directory.CreateDirectory(wp);
-            var state = UiHarness.BuildExecutionScenario(wp);
-            var longTitle = "This is an extremely long roadmap title that should be truncated to fit within the available column width";
-            state.Issues.Add(new IssueItem
-            {
-                Id = 100,
-                Title = longTitle,
-                RoleSlug = "developer",
-                Status = ItemStatus.Open,
-                Priority = 999
-            });
-            
-            var snapshot = BuildSnapshot(state, loopRunning: true);
-            
-            // Verify that the long title slot is truncated in the snapshot
-            var longTitleSlot = snapshot.Roadmap.FirstOrDefault(r => r.Id == 100);
-            Assert.That(longTitleSlot != null, "Expected long title issue in roadmap");
-            
-            // After rendering, verify title doesn't contain the full text
-            var console = CreateConsole();
-            var roadmapPanel = ShellPanelBuilder.BuildRoadmapPanel(snapshot, 15);
-            console.Write(roadmapPanel);
-            
-            var output = console.Output;
-            // The output should contain the truncated version, and verify it renders
-            Assert.That(output.Length > 0, "Roadmap panel should have rendered content");
-        }
-        finally { try { Directory.Delete(wp, recursive: true); } catch { } }
+            new(ShellMessageKind.Line, "This is an extremely long message line that should render safely inside the progress panel without overflowing layout bounds")
+        };
+        var console = CreateConsole();
+        console.Write(ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset: 0));
+        var output = console.Output;
+        Assert.That(output.Length > 0, "Progress panel with long messages should render content");
         return Task.CompletedTask;
     }
 
-    private static Task MalformedMarkupInRoadmapTitle_EscapedSafely()
+    private static Task ProgressPanel_WithMalformedMarkup_EscapedSafely()
     {
-        // Verify that roadmap titles with markup-like sequences are properly escaped
-        // and do not cause rendering exceptions
-        var wp = WorkspacePath;
-        try
+        var messages = new List<ShellMessage>
         {
-            Directory.CreateDirectory(wp);
-            var state = UiHarness.BuildExecutionScenario(wp);
-            state.Issues.Add(new IssueItem
-            {
-                Id = 101,
-                Title = "Fix [bracket] and </closing> tags in parser",
-                RoleSlug = "developer",
-                Status = ItemStatus.Open,
-                Priority = 85
-            });
-            
-            var snapshot = BuildSnapshot(state, loopRunning: true);
-            var console = CreateConsole();
-            
-            // This should not throw InvalidOperationException from Spectre.Console Markup parser
-            var roadmapPanel = ShellPanelBuilder.BuildRoadmapPanel(snapshot, 15);
-            console.Write(roadmapPanel);
-            
-            var output = console.Output;
-            Assert.That(output.Length > 0, "Roadmap panel should render safely with malformed markup");
-        }
-        finally { try { Directory.Delete(wp, recursive: true); } catch { } }
-        return Task.CompletedTask;
-    }
-
-    private static Task RoadmapRenderingIsConsistent_OnMultiplePasses()
-    {
-        // Verify that rendering the roadmap multiple times produces consistent output
-        // (no flicker or layout changes on subsequent renders)
-        var wp = WorkspacePath;
-        try
-        {
-            Directory.CreateDirectory(wp);
-            var state = UiHarness.BuildExecutionScenario(wp);
-            var snapshot = BuildSnapshot(state, loopRunning: true);
-            
-            var outputs = new List<string>();
-            for (int i = 0; i < 3; i++)
-            {
-                var console = CreateConsole();
-                console.Write(ShellPanelBuilder.BuildRoadmapPanel(snapshot, 15));
-                outputs.Add(console.Output);
-            }
-            
-            // All three renders should have the same length (consistent layout)
-            Assert.That(outputs[0].Length == outputs[1].Length && outputs[1].Length == outputs[2].Length,
-                $"Roadmap rendering should be consistent across multiple passes. " +
-                $"Got lengths: {outputs[0].Length}, {outputs[1].Length}, {outputs[2].Length}");
-        }
-        finally { try { Directory.Delete(wp, recursive: true); } catch { } }
-        return Task.CompletedTask;
-    }
-
-    private static Task RoadmapAndProgressPanels_DoNotOverflowTerminalWidth()
-    {
-        // Critical: Verify that the combined width of roadmap + progress panels
-        // does not exceed the terminal width (120 in test console)
-        var wp = WorkspacePath;
-        try
-        {
-            Directory.CreateDirectory(wp);
-            var state = UiHarness.BuildExecutionScenario(wp);
-            var snapshot = BuildSnapshot(state, loopRunning: true);
-            
-            var console = CreateConsole();
-            var terminalWidth = console.Profile.Width; // 120
-            
-            // Simulate building the body row with left (roadmap) and right (progress) panels
-            var roadmapPanel = ShellPanelBuilder.BuildRoadmapPanel(snapshot, 10);
-            var progressPanel = ShellPanelBuilder.BuildEmptyPanel("Progress");
-            
-            console.Write(roadmapPanel);
-            console.Write(progressPanel);
-            
-            var output = console.Output;
-            // The output should fit within the terminal without overflow
-            // This is a sanity check that layout calculation respects bounds
-            Assert.That(output.Length > 0, "Layout should render without error");
-        }
-        finally { try { Directory.Delete(wp, recursive: true); } catch { } }
+            new(ShellMessageKind.Line, "Fix [bracket] and </closing> tags in parser")
+        };
+        var console = CreateConsole();
+        console.Write(ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset: 0));
+        var output = console.Output;
+        Assert.That(output.Length > 0, "Progress panel should render safely with markup-like message content");
         return Task.CompletedTask;
     }
 }

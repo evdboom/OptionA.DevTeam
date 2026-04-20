@@ -10,21 +10,12 @@ namespace DevTeam.Cli.Shell;
 /// </summary>
 internal static class ShellPanelBuilder
 {
-    internal const int LeftColumnWidth = 60;
-    // Panel border + padding consumes 4 chars on each side ("│ " left, " │" right).
-    internal const int LeftColumnContentWidth = LeftColumnWidth - 4;
-    // Roadmap line: "○ <title> (<role>)" — 5 fixed chars overhead (check+space, space+parens).
-    internal const int RoadmapRoleMax = 12;
-    internal const int RoadmapTitleMax = LeftColumnContentWidth - 5 - RoadmapRoleMax;
-    // Agent slot: "⚡ <role> #<id> <title>" — ~8 fixed chars overhead (icon, spaces, #, id≤3 digits).
-    internal const int AgentRoleMax = 14;
-    internal const int AgentTitleMax = LeftColumnContentWidth - 8 - AgentRoleMax;
     internal const int FallbackTerminalHeight = 40;
 
     private const int HeaderSize = 4;
     private const int InputSize = 6;
 
-    internal static Panel BuildHeader(WorkflowPhase phase, bool isRunning)
+    internal static Panel BuildHeader(WorkflowPhase phase, bool isRunning, IReadOnlyList<CycleSlot>? currentCycle = null)
     {
         var phaseTag = phase switch
         {
@@ -34,7 +25,30 @@ internal static class ShellPanelBuilder
             _ => phase.ToString(),
         };
         var runTag = isRunning ? "  [dim]⏳ running[/]" : "";
-        return new Panel(new Markup($"[teal]Phase[/]: [bold]{phaseTag}[/]{runTag}"))
+
+        var lines = new List<string>
+        {
+            $"[teal]Phase[/]: [bold]{phaseTag}[/]{runTag}"
+        };
+
+        var cycle = currentCycle ?? [];
+        if (cycle.Count == 0)
+        {
+            lines.Add("[dim]Current cycle: no active runs[/]");
+        }
+        else
+        {
+            foreach (var slot in cycle.Take(3))
+            {
+                lines.Add(FormatHeaderCycleSlot(slot));
+            }
+            if (cycle.Count > 3)
+            {
+                lines.Add($"[dim]… {cycle.Count - 3} more[/]");
+            }
+        }
+
+        return new Panel(new Markup(string.Join("\n", lines)))
             .Header("- [teal bold]DevTeam[/] -", Justify.Center)
             .BorderColor(Color.Purple3)
             .Expand();
@@ -90,50 +104,44 @@ internal static class ShellPanelBuilder
             .BorderColor(Color.Grey)
             .Expand();
 
-    internal static Panel BuildAgentsPanel(ShellLayoutSnapshot snapshot)
-    {
-        var markup = snapshot.Agents.Count > 0
-            ? string.Join("\n", snapshot.Agents.Select(FormatAgentSlot))
-            : "[dim]No active agents[/]";
-        return new Panel(new Markup(markup))
-            .Header("- [teal bold]Agents[/] -")
-            .BorderColor(Color.Purple3)
-            .Expand();
-    }
-
-    internal static Panel BuildRoadmapPanel(ShellLayoutSnapshot snapshot, int maxLines)
-    {
-        var items = snapshot.Roadmap.Take(maxLines).Select(FormatRoadmapSlot).ToList();
-        if (snapshot.Roadmap.Count > maxLines)
-            items.Add($"[dim]… {snapshot.Roadmap.Count - maxLines} more[/]");
-        var markup = items.Count > 0 ? string.Join("\n", items) : "[dim]No issues[/]";
-        return new Panel(new Markup(markup))
-            .Header("- [teal bold]Roadmap[/] -")
-            .BorderColor(Color.Purple3)
-            .Expand();
-    }
-
-    internal static Panel BuildProgressPanel(IReadOnlyList<ShellMessage> messages, int scrollOffset, int termHeightOverride = 0)
+    internal static Panel BuildProgressPanel(
+        IReadOnlyList<ShellMessage> messages,
+        int scrollOffset,
+        int termHeightOverride = 0,
+        int contentWidthOverride = 0)
     {
         var termHeight = termHeightOverride > 0 ? termHeightOverride
             : Console.IsOutputRedirected ? FallbackTerminalHeight : Math.Max(20, Console.WindowHeight);
         var termWidth = Console.IsOutputRedirected ? 120 : Math.Max(40, Console.WindowWidth);
 
         var budget = ComputeLineBudget(termHeight);
-        var progressWidth = Math.Max(20, termWidth - LeftColumnWidth - 4);
+        var progressWidth = contentWidthOverride > 0
+            ? Math.Max(20, contentWidthOverride)
+            : Math.Max(20, termWidth - 4);
 
         IRenderable content;
         var allLines = FlattenMessages(messages);
+        var contentRows = Math.Max(1, budget - 2);
 
         if (allLines.Length == 0)
         {
-            content = CreateMarkupSafe("[grey]No events yet[/]");
+            var rendered = new List<IRenderable>
+            {
+                CreateMarkupSafe("[grey]No events yet[/]")
+            };
+
+            // Keep a fixed viewport height so header and input stay pinned.
+            var padRows = Math.Max(0, contentRows - 1);
+            for (var i = 0; i < padRows; i++)
+                rendered.Add(new Markup(" "));
+
+            content = new Rows(rendered);
         }
         else
         {
-            var totalLines = allLines.Length;
             // Reserve 2 rows for the above/below hint lines so panel never overflows budget.
-            var contentRows = Math.Max(1, budget - 2);
+            var rendered = new List<IRenderable>();
+            var totalLines = allLines.Length;
 
             // windowEnd: the exclusive upper bound of the visible window.
             // Lower bound is 1 (not contentRows) so scrolling can reach the very oldest line.
@@ -168,14 +176,26 @@ internal static class ShellPanelBuilder
 
             var linesAbove = windowStart;
             var linesBelow = totalLines - windowEnd;
+            var hintRows = 0;
 
-            var rendered = new List<IRenderable>();
             if (linesAbove > 0)
+            {
                 rendered.Add(CreateMarkupSafe($"[dim]▲ {linesAbove} lines above  ·  PgUp for more[/]"));
+                hintRows++;
+            }
             foreach (var line in selectedLines)
                 rendered.Add(CreateMarkupSafe(line));
             if (linesBelow > 0)
+            {
                 rendered.Add(CreateMarkupSafe($"[dim]▼ {linesBelow} lines below  ·  PgDn or End to follow[/]"));
+                hintRows++;
+            }
+
+            // Fill remaining viewport rows so the progress panel always occupies
+            // the full middle region between pinned header and pinned input.
+            var padRows = Math.Max(0, contentRows - usedRows - hintRows);
+            for (var i = 0; i < padRows; i++)
+                rendered.Add(new Markup(" "));
 
             content = new Rows(rendered);
         }
@@ -367,25 +387,21 @@ internal static class ShellPanelBuilder
         }
     }
 
-    internal static string FormatAgentSlot(AgentSlot slot)
+    private static string FormatHeaderCycleSlot(CycleSlot slot)
     {
-        var icon = slot.Status == AgentRunStatus.Running ? "⚡" : "⏳";
-        var role = slot.RoleSlug.Length > AgentRoleMax ? slot.RoleSlug[..(AgentRoleMax - 1)] + "…" : slot.RoleSlug;
-        var title = slot.Title.Length > AgentTitleMax ? slot.Title[..(AgentTitleMax - 1)] + "…" : slot.Title;
-        return $"[dim]{icon}[/] [cyan]{Markup.Escape(role)}[/] [dim]#{slot.IssueId}[/] {Markup.Escape(title)}";
-    }
+        var roleSlug = string.IsNullOrWhiteSpace(slot.RoleSlug) ? "agent" : slot.RoleSlug;
+        var role = roleSlug.Equals("orchestrator", StringComparison.OrdinalIgnoreCase)
+            ? "Orchestrator"
+            : char.ToUpperInvariant(roleSlug[0]) + roleSlug[1..];
 
-    internal static string FormatRoadmapSlot(RoadmapSlot slot)
-    {
-        var (check, statusColor) = slot.Status switch
+        var scope = slot.IssueId is int issueId ? $" - issue #{issueId}" : string.Empty;
+        var elapsed = $" {slot.Elapsed.TotalSeconds:0}s";
+
+        if (slot.IsRunning)
         {
-            ItemStatus.Done => ("[green]✓[/]", "green"),
-            ItemStatus.InProgress => ("[yellow]⚡[/]", "yellow"),
-            ItemStatus.Blocked => ("[red]✗[/]", "red"),
-            _ => ("[dim]○[/]", "dim"),
-        };
-        var role = slot.RoleSlug.Length > RoadmapRoleMax ? slot.RoleSlug[..(RoadmapRoleMax - 1)] + "…" : slot.RoleSlug;
-        var title = slot.Title.Length > RoadmapTitleMax ? slot.Title[..(RoadmapTitleMax - 1)] + "…" : slot.Title;
-        return $"{check} [{statusColor}]{Markup.Escape(title)}[/] [dim]({Markup.Escape(role)})[/]";
+            return $"[yellow]⏳[/] [cyan]{Markup.Escape(role)}[/]{Markup.Escape(scope + elapsed)}";
+        }
+
+        return $"[green]✓[/] [cyan]{Markup.Escape(role)}[/]{Markup.Escape(scope + elapsed)} [dim](done)[/]";
     }
 }

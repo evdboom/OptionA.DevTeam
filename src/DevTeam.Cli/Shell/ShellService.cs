@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using System.Threading;
 using DevTeam.Cli;
 using DevTeam.Core;
 using Spectre.Console;
@@ -45,6 +46,7 @@ internal sealed partial class ShellService(
     private readonly object _gate = new();
     private readonly List<ShellMessage> _messages = [];
     private readonly List<(DateTimeOffset At, string Entry)> _history = [];
+    private long _uiVersion;
 
     private Task<LoopExecutionReport>? _loopTask;
     private CancellationTokenSource? _loopCts;
@@ -61,6 +63,8 @@ internal sealed partial class ShellService(
     }
 
     public bool IsLoopRunning => _loopTask is { IsCompleted: false };
+
+    public long UiVersion => Interlocked.Read(ref _uiVersion);
 
     public string PromptText => IsLoopRunning ? "devteam (running)> " : "devteam> ";
 
@@ -132,6 +136,10 @@ internal sealed partial class ShellService(
         if (string.IsNullOrEmpty(line)) return;
 
         AddHistory(line);
+        if (line.StartsWith("/", StringComparison.Ordinal))
+        {
+            AddLine($"[bold aqua]You:[/] [aqua]{Markup.Escape(line)}[/]");
+        }
 
         TryLoadState(out var state);
         var openQuestions = state?.Questions.Where(q => q.Status == QuestionStatus.Open).ToList() ?? [];
@@ -267,9 +275,12 @@ internal sealed partial class ShellService(
                 case "adventure":
                 {
                     var requested = GetPositionalValue(options) ?? GetOption(options, EnabledText);
-                    var enable = string.IsNullOrWhiteSpace(requested)
-                        ? !IsAdventureModeEnabled
-                        : ParseBoolOrThrow(requested, "Usage: /adventure [on|off]");
+                    if (string.IsNullOrWhiteSpace(requested))
+                    {
+                        AddHint($"Adventure mode is currently {(IsAdventureModeEnabled ? "[green]on[/]" : "[dim]off[/]" )}. Use [cyan]/adventure on[/] or [cyan]/adventure off[/].");
+                        break;
+                    }
+                    var enable = ParseBoolOrThrow(requested, "Usage: /adventure [on|off]");
                     SetAdventureMode(enable);
                     AddSuccess(enable
                         ? "Adventure mode enabled. Arrow keys move, Enter chats, Esc returns to the normal shell."
@@ -996,6 +1007,7 @@ internal sealed partial class ShellService(
 
     private void StartLoopInBackground(WorkspaceState state, Dictionary<string, List<string>> options)
     {
+        ResetCycleState();
         var cts = new CancellationTokenSource();
         _loopCts = cts;
         var bgLogger = MakeBackgroundLogger(state);
@@ -1062,7 +1074,7 @@ internal sealed partial class ShellService(
             AgentTimeout = TimeSpan.FromSeconds(timeoutSeconds),
             HeartbeatInterval = TimeSpan.FromSeconds(5),
             Verbosity = verbosity,
-            ProgressReporter = null
+            ProgressReporter = ReportLoopProgress
         };
 
         var report = await _loopExecutor.RunAsync(state, executionOptions, log, cancellationToken);
@@ -1311,19 +1323,28 @@ internal sealed partial class ShellService(
             })
             .ToList();
 
+        var phase = state.Phase;
+        var cycle = GetCycleSnapshot();
+
+        lock (_gate)
+        {
+            _layoutSnapshot = new ShellLayoutSnapshot(phase, agents)
+            {
+                CurrentCycle = cycle
+            };
+        }
+
         var roadmap = state.Issues
             .Where(i => !i.IsPlanningIssue)
             .OrderByDescending(i => i.Priority).ThenBy(i => i.Id)
             .Select(i => new RoadmapSlot(i.Id, i.Title, i.RoleSlug, i.Status))
             .ToList();
 
-        var phase = state.Phase;
-        var showMiddle = agents.Count > 0 || (phase == WorkflowPhase.Execution && roadmap.Count > 0);
-
         lock (_gate)
         {
-            _layoutSnapshot = new ShellLayoutSnapshot(phase, showMiddle, agents, roadmap);
+            _adventureRoadmap = roadmap;
         }
+
         UpdateAdventureRoles(state);
         NotifyStateChanged();
     }

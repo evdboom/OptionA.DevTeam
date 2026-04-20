@@ -1,4 +1,4 @@
-//# hash=e845c5d1a305b10d79bff16ddbb17b1b
+//# hash=9f422f7a187898bef44c59624b45e112
 //# sourceMappingURL=ui-harness-scenarios.test.js.map
 
 function _array_like_to_array(arr, len) {
@@ -314,13 +314,19 @@ test.describe("execution scenario", function() {
                         ];
                     case 1:
                         _state.sent();
-                        // The running agent (issue #38, role=architect) renders as "⚡ architect #38 Drop stale…"
-                        // "Drop stale" is unique to this specific running issue title.
+                        // In 3-panel layout, the progress body shows execution guidance and workflow hints.
+                        // Verify "Execution" phase is shown and the progress panel content is visible.
                         return [
                             4,
-                            expect(terminal.getByText("Drop stale")).toBeVisible()
+                            expect(terminal.getByText("Execution")).toBeVisible()
                         ];
                     case 2:
+                        _state.sent();
+                        return [
+                            4,
+                            expect(terminal.getByText("workflow guide")).toBeVisible()
+                        ];
+                    case 3:
                         _state.sent();
                         return [
                             2
@@ -341,11 +347,11 @@ test.describe("execution scenario", function() {
                         ];
                     case 1:
                         _state.sent();
-                        // Issue #3 "Write project README and rule catalogue" is in the execution scenario
-                        // and its title is unique enough to distinguish roadmap content from other panels.
+                        // In 3-panel layout, the progress panel shows ready issues hint during execution.
+                        // Verify "4 issue(s) are ready" text from the workflow guide.
                         return [
                             4,
-                            expect(terminal.getByText("Write project README")).toBeVisible()
+                            expect(terminal.getByText("are ready")).toBeVisible()
                         ];
                     case 2:
                         _state.sent();
@@ -368,12 +374,11 @@ test.describe("execution scenario", function() {
                         ];
                     case 1:
                         _state.sent();
-                        // Multiple done issues show ✓ — getByText("✓") hits strict-mode (8+ matches).
-                        // Instead verify a specific done issue title is visible; its ✓ prefix proves
-                        // the done indicator works without needing to match the symbol in isolation.
+                        // In 3-panel layout, the progress panel shows workflow guidance text.
+                        // Verify the "step" indicator from the workflow guide.
                         return [
                             4,
-                            expect(terminal.getByText("Write project README")).toBeVisible()
+                            expect(terminal.getByText("Step 3 of 3")).toBeVisible()
                         ];
                     case 2:
                         _state.sent();
