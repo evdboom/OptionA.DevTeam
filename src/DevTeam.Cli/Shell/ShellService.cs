@@ -1469,7 +1469,7 @@ internal sealed partial class ShellService(
             var issue = state.Issues.FirstOrDefault(i => i.Id == run.IssueId);
             if (issue is not null) sb.AppendLine($"[bold]{Markup.Escape(issue.Title)}[/]");
             foreach (var summaryLine in run.Summary.Split('\n'))
-                sb.AppendLine(Markup.Escape(summaryLine));
+                sb.AppendLine(summaryLine);
         }
 
         var created = state.Issues
