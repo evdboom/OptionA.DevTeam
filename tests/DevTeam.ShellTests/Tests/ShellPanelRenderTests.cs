@@ -11,10 +11,8 @@ internal static class ShellPanelRenderTests
     [
         new("HeaderPanel_PlanningPhase_ContainsPhaseLabel", HeaderPanel_PlanningPhase_ContainsPhaseLabel),
         new("HeaderPanel_ExecutionPhase_Running_ContainsRunningLabel", HeaderPanel_ExecutionPhase_Running_ContainsRunningLabel),
-        new("AgentsPanel_NoAgents_ContainsNoActiveAgents", AgentsPanel_NoAgents_ContainsNoActiveAgents),
-        new("AgentsPanel_WithRunningAgent_ContainsAgentInfo", AgentsPanel_WithRunningAgent_ContainsAgentInfo),
-        new("RoadmapPanel_WithIssues_ContainsIssueInfo", RoadmapPanel_WithIssues_ContainsIssueInfo),
-        new("RoadmapPanel_DoneIssue_ContainsDoneIndicator", RoadmapPanel_DoneIssue_ContainsDoneIndicator),
+        new("HeaderPanel_WithCycleStatus_ShowsRunningAndDone", HeaderPanel_WithCycleStatus_ShowsRunningAndDone),
+        new("ProgressPanel_NoEvents_ContainsPlaceholder", ProgressPanel_NoEvents_ContainsPlaceholder),
         new("EmptyPanel_ContainsTitle", EmptyPanel_ContainsTitle),
         new("VisibleLength_PlainText_ReturnsCorrectCount", VisibleLength_PlainText_ReturnsCorrectCount),
         new("VisibleLength_MarkupStripped_ReturnsVisibleOnly", VisibleLength_MarkupStripped_ReturnsVisibleOnly),
@@ -23,6 +21,8 @@ internal static class ShellPanelRenderTests
         new("StripMarkup_RemovesTags", StripMarkup_RemovesTags),
         new("StripMarkup_ClosingTag_Removed", StripMarkup_ClosingTag_Removed),
         new("StripMarkup_EscapedBrackets_Preserved", StripMarkup_EscapedBrackets_Preserved),
+        new("ProgressPanel_MalformedMarkup_DoesNotThrow", ProgressPanel_MalformedMarkup_DoesNotThrow),
+        new("PanelHeader_WithBrackets_EscapedSafely", PanelHeader_WithBrackets_EscapedSafely),
     ];
 
     private static TestConsole CreateConsole()
@@ -51,59 +51,33 @@ internal static class ShellPanelRenderTests
         return Task.CompletedTask;
     }
 
-    private static Task AgentsPanel_NoAgents_ContainsNoActiveAgents()
+    private static Task HeaderPanel_WithCycleStatus_ShowsRunningAndDone()
     {
         var console = CreateConsole();
-        var snapshot = new ShellLayoutSnapshot(WorkflowPhase.Execution, false, [], []);
-        console.Write(ShellPanelBuilder.BuildAgentsPanel(snapshot));
+        var now = DateTimeOffset.UtcNow;
+        var cycle = new List<CycleSlot>
+        {
+            new("orchestrator", null, "Selecting next execution batch", TimeSpan.FromSeconds(74), IsRunning: true, IsCompleted: false, now),
+            new("developer", 4, "Implement rules", TimeSpan.FromSeconds(45), IsRunning: true, IsCompleted: false, now),
+            new("tester", 6, "Verify issue", TimeSpan.FromSeconds(65), IsRunning: false, IsCompleted: true, now),
+        };
+
+        console.Write(ShellPanelBuilder.BuildHeader(WorkflowPhase.Execution, isRunning: true, cycle));
         var output = console.Output;
-        Assert.That(output.Contains("No active agents"), $"Expected 'No active agents' but got: {output}");
+
+        Assert.That(output.Contains("Execution"), $"Expected execution phase in header but got: {output}");
+        Assert.That(output.Contains("Orchestrator"), $"Expected orchestrator line but got: {output}");
+        Assert.That(output.Contains("issue #4"), $"Expected issue #4 line in header but got: {output}");
+        Assert.That(output.Contains("done"), $"Expected completed marker but got: {output}");
         return Task.CompletedTask;
     }
 
-    private static Task AgentsPanel_WithRunningAgent_ContainsAgentInfo()
+    private static Task ProgressPanel_NoEvents_ContainsPlaceholder()
     {
         var console = CreateConsole();
-        var snapshot = new ShellLayoutSnapshot(
-            WorkflowPhase.Execution,
-            ShowMiddleRow: true,
-            Agents: [new AgentSlot(1, 5, "developer", "Build API", AgentRunStatus.Running)],
-            Roadmap: []);
-        console.Write(ShellPanelBuilder.BuildAgentsPanel(snapshot));
+        console.Write(ShellPanelBuilder.BuildProgressPanel([], 0));
         var output = console.Output;
-        Assert.That(output.Contains("developer"), $"Expected 'developer' in output but got: {output}");
-        Assert.That(output.Contains("#5"), $"Expected '#5' in output but got: {output}");
-        Assert.That(output.Contains("Build API"), $"Expected 'Build API' in output but got: {output}");
-        return Task.CompletedTask;
-    }
-
-    private static Task RoadmapPanel_WithIssues_ContainsIssueInfo()
-    {
-        var console = CreateConsole();
-        var snapshot = new ShellLayoutSnapshot(
-            WorkflowPhase.Execution,
-            ShowMiddleRow: true,
-            Agents: [],
-            Roadmap: [new RoadmapSlot(5, "Build API", "developer", ItemStatus.Open)]);
-        console.Write(ShellPanelBuilder.BuildRoadmapPanel(snapshot, 10));
-        var output = console.Output;
-        Assert.That(output.Contains("Build API"), $"Expected 'Build API' in output but got: {output}");
-        Assert.That(output.Contains("developer"), $"Expected 'developer' in output but got: {output}");
-        return Task.CompletedTask;
-    }
-
-    private static Task RoadmapPanel_DoneIssue_ContainsDoneIndicator()
-    {
-        var console = CreateConsole();
-        var snapshot = new ShellLayoutSnapshot(
-            WorkflowPhase.Execution,
-            ShowMiddleRow: true,
-            Agents: [],
-            Roadmap: [new RoadmapSlot(5, "Build API", "developer", ItemStatus.Done)]);
-        console.Write(ShellPanelBuilder.BuildRoadmapPanel(snapshot, 10));
-        var output = console.Output;
-        Assert.That(output.Contains("✓") || output.Contains("done") || output.Contains("Done"),
-            $"Expected done indicator in output but got: {output}");
+        Assert.That(output.Contains("No events yet"), $"Expected 'No events yet' placeholder but got: {output}");
         return Task.CompletedTask;
     }
 
@@ -162,6 +136,42 @@ internal static class ShellPanelRenderTests
     {
         var result = NonInteractiveShellHost.StripMarkup("[[bold]]");
         Assert.That(result == "[bold]", $"Expected '[bold]' but got '{result}'");
+        return Task.CompletedTask;
+    }
+
+    private static Task ProgressPanel_MalformedMarkup_DoesNotThrow()
+    {
+        var console = CreateConsole();
+        var messages = new List<ShellMessage>
+        {
+            new(ShellMessageKind.Line, "[dim]ok[/]"),
+            new(ShellMessageKind.Line, "[/boom] this used to crash markup parsing")
+        };
+
+        console.Write(ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset: 0, termHeightOverride: 40));
+        var output = console.Output;
+
+        Assert.That(output.Contains("this used to crash markup parsing", StringComparison.Ordinal),
+            $"Expected malformed-markup message to render safely, but got: {output}");
+        return Task.CompletedTask;
+    }
+
+    private static Task PanelHeader_WithBrackets_EscapedSafely()
+    {
+        // Verify that panel titles with unescaped brackets (from issue titles containing code patterns)
+        // are properly escaped and don't crash the Spectre.Console Markup parser
+        var console = CreateConsole();
+        var message = new ShellMessage(
+            ShellMessageKind.Panel,
+            "Panel content here",
+            Title: "architect — Implement [DllImport] rules (AOT040)");
+
+        var renderable = ShellPanelBuilder.RenderMessage(message);
+        console.Write(renderable);
+        var output = console.Output;
+
+        // Should render without throwing InvalidOperationException
+        Assert.That(output.Length > 0, "Expected panel to render with bracketed title");
         return Task.CompletedTask;
     }
 }

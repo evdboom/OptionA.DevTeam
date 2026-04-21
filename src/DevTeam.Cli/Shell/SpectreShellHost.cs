@@ -3,22 +3,17 @@ using System.Text;
 using System.Threading.Channels;
 using DevTeam.Core;
 using Spectre.Console;
+using Spectre.Console.Rendering;
 
 namespace DevTeam.Cli.Shell;
 
 /// <summary>
 /// Hosts the interactive shell using Spectre.Console LiveDisplay with a
-/// Layout-based dashboard for fixed-region rendering.
+/// single stacked frame (header, cycle, progress, input).
 /// </summary>
 internal static class SpectreShellHost
 {
-    private const int MaxRoadmapLines = 10;
-    private const int RefreshMs = 100;
-    private const int HeaderSize = 4;
-    private const int InputSize = 6; // 4 content lines max (border top + 4 + border bottom)
-    private const int AgentsSize = 8;
-    private const string AgentsPanelName = "Agents";
-    private const string RoadmapPanelName = "Roadmap";
+    private const int RefreshMs = 120;
 
     internal static async Task RunAsync(ShellService shell, CancellationToken cancellationToken)
     {
@@ -35,6 +30,11 @@ internal static class SpectreShellHost
         var savedDraft = string.Empty; // preserves unsent input while browsing history
         var scrollOffset = 0;  // 0 = auto-follow latest; N = scrolled N lines up
         var adventureSession = new AdventureSessionState();
+        var adventureLayout = AdventureShellHost.BuildLayoutTree();
+        var lastUiVersion = -1L;
+        var lastCursor = -1;
+        var lastScrollOffset = -1;
+        var lastAdventureMode = false;
 
         await shell.InitializeAsync();
 
@@ -50,37 +50,62 @@ internal static class SpectreShellHost
 
         try
         {
-            // Keep the Live target stable by rendering through a single wrapper layout.
-            // Normal/adventure layouts are both pre-built once and refreshed in place.
-            var layout = BuildLayoutTree();
-            var adventureLayout = AdventureShellHost.BuildLayoutTree();
-            var liveRoot = new Layout("LiveRoot");
-            UpdateLayout(layout, shell, string.Empty, 0, scrollOffset);
-            liveRoot.Update(layout);
+            var liveFrame = BuildFrame(shell, string.Empty, 0, scrollOffset);
+            lastUiVersion = -1L;  // Force rebuild on first loop iteration once terminal is measured
+            lastCursor = 0;
+            lastScrollOffset = scrollOffset;
 
-            await console.Live(liveRoot)
+            await console.Live(liveFrame)
                 .Overflow(VerticalOverflow.Crop)
                 .Cropping(VerticalOverflowCropping.Top)
                 .StartAsync(async context =>
                 {
+                    context.UpdateTarget(liveFrame);
                     while (!cancellationToken.IsCancellationRequested)
                     {
+                        var inputText = inputBuffer.ToString();
+                        var beforeScrollOffset = scrollOffset;
                         AdventureShellHost.SyncModeState(shell, adventureSession, inputBuffer, ref cursorPosition, ref historyCursor, ref savedDraft);
 
                         if (shell.IsAdventureModeEnabled)
                         {
                             AdventureShellHost.ReadInput(adventureSession, inputBuffer, shell, commandChannel.Writer, ref cursorPosition, ref historyCursor, ref savedDraft, ref scrollOffset);
-                            AdventureShellHost.UpdateLayout(adventureLayout, shell, adventureSession, inputBuffer.ToString(), cursorPosition, scrollOffset);
-                            liveRoot.Update(adventureLayout);
                         }
                         else
                         {
                             ReadInput(inputBuffer, shell, commandChannel.Writer, ref cursorPosition, ref historyCursor, ref savedDraft, ref scrollOffset);
-                            UpdateLayout(layout, shell, inputBuffer.ToString(), cursorPosition, scrollOffset);
-                            liveRoot.Update(layout);
                         }
 
-                        context.UpdateTarget(liveRoot);
+                        var inputChanged = !string.Equals(inputText, inputBuffer.ToString(), StringComparison.Ordinal)
+                            || cursorPosition != lastCursor
+                            || beforeScrollOffset != scrollOffset;
+
+                        var uiVersion = shell.UiVersion;
+                        var adventureMode = shell.IsAdventureModeEnabled;
+                        var shouldRender = uiVersion != lastUiVersion
+                            || inputChanged
+                            || scrollOffset != lastScrollOffset
+                            || adventureMode != lastAdventureMode;
+
+                        if (shouldRender)
+                        {
+                            if (adventureMode)
+                            {
+                                AdventureShellHost.UpdateLayout(adventureLayout, shell, adventureSession, inputBuffer.ToString(), cursorPosition, scrollOffset);
+                                liveFrame = adventureLayout;
+                            }
+                            else
+                            {
+                                liveFrame = BuildFrame(shell, inputBuffer.ToString(), cursorPosition, scrollOffset);
+                            }
+
+                            context.UpdateTarget(liveFrame);
+
+                            lastUiVersion = uiVersion;
+                            lastCursor = cursorPosition;
+                            lastScrollOffset = scrollOffset;
+                            lastAdventureMode = adventureMode;
+                        }
 
                         try { await Task.Delay(RefreshMs, cancellationToken); }
                         catch (OperationCanceledException) { break; }
@@ -115,55 +140,18 @@ internal static class SpectreShellHost
         }
     }
 
-    /// <summary>
-    /// Creates the Layout tree once. The same instance is reused every frame.
-    /// Only leaf .Update() calls change — never the tree structure.
-    /// </summary>
-    private static Layout BuildLayoutTree()
-    {
-        var root = new Layout("Root")
-            .SplitRows(
-                new Layout("Header").Size(HeaderSize),
-                new Layout("Body"),
-                new Layout("Input").Size(InputSize));
-
-        root["Body"].SplitColumns(
-            new Layout("Left").Size(ShellPanelBuilder.LeftColumnWidth),
-            new Layout("Right"));
-
-        root["Left"].SplitRows(
-            new Layout(AgentsPanelName).Size(AgentsSize),
-            new Layout(RoadmapPanelName));
-
-        return root;
-    }
-
-    /// <summary>Updates every leaf panel in the pre-built layout tree.</summary>
-    private static void UpdateLayout(Layout root, ShellService shell, string activeInput, int cursorPosition, int scrollOffset)
+    /// <summary>Builds the full stacked frame for the current shell state.</summary>
+    private static IRenderable BuildFrame(ShellService shell, string activeInput, int cursorPosition, int scrollOffset)
     {
         var snapshot = shell.LayoutSnapshot;
         var messages = shell.Messages;
 
-        root["Header"].Update(ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning));
-        root["Input"].Update(ShellPanelBuilder.BuildInput(shell.PromptText, activeInput, cursorPosition));
-
-        if (snapshot.ShowMiddleRow)
+        return new Rows(new IRenderable[]
         {
-            root[AgentsPanelName].Update(ShellPanelBuilder.BuildAgentsPanel(snapshot));
-
-            // Compute how many roadmap lines can fit in the remaining left-column height
-            // without overflowing: termHeight - header - input - agents slot - panel borders.
-            var th = Console.IsOutputRedirected ? ShellPanelBuilder.FallbackTerminalHeight : Math.Max(20, Console.WindowHeight);
-            var roadmapBudget = Math.Max(2, th - HeaderSize - InputSize - AgentsSize - 3);
-            root[RoadmapPanelName].Update(ShellPanelBuilder.BuildRoadmapPanel(snapshot, Math.Min(MaxRoadmapLines, roadmapBudget)));
-        }
-        else
-        {
-            root[AgentsPanelName].Update(ShellPanelBuilder.BuildEmptyPanel(AgentsPanelName));
-            root[RoadmapPanelName].Update(ShellPanelBuilder.BuildEmptyPanel(RoadmapPanelName));
-        }
-
-        root["Right"].Update(ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset));
+            ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning, snapshot.CurrentCycle),
+            ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset),
+            ShellPanelBuilder.BuildInput(shell.PromptText, activeInput, cursorPosition)
+        });
     }
 
     // ── Input handling ─────────────────────────────────────────────────────────
@@ -383,6 +371,6 @@ internal static class SpectreShellHost
     private static int ProgressWidth()
     {
         var termWidth = Console.IsOutputRedirected ? 120 : Math.Max(40, Console.WindowWidth);
-        return Math.Max(20, termWidth - ShellPanelBuilder.LeftColumnWidth - 4);
+        return Math.Max(20, termWidth - 4);
     }
 }

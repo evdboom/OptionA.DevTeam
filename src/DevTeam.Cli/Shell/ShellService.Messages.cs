@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Text;
+using System.Threading;
 using DevTeam.Core;
 using Spectre.Console;
 
@@ -364,6 +365,10 @@ internal sealed partial class ShellService
         }
     }
 
-    private void NotifyStateChanged() => OnStateChanged?.Invoke();
+    private void NotifyStateChanged()
+    {
+        Interlocked.Increment(ref _uiVersion);
+        OnStateChanged?.Invoke();
+    }
 
 }
