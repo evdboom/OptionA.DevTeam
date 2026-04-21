@@ -142,10 +142,10 @@ internal static class LoopExecutorTests
 
         var reloaded = store.Load();
         var run = reloaded.AgentRuns.Single(r => r.IssueId == issueId);
-        Assert.That(run.Status == AgentRunStatus.Completed,
-            $"Expected run to complete gracefully, but status was {run.Status}");
-        Assert.That(string.Equals(run.Outcome, "blocked", StringComparison.OrdinalIgnoreCase),
-            $"Expected run outcome 'blocked' on cancellation but was '{run.Outcome}'");
+        Assert.That(run.Status == AgentRunStatus.Blocked,
+            $"Expected run status Blocked for graceful cancellation, but status was {run.Status}");
+        Assert.That(run.Summary.Contains("Cancelled by user request.", StringComparison.OrdinalIgnoreCase),
+            $"Expected persisted run summary to mention graceful cancellation but was: {run.Summary}");
     }
 
     private static Task QueueIssues_SkipsAlreadyDoneIssue()
