@@ -39,6 +39,7 @@ public class CopilotSdkAgentClient : IAgentClient
                 case AssistantMessageDeltaEvent delta when !string.IsNullOrWhiteSpace(delta.Data?.DeltaContent):
                     sawDelta = true;
                     stdout.Append(delta.Data?.DeltaContent);
+                    request.OnToken?.Invoke(delta.Data!.DeltaContent);
                     break;
                 case AssistantMessageEvent message when !sawDelta && !string.IsNullOrWhiteSpace(message.Data?.Content):
                     stdout.Append(message.Data?.Content);

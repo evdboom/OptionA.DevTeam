@@ -51,6 +51,7 @@ internal sealed partial class ShellService(
     private Task<LoopExecutionReport>? _loopTask;
     private CancellationTokenSource? _loopCts;
     private string? _lastContextKey;
+    private volatile string? _connectedSlug;
     private bool _keepAwakeEnabled;
 
     // ── Public surface ─────────────────────────────────────────────────────────
@@ -233,14 +234,7 @@ internal sealed partial class ShellService(
                 AddEvent("✎", state.Phase == WorkflowPhase.ArchitectPlanning
                     ? "Captured architect plan feedback. Revising..."
                     : "Captured planning feedback. Revising...", "cyan");
-                var bgLogger = MakeBackgroundLogger(state);
-                var report = await RunLoopCoreAsync(state, ParseOptions(["--max-iterations", "2"]), CancellationToken.None, bgLogger);
-                AddEvent("✓", $"Revision complete ({report.IterationsExecuted} iteration(s)). Final state: {Markup.Escape(report.FinalState)}", GreenStyle);
-                AddHint(state.Phase == WorkflowPhase.ArchitectPlanning
-                    ? "Type [bold]approve[/] to begin execution, or use [dim]/plan[/] to review."
-                    : "Type [bold]approve[/] to proceed, or use [dim]/plan[/] to review.");
-                _lastContextKey = null;
-                RefreshContext(_store.Load());
+                StartLoopInBackground(state, ParseOptions(["--max-iterations", "2"]));
                 return;
             }
         }
@@ -818,6 +812,57 @@ internal sealed partial class ShellService(
                     break;
                 }
 
+                case "connect-to":
+                {
+                    if (!IsLoopRunning)
+                    {
+                        AddHint("No loop is running. Start one first with [cyan]/run[/].");
+                        break;
+                    }
+                    var target = GetPositionalValue(options);
+                    if (string.IsNullOrWhiteSpace(target))
+                    {
+                        // Auto-pick if only one agent is running
+                        var current = _store.Load();
+                        var activeRoles = current.AgentRuns
+                            .Where(r => r.Status == AgentRunStatus.Running)
+                            .Select(r => r.RoleSlug)
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+                        if (activeRoles.Count == 1)
+                        {
+                            target = activeRoles[0];
+                        }
+                        else if (activeRoles.Count == 0)
+                        {
+                            AddHint("No agents are currently active.");
+                            break;
+                        }
+                        else
+                        {
+                            var slugList = string.Join(", ", activeRoles.Select(s => $"[cyan]{Markup.Escape(s)}[/]"));
+                            AddHint($"Multiple agents running: {slugList}. Specify one: [cyan]/connect-to <slug>[/]");
+                            break;
+                        }
+                    }
+                    _connectedSlug = target;
+                    AddEvent("📡", $"Connected to [cyan]{Markup.Escape(target)}[/] — streaming output will appear below.");
+                    break;
+                }
+
+                case "disconnect":
+                {
+                    if (_connectedSlug is null)
+                    {
+                        AddHint("Not currently connected to any agent stream.");
+                        break;
+                    }
+                    var was = _connectedSlug;
+                    _connectedSlug = null;
+                    AddEvent("📴", $"Disconnected from [cyan]{Markup.Escape(was)}[/].");
+                    break;
+                }
+
                 case "stop":
                 {
                     if (!IsLoopRunning)
@@ -857,6 +902,7 @@ internal sealed partial class ShellService(
                     _loopCts?.Dispose();
                     _loopCts = null;
                     _lastContextKey = null;
+                    _connectedSlug = null;
                     RefreshContext(_store.Load());
                     break;
                 }
@@ -1043,6 +1089,7 @@ internal sealed partial class ShellService(
             _loopCts?.Dispose();
             _loopCts = null;
             _lastContextKey = null;
+            _connectedSlug = null;
 
             TryLoadState(out var finalState);
             if (finalState is not null) RefreshContext(finalState);
@@ -1077,7 +1124,8 @@ internal sealed partial class ShellService(
             AgentTimeout = TimeSpan.FromSeconds(timeoutSeconds),
             HeartbeatInterval = TimeSpan.FromSeconds(5),
             Verbosity = verbosity,
-            ProgressReporter = ReportLoopProgress
+            ProgressReporter = ReportLoopProgress,
+            TokenReporter = MakeTokenReporter()
         };
 
         var report = await _loopExecutor.RunAsync(state, executionOptions, log, cancellationToken);
@@ -1091,6 +1139,37 @@ internal sealed partial class ShellService(
             AddLoopLog(msg);
             if (stateForLayout is not null) RefreshLayoutSnapshot(stateForLayout);
         };
+
+    /// <summary>
+    /// Returns a token reporter that buffers streaming tokens per role slug and flushes
+    /// complete lines to the progress panel — but only for the currently connected slug.
+    /// Use [cyan]/connect-to &lt;slug&gt;[/] to attach and [cyan]/disconnect[/] to detach.
+    /// </summary>
+    private Action<string, string> MakeTokenReporter()
+    {
+        var lineBuffers = new System.Collections.Concurrent.ConcurrentDictionary<string, System.Text.StringBuilder>(StringComparer.OrdinalIgnoreCase);
+        return (roleSlug, token) =>
+        {
+            if (!string.Equals(_connectedSlug, roleSlug, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var buf = lineBuffers.GetOrAdd(roleSlug, _ => new System.Text.StringBuilder());
+            lock (buf)
+            {
+                buf.Append(token);
+                var text = buf.ToString();
+                var lastNl = text.LastIndexOf('\n');
+                if (lastNl < 0) return;
+
+                var lines = text[..lastNl].Split('\n');
+                buf.Clear();
+                buf.Append(text[(lastNl + 1)..]);
+
+                foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
+                    AddLoopLog($"  [{roleSlug}] {line.TrimEnd()}");
+            }
+        };
+    }
 
     // ── Plan workflow ──────────────────────────────────────────────────────────
 

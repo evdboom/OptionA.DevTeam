@@ -152,11 +152,14 @@ public static class AgentPromptBuilder
         Recent decisions:
         {BuildDecisionBlock(state)}
 
+        Planning feedback to apply:
+        {BuildPlanningFeedbackBlock(state)}
+
         Valid role slugs for ISSUES:
         {availableRoles}
         {BuildFileBoundaryBlock(issue.RoleSlug)}
         Task:
-        Work on the current issue using the available tools, active mode guardrails, and role guidance. Keep the scope narrow. If you discover follow-on work, a blocker, a prerequisite, or a natural decomposition that should not be absorbed into the current issue, use the workspace MCP tools when available and also summarize the outcome under ISSUES for compatibility. Avoid manually creating obvious next-stage architect, developer, or tester follow-ups for the same issue family when the runtime can chain those automatically. If you are blocked by missing information, say so clearly. Do not try to ask the user interactively. Instead, put every needed user question in the QUESTIONS section and use the workspace MCP tools when available to persist them immediately.
+        Work on the current issue using the available tools, active mode guardrails, and role guidance. Keep the scope narrow. If "Planning feedback to apply" is non-empty, treat it as an explicit revision request and address it directly in this run rather than redoing a generic plan. If you discover follow-on work, a blocker, a prerequisite, or a natural decomposition that should not be absorbed into the current issue, use the workspace MCP tools when available and also summarize the outcome under ISSUES for compatibility. Avoid manually creating obvious next-stage architect, developer, or tester follow-ups for the same issue family when the runtime can chain those automatically. If you are blocked by missing information, say so clearly. Do not try to ask the user interactively. Instead, put every needed user question in the QUESTIONS section and use the workspace MCP tools when available to persist them immediately.
         {BuildBrownfieldGuidanceBlock(state)}
 
         Reply in exactly this shape:
@@ -435,6 +438,26 @@ public static class AgentPromptBuilder
         return string.Join(
             "\n",
             recentDecisions.Select(item => $"- #{item.Id} [{item.Source}] {item.Title}: {item.Detail}"));
+    }
+
+    private static string BuildPlanningFeedbackBlock(WorkspaceState state)
+    {
+        var planningFeedback = state.Decisions
+            .Where(item =>
+                string.Equals(item.Source, "plan-feedback", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.Source, "architect-plan-feedback", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => item.CreatedAtUtc)
+            .Take(5)
+            .ToList();
+
+        if (planningFeedback.Count == 0)
+        {
+            return NoneLiteral;
+        }
+
+        return string.Join(
+            "\n",
+            planningFeedback.Select(item => $"- [{item.Source}] {item.Detail}"));
     }
 
     private static string ParseSection(

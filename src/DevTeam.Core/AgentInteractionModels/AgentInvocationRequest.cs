@@ -14,4 +14,10 @@ public sealed class AgentInvocationRequest
     public string WorkspaceMcpServerName { get; init; } = "devteam-workspace";
     public string? ToolHostPath { get; init; }
     public IReadOnlyList<McpServerDefinition> ExternalMcpServers { get; init; } = [];
+
+    /// <summary>
+    /// Called on each streaming token as the agent produces output.
+    /// The callback receives raw text fragments; may be called from any thread.
+    /// </summary>
+    public Action<string>? OnToken { get; init; }
 }

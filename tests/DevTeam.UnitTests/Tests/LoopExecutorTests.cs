@@ -9,6 +9,8 @@ internal static class LoopExecutorTests
         new("SpawnIssueAsync_ThrowsForUnknownIssue", SpawnIssueAsync_ThrowsForUnknownIssue),
         new("SpawnIssueAsync_ReturnsOutcomeSummary", SpawnIssueAsync_ReturnsOutcomeSummary),
         new("QueueIssues_SkipsAlreadyDoneIssue", QueueIssues_SkipsAlreadyDoneIssue),
+        new("TokenReporter_IsInvokedWithRoleAndTokens_DuringRunAsync", TokenReporter_IsInvokedWithRoleAndTokens_DuringRunAsync),
+        new("TokenReporter_ReceivesAllTokens_AcrossMultipleWords", TokenReporter_ReceivesAllTokens_AcrossMultipleWords),
     ];
 
     private static WorkspaceState BuildStateWithIssue(WorkspaceStore store, string title, string role = "developer")
@@ -144,5 +146,79 @@ internal static class LoopExecutorTests
         Assert.That(result.QueuedRuns.Count == 0, $"Expected 0 queued runs (issue already Done) but got {result.QueuedRuns.Count}");
         Assert.That(issue.Status == ItemStatus.Done, $"Expected issue to remain Done but was {issue.Status}");
         return Task.CompletedTask;
+    }
+
+    private static async Task TokenReporter_IsInvokedWithRoleAndTokens_DuringRunAsync()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Stream some output", "developer");
+        var issueId = state.Issues[^1].Id;
+        state.Phase = WorkflowPhase.Execution;
+        state.ExecutionSelection = new ExecutionSelectionState
+        {
+            SelectedIssueIds = [issueId],
+            Rationale = "test"
+        };
+        var agentOutput = "OUTCOME: completed\nSUMMARY:\nDone streaming.";
+        var factory = new FuncAgentClientFactory(_ => new FakeStreamingAgentClient(agentOutput));
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var reportedRoles = new List<string>();
+        var reportedTokens = new List<string>();
+        var options = new LoopExecutionOptions
+        {
+            MaxIterations = 1,
+            AgentTimeout = TimeSpan.FromSeconds(30),
+            TokenReporter = (role, token) =>
+            {
+                reportedRoles.Add(role);
+                reportedTokens.Add(token);
+            }
+        };
+
+        await executor.RunAsync(state, options);
+
+        Assert.That(reportedTokens.Count > 0, "Expected TokenReporter to be called at least once");
+        Assert.That(reportedRoles.All(r => string.Equals(r, "developer", StringComparison.OrdinalIgnoreCase)),
+            $"Expected all tokens attributed to 'developer' but got: {string.Join(", ", reportedRoles.Distinct())}");
+        var combined = string.Concat(reportedTokens).Trim();
+        Assert.That(combined.Contains("OUTCOME", StringComparison.Ordinal),
+            $"Expected streamed tokens to contain 'OUTCOME' but combined was: {combined}");
+    }
+
+    private static async Task TokenReporter_ReceivesAllTokens_AcrossMultipleWords()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Multi-word streaming", "tester");
+        var issueId = state.Issues[^1].Id;
+        state.Phase = WorkflowPhase.Execution;
+        state.ExecutionSelection = new ExecutionSelectionState
+        {
+            SelectedIssueIds = [issueId],
+            Rationale = "test"
+        };
+        const string agentOutput = "OUTCOME: completed\nSUMMARY:\nWord1 Word2 Word3 Word4 Word5.";
+        var factory = new FuncAgentClientFactory(_ => new FakeStreamingAgentClient(agentOutput));
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var allTokens = new System.Text.StringBuilder();
+        var options = new LoopExecutionOptions
+        {
+            MaxIterations = 1,
+            AgentTimeout = TimeSpan.FromSeconds(30),
+            TokenReporter = (_, token) => allTokens.Append(token)
+        };
+
+        await executor.RunAsync(state, options);
+
+        var combined = allTokens.ToString().Trim();
+        // Each word in the output becomes a separate token via FakeStreamingAgentClient
+        foreach (var word in new[] { "OUTCOME", "completed", "Word1", "Word5" })
+        {
+            Assert.That(combined.Contains(word, StringComparison.Ordinal),
+                $"Expected streamed output to contain '{word}' but combined was: {combined}");
+        }
     }
 }

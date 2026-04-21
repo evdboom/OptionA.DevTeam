@@ -171,6 +171,31 @@ public sealed class FuncAgentClientFactory(Func<string, IAgentClient> factory) :
     public IAgentClient Create(string backend) => factory(backend);
 }
 
+/// <summary>
+/// Agent client that fires <see cref="AgentInvocationRequest.OnToken"/> for each word
+/// in the output before returning the full result — simulates streaming output.
+/// </summary>
+public sealed class FakeStreamingAgentClient(string output) : IAgentClient
+{
+    public string Name => "fake-streaming-agent";
+
+    public Task<AgentInvocationResult> InvokeAsync(AgentInvocationRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.OnToken is not null)
+        {
+            foreach (var word in output.Split(' '))
+                request.OnToken(word + " ");
+        }
+
+        return Task.FromResult(new AgentInvocationResult
+        {
+            BackendName = Name,
+            ExitCode = 0,
+            StdOut = output
+        });
+    }
+}
+
 public static class TestFileSystem
 {
     public static void DeleteDirectoryWithRetries(string path)

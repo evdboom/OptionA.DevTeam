@@ -56,6 +56,8 @@ internal sealed partial class ShellService
         sb.AppendLine("  [cyan]/preview[/] [[--max-subagents N]]  [dim]Preview the next batch without spending credits[/]");
         sb.AppendLine("  [cyan]/run[/] [[--provider NAME]] [[--max-iterations N]] [[--max-subagents N]] [[--timeout-seconds N]] [[--dry-run]]  [dim]Start the loop in the background[/]");
         sb.AppendLine("  [cyan]/stop[/]                 [dim]Cancel the running loop[/]");
+        sb.AppendLine("  [cyan]/connect-to[/] [[slug]]  [dim]Stream live output from a running agent (omit slug to auto-pick when only one is active)[/]");
+        sb.AppendLine("  [cyan]/disconnect[/]           [dim]Stop streaming agent output[/]");
         sb.AppendLine("  [cyan]/wait[/]                 [dim]Re-attach to the running loop and wait for it to finish[/]");
         sb.AppendLine("  [cyan]/feedback[/] <text>      [dim]Add planning feedback[/]");
         sb.AppendLine("  [cyan]/approve[/] [[note]]     [dim]Approve the current plan and advance to the next phase[/]");
