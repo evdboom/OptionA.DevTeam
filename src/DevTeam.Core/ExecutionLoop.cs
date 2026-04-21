@@ -696,24 +696,7 @@ public class LoopExecutor(
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                var cancelledResponse = new AgentInvocationResult
-                {
-                    BackendName = "cancelled",
-                    SessionId = sessionId,
-                    ExitCode = 0,
-                    StdErr = ""
-                };
-                return new AgentExecutionResult(
-                    queuedRun,
-                    cancelledResponse,
-                    "blocked",
-                    "Cancelled by user request.",
-                    "",
-                    "",
-                    [],
-                    [],
-                    [],
-                    []);
+                throw;
             }
 
             var timeoutResponse = new AgentInvocationResult
