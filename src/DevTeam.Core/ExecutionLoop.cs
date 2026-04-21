@@ -692,9 +692,31 @@ public class LoopExecutor(
             var parsed = AgentPromptBuilder.ParseResponse(response);
             return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Approach, parsed.Rationale, parsed.Issues, parsed.SkillsUsed, parsed.ToolsUsed, parsed.Questions);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            var response = new AgentInvocationResult
+            if (cancellationToken.IsCancellationRequested)
+            {
+                var cancelledResponse = new AgentInvocationResult
+                {
+                    BackendName = "cancelled",
+                    SessionId = sessionId,
+                    ExitCode = 0,
+                    StdErr = ""
+                };
+                return new AgentExecutionResult(
+                    queuedRun,
+                    cancelledResponse,
+                    "blocked",
+                    "Cancelled by user request.",
+                    "",
+                    "",
+                    [],
+                    [],
+                    [],
+                    []);
+            }
+
+            var timeoutResponse = new AgentInvocationResult
             {
                 BackendName = "timeout",
                 SessionId = sessionId,
@@ -703,9 +725,9 @@ public class LoopExecutor(
             };
             return new AgentExecutionResult(
                 queuedRun,
-                response,
+                timeoutResponse,
                 "failed",
-                response.StdErr,
+                timeoutResponse.StdErr,
                 "",
                 "",
                 [],

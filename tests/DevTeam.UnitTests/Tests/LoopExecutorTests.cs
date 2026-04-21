@@ -8,6 +8,7 @@ internal static class LoopExecutorTests
         new("SpawnIssueAsync_PersistsChangedPathsToArtifacts", SpawnIssueAsync_PersistsChangedPathsToArtifacts),
         new("SpawnIssueAsync_ThrowsForUnknownIssue", SpawnIssueAsync_ThrowsForUnknownIssue),
         new("SpawnIssueAsync_ReturnsOutcomeSummary", SpawnIssueAsync_ReturnsOutcomeSummary),
+        new("SpawnIssueAsync_CancelledToken_IsGracefulBlocked", SpawnIssueAsync_CancelledToken_IsGracefulBlocked),
         new("QueueIssues_SkipsAlreadyDoneIssue", QueueIssues_SkipsAlreadyDoneIssue),
         new("TokenReporter_IsInvokedWithRoleAndTokens_DuringRunAsync", TokenReporter_IsInvokedWithRoleAndTokens_DuringRunAsync),
         new("TokenReporter_ReceivesAllTokens_AcrossMultipleWords", TokenReporter_ReceivesAllTokens_AcrossMultipleWords),
@@ -115,6 +116,36 @@ internal static class LoopExecutorTests
 
         Assert.That(result.Contains("completed", StringComparison.OrdinalIgnoreCase), $"Expected 'completed' in result but got: {result}");
         Assert.That(result.Contains(issueId.ToString(), StringComparison.Ordinal), $"Expected issue ID in result but got: {result}");
+    }
+
+    private static async Task SpawnIssueAsync_CancelledToken_IsGracefulBlocked()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Long-running task", "developer");
+        var issueId = state.Issues[^1].Id;
+
+        // Delay long enough that the test can cancel the token while the agent call is in-flight.
+        var factory = new FuncAgentClientFactory(_ => new FakeStaggeredAgentClient("OUTCOME: completed\nSUMMARY:\nDone.", TimeSpan.FromSeconds(5)));
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        using var cts = new CancellationTokenSource();
+        var task = executor.SpawnIssueAsync(issueId, null, "fake", TimeSpan.FromSeconds(30), cts.Token);
+        cts.CancelAfter(TimeSpan.FromMilliseconds(50));
+
+        var result = await task;
+
+        Assert.That(result.Contains("outcome: blocked", StringComparison.OrdinalIgnoreCase),
+            $"Expected blocked outcome on user cancellation but got: {result}");
+        Assert.That(result.Contains("Cancelled by user request.", StringComparison.OrdinalIgnoreCase),
+            $"Expected graceful cancellation summary but got: {result}");
+
+        var reloaded = store.Load();
+        var run = reloaded.AgentRuns.Single(r => r.IssueId == issueId);
+        Assert.That(run.Status == AgentRunStatus.Completed,
+            $"Expected run to complete gracefully, but status was {run.Status}");
+        Assert.That(string.Equals(run.Outcome, "blocked", StringComparison.OrdinalIgnoreCase),
+            $"Expected run outcome 'blocked' on cancellation but was '{run.Outcome}'");
     }
 
     private static Task QueueIssues_SkipsAlreadyDoneIssue()
