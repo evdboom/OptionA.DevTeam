@@ -23,6 +23,8 @@ internal static class ShellPanelRenderTests
         new("StripMarkup_EscapedBrackets_Preserved", StripMarkup_EscapedBrackets_Preserved),
         new("ProgressPanel_MalformedMarkup_DoesNotThrow", ProgressPanel_MalformedMarkup_DoesNotThrow),
         new("PanelHeader_WithBrackets_EscapedSafely", PanelHeader_WithBrackets_EscapedSafely),
+        new("ArchitectSummary_SpectreMarkup_RendersStyled", ArchitectSummary_SpectreMarkup_RendersStyled),
+        new("ArchitectSummary_UnclosedTag_DoesNotThrow", ArchitectSummary_UnclosedTag_DoesNotThrow),
     ];
 
     private static TestConsole CreateConsole()
@@ -172,6 +174,49 @@ internal static class ShellPanelRenderTests
 
         // Should render without throwing InvalidOperationException
         Assert.That(output.Length > 0, "Expected panel to render with bracketed title");
+        return Task.CompletedTask;
+    }
+
+    private static Task ArchitectSummary_SpectreMarkup_RendersStyled()
+    {
+        // TestConsole keeps markup tags in textual output. We validate that the payload is
+        // passed through as markup (not escaped), which would otherwise double brackets.
+        var console = CreateConsole();
+        var summaryMarkup =
+            "[bold]Execution issues created (2):[/]\n" +
+            "  [dim]#7[/] [[cyan]developer[/]] Scaffold project\n" +
+            "  [dim]#8[/] [[cyan]tester[/]] Write tests\n";
+
+        var message = new ShellMessage(ShellMessageKind.Panel, summaryMarkup, Title: "architect summary");
+        console.Write(ShellPanelBuilder.RenderMessage(message));
+        var output = console.Output;
+
+        // Escaped markup would show doubled brackets like [[dim]] or [[bold]].
+        Assert.That(!output.Contains("[[dim]]", StringComparison.Ordinal),
+            $"Expected [dim] markup to pass through without escaping. Output: {output}");
+        Assert.That(!output.Contains("[[bold]]", StringComparison.Ordinal),
+            $"Expected [bold] markup to pass through without escaping. Output: {output}");
+        Assert.That(output.Contains("Scaffold project", StringComparison.Ordinal),
+            $"Expected issue title in output. Got: {output}");
+        Assert.That(output.Contains("#7", StringComparison.Ordinal),
+            $"Expected issue number in output. Got: {output}");
+        return Task.CompletedTask;
+    }
+
+    private static Task ArchitectSummary_UnclosedTag_DoesNotThrow()
+    {
+        // If architect output contains a genuinely unclosed tag, CreateMarkupSafe should catch
+        // and fall back to escaping the whole panel rather than crashing.
+        var console = CreateConsole();
+        var badMarkup = "Issues created:\n  [dim]#7 developer Scaffold project (missing closing tag\n";
+        var message = new ShellMessage(ShellMessageKind.Panel, badMarkup, Title: "architect summary");
+
+        var renderable = ShellPanelBuilder.RenderMessage(message);
+        console.Write(renderable);
+        var output = console.Output;
+
+        Assert.That(output.Contains("Scaffold project", StringComparison.Ordinal),
+            $"Expected content to still appear after safe fallback. Got: {output}");
         return Task.CompletedTask;
     }
 }

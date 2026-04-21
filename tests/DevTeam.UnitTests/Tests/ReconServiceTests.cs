@@ -25,6 +25,8 @@ internal static class ReconServiceTests
         new("ParseResponse_ReadsBrownfieldApproachAndRationale", ParseResponse_ReadsBrownfieldApproachAndRationale),
         new("WorkspaceStore_WritesCodebaseContextFile_WhenPresent", WorkspaceStore_WritesCodebaseContextFile_WhenPresent),
         new("WorkspaceStore_DoesNotWriteContextFile_WhenEmpty", WorkspaceStore_DoesNotWriteContextFile_WhenEmpty),
+            new("BuildPrompt_IncludesArchitectPlanningFeedback_WhenPresent", BuildPrompt_IncludesArchitectPlanningFeedback_WhenPresent),
+            new("BuildPrompt_KeepsArchitectPlanningFeedback_WhenRecentDecisionWindowIsCrowded", BuildPrompt_KeepsArchitectPlanningFeedback_WhenRecentDecisionWindowIsCrowded),
     ];
 
     private static Task BuildReconPrompt_IncludesGoal_WhenProvided()
@@ -195,6 +197,76 @@ internal static class ReconServiceTests
         Assert.Contains("RATIONALE:", prompt);
         return Task.CompletedTask;
     }
+
+        private static Task BuildPrompt_IncludesArchitectPlanningFeedback_WhenPresent()
+        {
+            var state = new WorkspaceState
+            {
+                RepoRoot = RepoRoot,
+                Phase = WorkflowPhase.ArchitectPlanning,
+                Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
+            };
+            state.Decisions.Add(new DecisionRecord
+            {
+                Id = 1,
+                Source = "architect-plan-feedback",
+                Title = "Architect plan feedback from user",
+                Detail = "Remove issue #3 because it belongs to another repository.",
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            });
+
+            var issue = new IssueItem { Id = 2, Title = "Design the technical approach", RoleSlug = "architect", Status = ItemStatus.Open };
+            state.Issues.Add(issue);
+
+            var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+
+            Assert.Contains("Planning feedback to apply:", prompt);
+            Assert.Contains("Remove issue #3 because it belongs to another repository.", prompt);
+            return Task.CompletedTask;
+        }
+
+        private static Task BuildPrompt_KeepsArchitectPlanningFeedback_WhenRecentDecisionWindowIsCrowded()
+        {
+            var now = DateTimeOffset.UtcNow;
+            var state = new WorkspaceState
+            {
+                RepoRoot = RepoRoot,
+                Phase = WorkflowPhase.ArchitectPlanning,
+                Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
+            };
+
+            // Older, but still relevant user feedback.
+            state.Decisions.Add(new DecisionRecord
+            {
+                Id = 1,
+                Source = "architect-plan-feedback",
+                Title = "Architect plan feedback from user",
+                Detail = "Drop the analyst task; it is out of scope for this repo.",
+                CreatedAtUtc = now.AddMinutes(-10)
+            });
+
+            // Newer non-feedback decisions that can crowd out the generic recent-decision window.
+            for (var i = 0; i < 6; i++)
+            {
+                state.Decisions.Add(new DecisionRecord
+                {
+                    Id = 2 + i,
+                    Source = "execution",
+                    Title = $"Execution note {i + 1}",
+                    Detail = "Background run detail.",
+                    CreatedAtUtc = now.AddMinutes(-i)
+                });
+            }
+
+            var issue = new IssueItem { Id = 2, Title = "Design the technical approach", RoleSlug = "architect", Status = ItemStatus.Open };
+            state.Issues.Add(issue);
+
+            var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+
+            Assert.Contains("Planning feedback to apply:", prompt);
+            Assert.Contains("Drop the analyst task; it is out of scope for this repo.", prompt);
+            return Task.CompletedTask;
+        }
 
     private static Task ParseResponse_ReadsBrownfieldApproachAndRationale()
     {
