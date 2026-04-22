@@ -27,6 +27,7 @@ Skill folder names use lowercase and hyphens.
 | `scout` | Do a read-only reconnaissance pass and map affected files. |
 | `hygiene` | Enforce maintainability rules and file-boundary hygiene. |
 | `resolve-conflict` | Resolve git merge conflicts safely and completely. |
+| `refine` | Turn ambiguous issues into exhaustive, executable scoped work packets. |
 
 ## Typical Flow
 

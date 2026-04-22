@@ -391,14 +391,18 @@ public sealed class WorkspaceMcpServer(
         {
             tools.Add(BuildToolDefinition(
                 "spawn_agent",
-                "Execute a single ready issue as a child agent session and return the result synchronously. Use this to run a specific issue directly within the current session rather than waiting for the next loop iteration.",
+                "Execute a single ready issue as a child agent session and return the result synchronously. Use this to run a specific issue directly within the current session rather than waiting for the next loop iteration. Optional contextHint is supplemental caller context only: use it to pass concise context not yet captured in the issue, not to replace issue/decsion MCP context or inject a broad custom prompt.",
                 new JsonObject
                 {
                     ["type"] = "object",
                     ["properties"] = new JsonObject
                     {
                         ["issueId"] = IntegerSchema(),
-                        ["contextHint"] = StringSchema()
+                        ["contextHint"] = new JsonObject
+                        {
+                            ["type"] = "string",
+                            ["description"] = "Optional supplemental caller context. Keep it short and focused. It is a convenience hint for missing context, not a replacement for get_issue/get_decisions or a way to bypass scoped execution."
+                        }
                     },
                     ["required"] = new JsonArray("issueId"),
                     ["additionalProperties"] = false

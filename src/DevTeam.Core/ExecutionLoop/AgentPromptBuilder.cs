@@ -25,6 +25,8 @@ public static class AgentPromptBuilder
     private const string SkillDebug = "debug";
     private const string SkillReview = "review";
     private const string SkillHygiene = "hygiene";
+    private const string SkillBacklogManager = "backlog-manager";
+    private const string SkillRefine = "refine";
     private const string HeaderOutcome = "OUTCOME:";
     private const string HeaderSummary = "SUMMARY:";
     private const string HeaderApproach = "APPROACH:";
@@ -38,17 +40,17 @@ public static class AgentPromptBuilder
 
     private static readonly Dictionary<string, string[]> RoleSkillMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        [RoleOrchestrator] = [SkillBrainstorm, SkillPlan],
+        [RoleOrchestrator] = [SkillBrainstorm, SkillPlan, SkillBacklogManager],
         [RolePlanner] = [SkillBrainstorm, SkillPlan],
-        [RoleArchitect] = [SkillBrainstorm, SkillPlan],
-        [RoleNavigator] = [SkillScout],
+        [RoleArchitect] = [SkillBrainstorm, SkillPlan, SkillRefine],
+        [RoleNavigator] = [SkillScout, SkillRefine],
         [RoleDeveloper] = [SkillPlan, SkillTdd, SkillVerify],
         ["backend-developer"] = [SkillPlan, SkillTdd, SkillVerify],
         ["frontend-developer"] = [SkillPlan, SkillTdd, SkillVerify],
         ["fullstack-developer"] = [SkillPlan, SkillTdd, SkillVerify],
         ["tester"] = [SkillTdd, SkillDebug, SkillVerify],
-        ["reviewer"] = [SkillReview, SkillVerify],
-        ["auditor"] = [SkillScout, SkillReview, SkillVerify, SkillHygiene],
+        ["reviewer"] = [SkillReview, SkillVerify, SkillRefine],
+        ["auditor"] = [SkillScout, SkillReview, SkillVerify, SkillHygiene, SkillRefine],
         ["ux"] = [SkillVerify],
         ["user"] = [SkillVerify],
         ["game-designer"] = [SkillBrainstorm, "review", SkillVerify],
@@ -58,6 +60,16 @@ public static class AgentPromptBuilder
     private static readonly HashSet<string> DesignOnlyRoles = new(StringComparer.OrdinalIgnoreCase)
     {
         RolePlanner, RoleOrchestrator, RoleArchitect, RoleNavigator, "analyst", "security", "reviewer", "auditor"
+    };
+
+    private static readonly HashSet<string> WideResearchRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        RolePlanner, RoleOrchestrator, RoleArchitect, RoleNavigator, "analyst", "security", "reviewer", "auditor"
+    };
+
+    private static readonly HashSet<string> ScopedExecutionRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        RoleDeveloper, "backend-developer", "frontend-developer", "fullstack-developer", "tester", "devops", "docs", "refactorer"
     };
 
     private static string BuildFileBoundaryBlock(string roleSlug)
@@ -76,7 +88,7 @@ public static class AgentPromptBuilder
         """;
     }
 
-    public static string BuildPrompt(WorkspaceState state, IssueItem issue)
+    public static string BuildPrompt(WorkspaceState state, IssueItem issue, string? contextHint = null)
     {
         var role = state.Roles.FirstOrDefault(item => item.Slug == issue.RoleSlug);
         var activeMode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase))
@@ -117,6 +129,8 @@ public static class AgentPromptBuilder
         - Detail: {issue.Detail}
         - Role: {issue.RoleSlug}
         - Area: {(string.IsNullOrWhiteSpace(issue.Area) ? NoneLiteral : issue.Area)}
+        {BuildExecutionScopeBlock(issue.RoleSlug)}
+        {BuildContextHintBlock(contextHint)}
 
         Role baseline:
         {roleCard}
@@ -246,6 +260,7 @@ public static class AgentPromptBuilder
 
         Valid role slugs for ISSUES:
         {availableRoles}
+        {BuildExecutionScopeBlock(roleSlug)}
         {BuildFileBoundaryBlock(roleSlug)}
         User message:
         {userMessage}
@@ -448,11 +463,65 @@ public static class AgentPromptBuilder
             slugs.Add(SkillPlan);
         }
 
+        if (ContainsAny(text, "refine", "refinement", "scope", "filesinscope", "linkeddecision", "triage", "what why how"))
+        {
+            slugs.Add(SkillRefine);
+        }
+
         return slugs.ToList();
     }
 
     private static bool ContainsAny(string source, params string[] needles) =>
         needles.Any(needle => source.Contains(needle, StringComparison.OrdinalIgnoreCase));
+
+    private static string BuildExecutionScopeBlock(string roleSlug)
+    {
+        if (ScopedExecutionRoles.Contains(roleSlug))
+        {
+            return """
+
+        EXECUTION SCOPE (scoped role):
+        - You are a scoped execution role. Start from the current issue only.
+        - Before implementation, fetch scoped context via MCP:
+          1) call get_issue(issueId)
+          2) call get_decisions(linkedDecisionIds) from that issue
+        - Stay focused on FilesInScope when provided. Expand only for direct dependencies discovered during work.
+        - If scope is insufficient or ambiguous, create a refinement issue instead of reinterpreting the goal.
+        - Refinement issues must be exhaustive: include what, why, how, suggested FilesInScope, and linked decision IDs.
+        """;
+        }
+
+        if (WideResearchRoles.Contains(roleSlug))
+        {
+            return """
+
+        EXECUTION SCOPE (wide research role):
+        - You may read broadly across the repository to map architecture, dependencies, and risks.
+        - Do not perform broad implementation; produce scoped follow-up issues for execution roles.
+        - Issues you create must be exhaustive and testable: include what, why, how, acceptance criteria, FilesInScope, and linked decisions.
+        """;
+        }
+
+        return "";
+    }
+
+    private static string BuildContextHintBlock(string? contextHint)
+    {
+        if (string.IsNullOrWhiteSpace(contextHint))
+        {
+            return "";
+        }
+
+        return $"""
+
+        Supplemental caller context:
+        {contextHint.Trim()}
+
+        Treat this as a convenience hint from the caller, not as authoritative scope.
+        The issue record and linked decisions remain the source of truth.
+        Use this to avoid re-discovering context that is not yet captured in the issue, but do not let it override decisions or broaden scope casually.
+        """;
+    }
 
     private static string BuildDesignRoleTestabilityBlock(string roleSlug)
     {

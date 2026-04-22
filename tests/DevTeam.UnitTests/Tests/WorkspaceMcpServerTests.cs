@@ -10,6 +10,7 @@ internal static class WorkspaceMcpServerTests
         new("ToolsList_ExcludesSpawnAgent_WhenNoRunner", ToolsList_ExcludesSpawnAgent_WhenNoRunner),
         new("ToolsList_IncludesSpawnAgent_WhenRunnerProvided", ToolsList_IncludesSpawnAgent_WhenRunnerProvided),
         new("SpawnAgentTool_InvokesRunner_WithCorrectIssueId", SpawnAgentTool_InvokesRunner_WithCorrectIssueId),
+        new("SpawnAgentTool_ForwardsContextHint", SpawnAgentTool_ForwardsContextHint),
         new("Initialize_RespondsWithServerInfo", Initialize_RespondsWithServerInfo),
         new("ToolsList_IncludesGetIssueAndGetDecisions", ToolsList_IncludesGetIssueAndGetDecisions),
         new("GetIssueTool_ReturnsIssueWithRefinementFields", GetIssueTool_ReturnsIssueWithRefinementFields),
@@ -123,6 +124,34 @@ internal static class WorkspaceMcpServerTests
         });
 
         Assert.That(capturedIssueId == 42, $"Expected runner called with issueId=42 but got {capturedIssueId}");
+    }
+
+    private static async Task SpawnAgentTool_ForwardsContextHint()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore(TestWorkspace, fs);
+        store.Initialize(TestRepoRoot, 100, 20);
+
+        var capturedIssueId = -1;
+        string? capturedContextHint = null;
+        Func<int, string?, CancellationToken, Task<string>> runner = (issueId, contextHint, _) =>
+        {
+            capturedIssueId = issueId;
+            capturedContextHint = contextHint;
+            return Task.FromResult($"Issue #{issueId} completed");
+        };
+        var server = new WorkspaceMcpServer(TestWorkspace, runner);
+
+        await SendMcpRequest(server, McpInitialize);
+        await SendMcpRequest(server, McpToolsCall, new
+        {
+            name = "spawn_agent",
+            arguments = new { issueId = 42, contextHint = "Use the release-branch API notes already gathered by orchestrator." }
+        });
+
+        Assert.That(capturedIssueId == 42, $"Expected runner called with issueId=42 but got {capturedIssueId}");
+        Assert.That(string.Equals(capturedContextHint, "Use the release-branch API notes already gathered by orchestrator.", StringComparison.Ordinal),
+            $"Expected contextHint to be forwarded but got: {capturedContextHint}");
     }
 
     private static async Task Initialize_RespondsWithServerInfo()

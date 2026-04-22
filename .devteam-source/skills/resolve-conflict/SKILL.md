@@ -1,6 +1,7 @@
 ---
 name: resolve-conflict
 description: Resolve git merge conflicts safely and completely.
+allowed-tools: [read_file, grep_search, execution_subagent]
 ---
 # Skill: Resolve Merge Conflict
 

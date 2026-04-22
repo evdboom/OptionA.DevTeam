@@ -142,7 +142,7 @@ public class LoopExecutor(
                 pendingRuns.Add(new PendingAgentRun(
                     queuedRun,
                     sessionId,
-                    ExecuteRunAsync(state, options, queuedRun, sessionId, worktreePath, cancellationToken),
+                    ExecuteRunAsync(state, options, queuedRun, sessionId, overrideWorkingDirectory: worktreePath, cancellationToken: cancellationToken),
                     _clock.UtcNow,
                     workingDirectory,
                     gitStatusBeforeRun));
@@ -336,7 +336,7 @@ public class LoopExecutor(
         AgentExecutionResult result;
         try
         {
-            result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, cancellationToken: cancellationToken);
+            result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, contextHint: contextHint, cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -708,11 +708,12 @@ public class LoopExecutor(
         QueuedRunInfo queuedRun,
         string sessionId,
         string? overrideWorkingDirectory = null,
+        string? contextHint = null,
         CancellationToken cancellationToken = default)
     {
         var client = _agentClientFactory.Create(options.Backend);
         var issue = state.Issues.First(item => item.Id == queuedRun.IssueId);
-        var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue, contextHint);
         var workingDirectory = overrideWorkingDirectory ?? state.RepoRoot;
         try
         {
