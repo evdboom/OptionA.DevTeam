@@ -151,7 +151,10 @@ internal static class SpectreShellHost
                 }
             }
         }
-        catch (OperationCanceledException) { /* normal exit via cancellation */ }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            /* normal exit via cancellation */
+        }
     }
 
     /// <summary>Builds the full stacked frame for the current shell state.</summary>
