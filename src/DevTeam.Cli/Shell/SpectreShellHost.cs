@@ -119,14 +119,14 @@ internal static class SpectreShellHost
             {
                 Console.Write("\x1b[?1049l"); // restore original screen
             }
-            
-            try 
-            { 
+
+            try
+            {
                 await consumerTask;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                 /* normal exit via cancellation */ 
+                /* normal exit via cancellation */
             }
         }
     }
