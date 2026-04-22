@@ -136,20 +136,7 @@ internal static class TerminalMouseScroll
 
     private static bool TryAwaitEscapeFollowUp(Func<bool> isKeyAvailable)
     {
-        var spin = new SpinWait();
-        var deadline = Environment.TickCount64 + EscapeSequenceProbeMs;
-
-        while (Environment.TickCount64 <= deadline)
-        {
-            if (isKeyAvailable())
-            {
-                return true;
-            }
-
-            spin.SpinOnce();
-        }
-
-        return false;
+        return SpinWait.SpinUntil(isKeyAvailable, EscapeSequenceProbeMs);
     }
 
     internal static void ClearPendingKeysForTests()
