@@ -10,6 +10,10 @@ public sealed class WorkspaceMcpServer(
     string workspacePath,
     Func<int, string?, CancellationToken, Task<string>>? subAgentRunner = null)
 {
+    private static readonly IEqualityComparer<string> PathComparer = OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
@@ -665,7 +669,7 @@ public sealed class WorkspaceMcpServer(
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path => path.Trim().Replace('\\', '/'))
             .Where(path => !path.StartsWith("../", StringComparison.Ordinal) && !path.StartsWith("/", StringComparison.Ordinal))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(PathComparer)
             .ToList();
     }
 }

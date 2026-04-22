@@ -12,6 +12,9 @@ public class WorkspaceStore
     private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
         ? StringComparison.OrdinalIgnoreCase
         : StringComparison.Ordinal;
+    private static readonly IEqualityComparer<string> PathComparer = OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -137,7 +140,7 @@ public class WorkspaceStore
                 }
 
                 var relativePath = Path.GetRelativePath(repoRoot, fullPath).Replace('\\', '/');
-                if (!normalizedFiles.Contains(relativePath, StringComparer.OrdinalIgnoreCase))
+                if (!normalizedFiles.Contains(relativePath, PathComparer))
                 {
                     normalizedFiles.Add(relativePath);
                 }

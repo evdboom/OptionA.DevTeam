@@ -321,26 +321,39 @@ internal static class WorkspaceMcpServerTests
 
     private static async Task CreateIssueTool_ReturnsError_WhenTitleTooLong()
     {
-        var fs = new InMemoryFileSystem();
-        var store = new WorkspaceStore(TestWorkspace, fs);
-        store.Initialize(TestRepoRoot, 100, 20);
-
-        var server = new WorkspaceMcpServer(TestWorkspace);
-
-        await SendMcpRequest(server, McpInitialize);
-        using var response = await SendMcpRequest(server, McpToolsCall, new
+        var workspacePath = Path.Combine(Path.GetTempPath(), $"devteam-test-{Guid.NewGuid():N}");
+        try
         {
-            name = "create_issue",
-            arguments = new
-            {
-                title = new string('x', 201),
-                detail = "too long title test"
-            }
-        });
+            var store = new WorkspaceStore(workspacePath);
+            store.Initialize(TestRepoRoot, 100, 20);
 
-        var responseText = response.RootElement.ToString();
-        Assert.That(responseText.Contains("maximum length", StringComparison.OrdinalIgnoreCase) ||
-                    responseText.Contains("error", StringComparison.OrdinalIgnoreCase),
-            $"Expected create_issue validation error but got: {responseText}");
+            var server = new WorkspaceMcpServer(workspacePath);
+
+            await SendMcpRequest(server, McpInitialize);
+            using var response = await SendMcpRequest(server, McpToolsCall, new
+            {
+                name = "create_issue",
+                arguments = new
+                {
+                    title = new string('x', 201),
+                    detail = "too long title test"
+                }
+            });
+
+            var error = response.RootElement.GetProperty("error");
+            var code = error.GetProperty("code").GetInt32();
+            var message = error.GetProperty("message").GetString() ?? string.Empty;
+
+            Assert.That(code == -32000, $"Expected JSON-RPC application error code -32000 but got {code}");
+            Assert.That(message.Contains("Argument 'title' exceeds maximum length of 200 characters.", StringComparison.Ordinal),
+                $"Expected specific title max-length validation message but got: {message}");
+        }
+        finally
+        {
+            if (Directory.Exists(workspacePath))
+            {
+                Directory.Delete(workspacePath, recursive: true);
+            }
+        }
     }
 }

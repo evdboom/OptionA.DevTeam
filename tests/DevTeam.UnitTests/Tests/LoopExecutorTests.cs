@@ -73,10 +73,8 @@ internal static class LoopExecutorTests
         var runArtifact = fs.ReadAllText(Path.Combine(store.WorkspacePath, "runs", "run-001.md"));
         Assert.That(runArtifact.Contains("src/Feature.cs", StringComparison.Ordinal),
             $"Expected run artifact to mention changed file, got: {runArtifact}");
-
-        var decisionArtifact = fs.ReadAllText(Path.Combine(store.WorkspacePath, "decisions", "decision-001.md"));
-        Assert.That(decisionArtifact.Contains("tests/FeatureTests.cs", StringComparison.Ordinal),
-            $"Expected decision artifact to mention changed file, got: {decisionArtifact}");
+        Assert.That(runArtifact.Contains("tests/FeatureTests.cs", StringComparison.Ordinal),
+            $"Expected run artifact to mention changed file, got: {runArtifact}");
     }
 
     private static async Task SpawnIssueAsync_ThrowsForUnknownIssue()

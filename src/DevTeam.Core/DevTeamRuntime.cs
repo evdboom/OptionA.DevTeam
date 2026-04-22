@@ -759,15 +759,6 @@ public class DevTeamRuntime
             default:
                 throw new InvalidOperationException("Outcome must be one of: completed, failed, blocked.");
         }
-
-        RememberDecision(
-            state,
-            $"Run #{run.Id} {run.Status}",
-            request.Summary.Trim(),
-            "run",
-            issue.Id,
-            run.Id,
-            run.SessionId);
     }
 
     public void StartRun(WorkspaceState state, int runId, string sessionId)

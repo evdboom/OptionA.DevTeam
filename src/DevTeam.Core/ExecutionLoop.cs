@@ -176,6 +176,7 @@ public class LoopExecutor(
                 var completedIssue = state.Issues.First(issue => issue.Id == completed.Run.IssueId);
                 var model = state.Models.FirstOrDefault(item => string.Equals(item.Name, completed.Run.ModelName, StringComparison.OrdinalIgnoreCase));
                 var usageTelemetry = UsageTelemetryExtractor.Extract(model, completed.Response);
+                var decisionCountBeforeCompletion = state.Decisions.Count;
                 _runtime.CompleteRun(
                     state,
                     new CompleteRunRequest
@@ -193,10 +194,12 @@ public class LoopExecutor(
                         OutputTokens = usageTelemetry.OutputTokens,
                         EstimatedCostUsd = usageTelemetry.EstimatedCostUsd
                     });
-                var decision = state.Decisions[^1];
                 var persistedRun = state.AgentRuns.First(run => run.Id == completed.Run.RunId);
                 WriteRunArtifact(_store.WorkspacePath, completed.Run, persistedRun, completed.Response, completed.Outcome, completed.Summary);
-                WriteDecisionArtifact(_store.WorkspacePath, decision, persistedRun);
+                if (state.Decisions.Count > decisionCountBeforeCompletion)
+                {
+                    WriteDecisionArtifact(_store.WorkspacePath, state.Decisions[^1], persistedRun);
+                }
                 if (!string.IsNullOrWhiteSpace(state.CodebaseContext) && string.Equals(completed.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
                 {
                     WriteBrownfieldDeltaLog(_store.WorkspacePath, completedIssue, persistedRun, completed.Approach, completed.Rationale);
@@ -367,6 +370,7 @@ public class LoopExecutor(
         var completedIssue = state.Issues.First(issue => issue.Id == result.Run.IssueId);
         var model = state.Models.FirstOrDefault(item => string.Equals(item.Name, result.Run.ModelName, StringComparison.OrdinalIgnoreCase));
         var usageTelemetry = UsageTelemetryExtractor.Extract(model, result.Response);
+        var decisionCountBeforeCompletion = state.Decisions.Count;
         _runtime.CompleteRun(
             state,
             new CompleteRunRequest
@@ -386,7 +390,10 @@ public class LoopExecutor(
             });
         var persistedRun = state.AgentRuns.First(r => r.Id == result.Run.RunId);
         WriteRunArtifact(_store.WorkspacePath, result.Run, persistedRun, result.Response, result.Outcome, result.Summary);
-        WriteDecisionArtifact(_store.WorkspacePath, state.Decisions[^1], persistedRun);
+        if (state.Decisions.Count > decisionCountBeforeCompletion)
+        {
+            WriteDecisionArtifact(_store.WorkspacePath, state.Decisions[^1], persistedRun);
+        }
         if (!string.IsNullOrWhiteSpace(state.CodebaseContext) && string.Equals(result.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
         {
             WriteBrownfieldDeltaLog(_store.WorkspacePath, completedIssue, persistedRun, result.Approach, result.Rationale);
