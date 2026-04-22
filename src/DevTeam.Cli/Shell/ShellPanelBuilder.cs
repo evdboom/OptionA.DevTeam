@@ -12,8 +12,8 @@ internal static class ShellPanelBuilder
 {
     internal const int FallbackTerminalHeight = 40;
 
-    private const int HeaderSize = 4;
-    private const int InputSize = 6;
+    internal const int HeaderSize = 4;
+    internal const int InputSize = 6;
 
     internal static Panel BuildHeader(WorkflowPhase phase, bool isRunning, IReadOnlyList<CycleSlot>? currentCycle = null)
     {
@@ -28,25 +28,9 @@ internal static class ShellPanelBuilder
 
         var lines = new List<string>
         {
-            $"[teal]Phase[/]: [bold]{phaseTag}[/]{runTag}"
+            $"[teal]Phase[/]: [bold]{phaseTag}[/]{runTag}",
+            FormatHeaderCycleSummary(currentCycle ?? []),
         };
-
-        var cycle = currentCycle ?? [];
-        if (cycle.Count == 0)
-        {
-            lines.Add("[dim]Current cycle: no active runs[/]");
-        }
-        else
-        {
-            foreach (var slot in cycle.Take(3))
-            {
-                lines.Add(FormatHeaderCycleSlot(slot));
-            }
-            if (cycle.Count > 3)
-            {
-                lines.Add($"[dim]… {cycle.Count - 3} more[/]");
-            }
-        }
 
         return new Panel(new Markup(string.Join("\n", lines)))
             .Header("- [teal bold]DevTeam[/] -", Justify.Center)
@@ -388,6 +372,25 @@ internal static class ShellPanelBuilder
         }
     }
 
+    private static string FormatHeaderCycleSummary(IReadOnlyList<CycleSlot> cycle)
+    {
+        if (cycle.Count == 0)
+        {
+            return "[dim]Current cycle: no active runs[/]";
+        }
+
+        var parts = cycle.Take(3)
+            .Select(FormatHeaderCycleSlot)
+            .ToList();
+
+        if (cycle.Count > 3)
+        {
+            parts.Add($"[dim]+{cycle.Count - 3} more[/]");
+        }
+
+        return $"[dim]Current cycle:[/] {string.Join(" [dim]·[/] ", parts)}";
+    }
+
     private static string FormatHeaderCycleSlot(CycleSlot slot)
     {
         var roleSlug = string.IsNullOrWhiteSpace(slot.RoleSlug) ? "agent" : slot.RoleSlug;
@@ -395,7 +398,7 @@ internal static class ShellPanelBuilder
             ? "Orchestrator"
             : char.ToUpperInvariant(roleSlug[0]) + roleSlug[1..];
 
-        var scope = slot.IssueId is int issueId ? $" - issue #{issueId}" : string.Empty;
+        var scope = slot.IssueId is int issueId ? $" issue #{issueId}" : string.Empty;
         var elapsed = $" {slot.Elapsed.TotalSeconds:0}s";
 
         if (slot.IsRunning)
@@ -403,6 +406,6 @@ internal static class ShellPanelBuilder
             return $"[yellow]⏳[/] [cyan]{Markup.Escape(role)}[/]{Markup.Escape(scope + elapsed)}";
         }
 
-        return $"[green]✓[/] [cyan]{Markup.Escape(role)}[/]{Markup.Escape(scope + elapsed)} [dim](done)[/]";
+        return $"[green]✓[/] [cyan]{Markup.Escape(role)}[/]{Markup.Escape(scope + elapsed)} [dim]done[/]";
     }
 }

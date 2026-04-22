@@ -11,6 +11,7 @@ internal static class TerminalMouseScroll
     private const int WheelDownButtonCode = 65;
     private const int ModifierBitsMask = 4 | 8 | 16;
     private const int MaxEscapeSequenceLength = 32;
+    private const int EscapeSequenceProbeMs = 6;
     private static readonly Queue<ConsoleKeyInfo> PendingKeys = new();
 
     internal static void EnableTracking()
@@ -75,7 +76,12 @@ internal static class TerminalMouseScroll
     internal static bool TryGetWheelDelta(ConsoleKeyInfo key, Func<bool> isKeyAvailable, Func<ConsoleKeyInfo> readKey, out int delta)
     {
         delta = 0;
-        if (key.Key != ConsoleKey.Escape || !isKeyAvailable())
+        if (key.Key != ConsoleKey.Escape)
+        {
+            return false;
+        }
+
+        if (!isKeyAvailable() && !TryAwaitEscapeFollowUp(isKeyAvailable))
         {
             return false;
         }
@@ -126,6 +132,11 @@ internal static class TerminalMouseScroll
         };
 
         return delta != 0;
+    }
+
+    private static bool TryAwaitEscapeFollowUp(Func<bool> isKeyAvailable)
+    {
+        return SpinWait.SpinUntil(isKeyAvailable, EscapeSequenceProbeMs);
     }
 
     internal static void ClearPendingKeysForTests()
