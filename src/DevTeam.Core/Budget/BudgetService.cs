@@ -25,7 +25,7 @@ public sealed class BudgetService : IBudgetService
                 .Where(m => m is not null
                     && CanAffordModel(state, m)
                     && (!m.IsPremium || policy.AllowPremium)
-                    && IsBudgetComfortable(m, budgetRatio))
+                    && IsBudgetComfortable(state, m, budgetRatio))
                 .ToList();
             if (affordable.Count > 0)
             {
@@ -57,7 +57,7 @@ public sealed class BudgetService : IBudgetService
                     && !string.Equals(m.EffectiveFamily, excludeFamily, StringComparison.OrdinalIgnoreCase)
                     && CanAffordModel(state, m)
                     && (!m.IsPremium || policy.AllowPremium)
-                    && IsBudgetComfortable(m, budgetRatio))
+                    && IsBudgetComfortable(state, m, budgetRatio))
                 .ToList();
             if (crossCandidates.Count > 0)
             {
@@ -67,14 +67,14 @@ public sealed class BudgetService : IBudgetService
 
         if (CanAffordModel(state, primary)
             && (!primary.IsPremium || policy.AllowPremium)
-            && IsBudgetComfortable(primary, budgetRatio))
+            && IsBudgetComfortable(state, primary, budgetRatio))
         {
             return primary;
         }
 
         if (fallback.Cost > 0
             && CanAffordModel(state, fallback)
-            && IsBudgetComfortable(fallback, budgetRatio))
+            && IsBudgetComfortable(state, fallback, budgetRatio))
         {
             return fallback;
         }
@@ -102,6 +102,7 @@ public sealed class BudgetService : IBudgetService
 
     public bool CanAffordModel(WorkspaceState state, ModelDefinition model)
     {
+        // Check project-wide budget cap
         var totalAfter = state.Budget.CreditsCommitted + model.Cost;
         if (totalAfter > state.Budget.TotalCreditCap)
         {
@@ -120,9 +121,22 @@ public sealed class BudgetService : IBudgetService
         return true;
     }
 
-    private static bool IsBudgetComfortable(ModelDefinition model, double budgetRatio)
+    private bool IsBudgetComfortable(WorkspaceState state, ModelDefinition model, double budgetRatio)
     {
         if (model.Cost == 0) return true;
+        
+        // Check if model cost exceeds per-run limits even if project budget is low
+        // This allows expensive models for critical single-run tasks
+        if (model.IsPremium && model.Cost <= state.Budget.PerRunPremiumLimit)
+        {
+            return true; // Affordable within per-run premium limit
+        }
+        if (!model.IsPremium && model.Cost <= state.Budget.PerRunCreditLimit)
+        {
+            return true; // Affordable within per-run standard limit
+        }
+        
+        // Enforce project-level budget pressure thresholds
         if (model.IsPremium) return budgetRatio > 0.30;
         if (model.Cost >= 1) return budgetRatio > 0.15;
         return true;

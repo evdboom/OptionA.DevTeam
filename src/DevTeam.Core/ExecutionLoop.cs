@@ -273,6 +273,17 @@ public class LoopExecutor(
                 }
             }
 
+            // After all runs complete, check if blocking questions were created.
+            // If so, pause execution and wait for user input.
+            var hasBlockingQuestions = state.Questions.Any(q => q.Status == QuestionStatus.Open && q.IsBlocking);
+            if (hasBlockingQuestions)
+            {
+                Log(log, options.Verbosity, "  Blocking question(s) created. Pausing loop to wait for user input.");
+                finalState = "waiting-for-user";
+                _store.Save(state);
+                break;
+            }
+
             LogBudget(state, log, options.Verbosity);
             LogDetailed(log, options.Verbosity, "  Finalizing iteration and staging changed paths...");
             var stagedPaths = _git.StagePathsChangedSince(state.RepoRoot, gitStatusBeforeIteration);
