@@ -37,7 +37,14 @@ internal static class CliLoopHandler
         }
         else
         {
-            await SpectreShellHost.RunAsync(shell, exitCts.Token);
+            try
+            {
+                await SpectreShellHost.RunAsync(shell, exitCts.Token);
+            }
+            catch (OperationCanceledException) when (exitCts.IsCancellationRequested)
+            {
+                // Normal exit — user quit or update triggered exit
+            }
         }
         return 0;
     }

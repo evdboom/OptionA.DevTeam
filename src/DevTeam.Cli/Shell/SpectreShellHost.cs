@@ -115,29 +115,43 @@ internal static class SpectreShellHost
         finally
         {
             commandChannel.Writer.Complete();
-            await consumerTask;
             if (useAltScreen)
+            {
                 Console.Write("\x1b[?1049l"); // restore original screen
+            }
+            
+            try 
+            { 
+                await consumerTask;
+            }
+            catch (OperationCanceledException)
+            {
+                 /* normal exit via cancellation */ 
+            }
         }
     }
 
     private static async Task ConsumeCommandsAsync(ChannelReader<string> reader, ShellService shell, CancellationToken cancellationToken)
     {
-        await foreach (var command in reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        try
         {
-            try
+            await foreach (var command in reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                await shell.ProcessInputAsync(command).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                shell.AddError($"Command failed: {ex.Message}");
+                try
+                {
+                    await shell.ProcessInputAsync(command).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    shell.AddError($"Command failed: {ex.Message}");
+                }
             }
         }
+        catch (OperationCanceledException) { /* normal exit via cancellation */ }
     }
 
     /// <summary>Builds the full stacked frame for the current shell state.</summary>
