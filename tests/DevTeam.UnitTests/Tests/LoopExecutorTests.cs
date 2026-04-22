@@ -211,8 +211,9 @@ internal static class LoopExecutorTests
         await executor.RunAsync(state, options);
 
         Assert.That(reportedTokens.Count > 0, "Expected TokenReporter to be called at least once");
-        Assert.That(reportedRoles.All(r => string.Equals(r, "developer", StringComparison.OrdinalIgnoreCase)),
-            $"Expected all tokens attributed to 'developer' but got: {string.Join(", ", reportedRoles.Distinct())}");
+        var expectedRoleKey = $"developer#{issueId}";
+        Assert.That(reportedRoles.All(r => string.Equals(r, expectedRoleKey, StringComparison.OrdinalIgnoreCase)),
+            $"Expected all tokens attributed to '{expectedRoleKey}' but got: {string.Join(", ", reportedRoles.Distinct())}");
         var combined = string.Concat(reportedTokens).Trim();
         Assert.That(combined.Contains("OUTCOME", StringComparison.Ordinal),
             $"Expected streamed tokens to contain 'OUTCOME' but combined was: {combined}");

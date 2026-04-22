@@ -28,6 +28,8 @@ internal sealed partial class ShellService(
     private const string MaxIterationsOption = "max-iterations";
     private const string MaxSubagentsOption = "max-subagents";
     private const string GreenStyle = "green";
+    private const int TokenPartialFlushChars = 72;
+    private static readonly TimeSpan TokenPartialFlushInterval = TimeSpan.FromMilliseconds(300);
 
     // ── Dependencies ───────────────────────────────────────────────────────────
 
@@ -51,7 +53,7 @@ internal sealed partial class ShellService(
     private Task<LoopExecutionReport>? _loopTask;
     private CancellationTokenSource? _loopCts;
     private string? _lastContextKey;
-    private volatile string? _connectedSlug;
+    private volatile string? _connectedStreamKey;
     private bool _keepAwakeEnabled;
 
     // ── Public surface ─────────────────────────────────────────────────────────
@@ -812,6 +814,7 @@ internal sealed partial class ShellService(
                     break;
                 }
 
+                case "connect":
                 case "connect-to":
                 {
                     if (!IsLoopRunning)
@@ -819,47 +822,87 @@ internal sealed partial class ShellService(
                         AddHint("No loop is running. Start one first with [cyan]/run[/].");
                         break;
                     }
-                    var target = GetPositionalValue(options);
-                    if (string.IsNullOrWhiteSpace(target))
+                    var current = _store.Load();
+                    var activeStreams = GetActiveStreams(current);
+                    if (activeStreams.Count == 0)
                     {
-                        // Auto-pick if only one agent is running
-                        var current = _store.Load();
-                        var activeRoles = current.AgentRuns
-                            .Where(r => r.Status == AgentRunStatus.Running)
-                            .Select(r => r.RoleSlug)
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .ToList();
-                        if (activeRoles.Count == 1)
-                        {
-                            target = activeRoles[0];
-                        }
-                        else if (activeRoles.Count == 0)
-                        {
-                            AddHint("No agents are currently active.");
-                            break;
-                        }
-                        else
-                        {
-                            var slugList = string.Join(", ", activeRoles.Select(s => $"[cyan]{Markup.Escape(s)}[/]"));
-                            AddHint($"Multiple agents running: {slugList}. Specify one: [cyan]/connect-to <slug>[/]");
-                            break;
-                        }
+                        AddHint("No agents are currently active.");
+                        break;
                     }
-                    _connectedSlug = target;
-                    AddEvent("📡", $"Connected to [cyan]{Markup.Escape(target)}[/] — streaming output will appear below.");
+
+                    var values = GetPositionalValues(options);
+                    if (values.Count > 2)
+                    {
+                        AddHint("Usage: [cyan]/connect[/] [[slug [[issue-id]] | slug#issue-id | issue-id]]");
+                        break;
+                    }
+
+                    var roleArg = values.Count > 0 ? values[0] : null;
+                    var issueArg = values.Count > 1 ? values[1] : null;
+                    var target = ResolveConnectedStreamTarget(activeStreams, roleArg, issueArg);
+
+                    if (target is not ActiveStream selected)
+                    {
+                        if (string.IsNullOrWhiteSpace(roleArg) && activeStreams.Count == 1)
+                        {
+                            var only = activeStreams[0];
+                            _connectedStreamKey = only.StreamKey;
+                            AddEvent("📡", $"Connected to [cyan]{Markup.Escape(only.RoleSlug)}[/] issue [cyan]#{only.IssueId}[/] — streaming output will appear below.");
+                            break;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(roleArg))
+                        {
+                            AddHint($"Multiple agents running: {FormatStreamList(activeStreams)}. Specify one: [cyan]/connect <slug> <issue-id>[/]");
+                            break;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(issueArg) && !int.TryParse(issueArg, out _))
+                        {
+                            AddHint("Issue id must be a number. Usage: [cyan]/connect <slug> <issue-id>[/]");
+                            break;
+                        }
+
+                        if (TryParseStreamKey(roleArg!, out _, out _))
+                        {
+                            AddHint($"No active stream matches [cyan]{Markup.Escape(roleArg!)}[/]. Active streams: {FormatStreamList(activeStreams)}.");
+                            break;
+                        }
+
+                        if (int.TryParse(roleArg, out var issueOnly))
+                        {
+                            AddHint($"No active stream for issue [cyan]#{issueOnly}[/]. Active streams: {FormatStreamList(activeStreams)}.");
+                            break;
+                        }
+
+                        var sameRole = activeStreams
+                            .Where(s => string.Equals(s.RoleSlug, roleArg, StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        if (sameRole.Count > 1)
+                        {
+                            AddHint($"Multiple [cyan]{Markup.Escape(roleArg!)}[/] agents running: {FormatStreamList(sameRole)}. Specify one: [cyan]/connect {Markup.Escape(roleArg!)} <issue-id>[/]");
+                            break;
+                        }
+
+                        AddHint($"No active stream matches [cyan]{Markup.Escape(roleArg!)}[/]. Active streams: {FormatStreamList(activeStreams)}.");
+                        break;
+                    }
+
+                    _connectedStreamKey = selected.StreamKey;
+                    AddEvent("📡", $"Connected to [cyan]{Markup.Escape(selected.RoleSlug)}[/] issue [cyan]#{selected.IssueId}[/] — streaming output will appear below.");
                     break;
                 }
 
                 case "disconnect":
                 {
-                    if (_connectedSlug is null)
+                    if (_connectedStreamKey is null)
                     {
                         AddHint("Not currently connected to any agent stream.");
                         break;
                     }
-                    var was = _connectedSlug;
-                    _connectedSlug = null;
-                    AddEvent("📴", $"Disconnected from [cyan]{Markup.Escape(was)}[/].");
+                    var was = _connectedStreamKey;
+                    _connectedStreamKey = null;
+                    AddEvent("📴", $"Disconnected from [cyan]{Markup.Escape(FormatStreamLabel(was))}[/].");
                     break;
                 }
 
@@ -902,7 +945,7 @@ internal sealed partial class ShellService(
                     _loopCts?.Dispose();
                     _loopCts = null;
                     _lastContextKey = null;
-                    _connectedSlug = null;
+                    _connectedStreamKey = null;
                     RefreshContext(_store.Load());
                     break;
                 }
@@ -1089,7 +1132,7 @@ internal sealed partial class ShellService(
             _loopCts?.Dispose();
             _loopCts = null;
             _lastContextKey = null;
-            _connectedSlug = null;
+            _connectedStreamKey = null;
 
             TryLoadState(out var finalState);
             if (finalState is not null) RefreshContext(finalState);
@@ -1141,34 +1184,137 @@ internal sealed partial class ShellService(
         };
 
     /// <summary>
-    /// Returns a token reporter that buffers streaming tokens per role slug and flushes
-    /// complete lines to the progress panel — but only for the currently connected slug.
-    /// Use [cyan]/connect-to &lt;slug&gt;[/] to attach and [cyan]/disconnect[/] to detach.
+    /// Returns a token reporter that buffers streaming tokens per active stream key
+    /// and flushes completed lines (plus partial chunks) to the progress panel.
+    /// Use [cyan]/connect[/] or [cyan]/connect-to[/] to attach and [cyan]/disconnect[/] to detach.
     /// </summary>
     private Action<string, string> MakeTokenReporter()
     {
-        var lineBuffers = new System.Collections.Concurrent.ConcurrentDictionary<string, System.Text.StringBuilder>(StringComparer.OrdinalIgnoreCase);
-        return (roleSlug, token) =>
+        var lineBuffers = new ConcurrentDictionary<string, StreamTokenBuffer>(StringComparer.OrdinalIgnoreCase);
+        return (streamKey, token) =>
         {
-            if (!string.Equals(_connectedSlug, roleSlug, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(_connectedStreamKey, streamKey, StringComparison.OrdinalIgnoreCase))
                 return;
 
-            var buf = lineBuffers.GetOrAdd(roleSlug, _ => new System.Text.StringBuilder());
-            lock (buf)
+            var streamLabel = FormatStreamLabel(streamKey);
+            var buf = lineBuffers.GetOrAdd(streamKey, _ => new StreamTokenBuffer());
+            lock (buf.Gate)
             {
-                buf.Append(token);
-                var text = buf.ToString();
+                buf.Buffer.Append(token);
+                var text = buf.Buffer.ToString();
                 var lastNl = text.LastIndexOf('\n');
-                if (lastNl < 0) return;
 
-                var lines = text[..lastNl].Split('\n');
-                buf.Clear();
-                buf.Append(text[(lastNl + 1)..]);
+                if (lastNl >= 0)
+                {
+                    var lines = text[..lastNl].Split('\n');
+                    buf.Buffer.Clear();
+                    buf.Buffer.Append(text[(lastNl + 1)..]);
 
-                foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
-                    AddLoopLog($"  [{roleSlug}] {line.TrimEnd()}");
+                    foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
+                        AddLoopLog($"  [{streamLabel}] {line.TrimEnd()}\r");
+
+                    buf.LastFlushAt = _clock.UtcNow;
+                }
+
+                var now = _clock.UtcNow;
+                if (buf.Buffer.Length == 0) return;
+
+                var elapsed = now - buf.LastFlushAt;
+                if (buf.Buffer.Length < TokenPartialFlushChars && elapsed < TokenPartialFlushInterval)
+                    return;
+
+                var fragment = buf.Buffer.ToString().Trim();
+                if (fragment.Length > 0)
+                    AddLoopLog($"  [{streamLabel}] {fragment}");
+
+                buf.Buffer.Clear();
+                buf.LastFlushAt = now;
             }
         };
+    }
+
+    private readonly record struct ActiveStream(string StreamKey, string RoleSlug, int IssueId);
+
+    private sealed class StreamTokenBuffer
+    {
+        public object Gate { get; } = new();
+        public StringBuilder Buffer { get; } = new();
+        public DateTimeOffset LastFlushAt { get; set; } = DateTimeOffset.MinValue;
+    }
+
+    private static List<ActiveStream> GetActiveStreams(WorkspaceState state) =>
+        state.AgentRuns
+            .Where(r => r.Status == AgentRunStatus.Running)
+            .Select(r => new ActiveStream(BuildStreamKey(r.RoleSlug, r.IssueId), r.RoleSlug, r.IssueId))
+            .OrderBy(r => r.RoleSlug, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.IssueId)
+            .ToList();
+
+    private static ActiveStream? FindActiveStream(IReadOnlyList<ActiveStream> activeStreams, Func<ActiveStream, bool> predicate)
+    {
+        foreach (var activeStream in activeStreams)
+        {
+            if (predicate(activeStream))
+                return activeStream;
+        }
+
+        return null;
+    }
+
+    private static ActiveStream? ResolveConnectedStreamTarget(IReadOnlyList<ActiveStream> activeStreams, string? roleArg, string? issueArg)
+    {
+        if (string.IsNullOrWhiteSpace(roleArg))
+            return activeStreams.Count == 1 ? activeStreams[0] : null;
+
+        if (!string.IsNullOrWhiteSpace(issueArg) && int.TryParse(issueArg, out var issueFromSecondArg))
+            return FindActiveStream(activeStreams, s =>
+                s.IssueId == issueFromSecondArg &&
+                string.Equals(s.RoleSlug, roleArg, StringComparison.OrdinalIgnoreCase));
+
+        if (TryParseStreamKey(roleArg, out var roleFromKey, out var issueFromKey))
+            return FindActiveStream(activeStreams, s =>
+                s.IssueId == issueFromKey &&
+                string.Equals(s.RoleSlug, roleFromKey, StringComparison.OrdinalIgnoreCase));
+
+        if (int.TryParse(roleArg, out var issueOnly))
+            return FindActiveStream(activeStreams, s => s.IssueId == issueOnly);
+
+        var sameRole = activeStreams
+            .Where(s => string.Equals(s.RoleSlug, roleArg, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return sameRole.Count == 1 ? sameRole[0] : null;
+    }
+
+    private static string FormatStreamList(IEnumerable<ActiveStream> streams) =>
+        string.Join(", ", streams.Select(s => $"[cyan]{Markup.Escape(BuildStreamKey(s.RoleSlug, s.IssueId))}[/]"));
+
+    private static string BuildStreamKey(string roleSlug, int issueId) => $"{roleSlug}#{issueId}";
+
+    private static string FormatStreamLabel(string streamKey)
+    {
+        if (!TryParseStreamKey(streamKey, out var roleSlug, out var issueId))
+            return streamKey;
+
+        return $"{roleSlug} issue #{issueId}";
+    }
+
+    private static bool TryParseStreamKey(string value, out string roleSlug, out int issueId)
+    {
+        roleSlug = string.Empty;
+        issueId = 0;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        var idx = value.LastIndexOf('#');
+        if (idx <= 0 || idx == value.Length - 1) return false;
+
+        var role = value[..idx].Trim();
+        var issuePart = value[(idx + 1)..].Trim();
+        if (role.Length == 0 || !int.TryParse(issuePart, out var parsedIssue)) return false;
+
+        roleSlug = role;
+        issueId = parsedIssue;
+        return true;
     }
 
     // ── Plan workflow ──────────────────────────────────────────────────────────

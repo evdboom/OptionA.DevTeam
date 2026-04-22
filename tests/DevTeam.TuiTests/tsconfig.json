@@ -8,5 +8,6 @@
     "skipLibCheck": true,
     "outDir": "dist"
   },
-  "include": ["tests/**/*.ts", "tui-test.config.ts"]
+  "include": ["tests/**/*.ts", "tui-test.config.ts"],
+  "exclude": [".tui-test"]
 }

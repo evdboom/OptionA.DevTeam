@@ -44,6 +44,31 @@ produce a compact manifest only:
 - **Recommended area tag** for the dependent issue
 Skip the full dependency map and module boundary analysis to keep the output brief.
 
+### Refinement sub-task output
+When called as a refinement sub-task (issue title contains "Refine #" or "Scout #" and a parent issue is referenced),
+use `update_issue_status` to update the parent issue's notes with the refinement output, then produce:
+
+```
+FILES_IN_SCOPE:
+- src/path/to/File1.cs
+- src/path/to/File2.razor
+
+LINKED_DECISIONS:
+- #7: <decision title>
+- #15: <decision title>
+
+ACCEPTANCE_CRITERIA:
+- [ ] <testable criterion 1>
+- [ ] <testable criterion 2>
+
+NOTES:
+<any additional observations — coupling risks, missing files, contradicting decisions>
+```
+
+After producing this output, update the parent issue using `update_issue_status` with the scope doc as `notes`,
+and set status to `open` so the orchestrator knows refinement is complete.
+The orchestrator will then update `FilesInScope`, `LinkedDecisionIds`, and mark the parent `ReadyToPickup`.
+
 Use `ISSUES` only if you discover work that needs doing (e.g., missing files, broken imports, circular dependencies). Format:
 - `- role=developer; area=core; priority=60; title=Fix circular import between X and Y; detail=...`
 

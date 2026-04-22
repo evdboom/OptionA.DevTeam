@@ -20,6 +20,18 @@ You are the execution coordination role. Choose the safest, highest-value ready 
   create a `navigator` preflight issue with `depends=none` and `priority` equal to the developer issue's priority + 5.
   Give it a title like "Scout codebase for: <developer issue title>" and set `detail` to reference the developer issue.
   Then set the developer issue to depend on the navigator issue. This improves context quality without adding a full iteration.
+- **Backlog triage (PO hat):** Before each batch, apply the backlog-manager skill:
+  - Scan for duplicate or conflicting issues (especially naming conflicts like "Playground" vs "Interactive").
+  - For each new issue not yet triaged (`RefinementState == Planned`), assess complexity:
+    - **Small (0–30):** Mark as ReadyToPickup. No refinement needed.
+    - **Medium (30–60) + unclear scope:** Create a refinement sub-issue (role=developer or architect) that populates FilesInScope and LinkedDecisionIds.
+    - **Large (60+) or fuzzy:** Create a scout sub-issue (role=navigator) before the parent can execute.
+  - Close or merge issues that are superseded, duplicated, or contradict existing decisions.
+  - Check stale questions: close those answered by decisions.
+- **Scoped agent context:** When spawning agents for issues that have `RefinementState == ReadyToPickup`:
+  - The agent should call `get_issue(issueId)` to fetch its scoped work.
+  - The agent should call `get_decisions(linkedDecisionIds)` to fetch only relevant decisions.
+  - This keeps agent context minimal and prevents context poisoning from prior runs.
 - **spawn_agent (primary execution path):** When the `spawn_agent` workspace MCP tool is available, use it to execute ready
   issues directly rather than only selecting them for a later iteration. Call `spawn_agent(issueId)` for each issue in the
   chosen batch, await each result before spawning the next (sequential) or spawn in sequence then review all results.
