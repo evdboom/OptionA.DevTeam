@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace DevTeam.Core;
@@ -20,6 +21,10 @@ public static class AgentPromptBuilder
     private const string SkillPlan = "plan";
     private const string SkillScout = "scout";
     private const string SkillVerify = "verify";
+    private const string SkillTdd = "tdd";
+    private const string SkillDebug = "debug";
+    private const string SkillReview = "review";
+    private const string SkillHygiene = "hygiene";
     private const string HeaderOutcome = "OUTCOME:";
     private const string HeaderSummary = "SUMMARY:";
     private const string HeaderApproach = "APPROACH:";
@@ -29,6 +34,7 @@ public static class AgentPromptBuilder
     private const string HeaderSkillsUsed = "SKILLS_USED:";
     private const string HeaderToolsUsed = "TOOLS_USED:";
     private const string HeaderQuestions = "QUESTIONS:";
+    private const int RoleExcerptMaxLines = 12;
 
     private static readonly Dictionary<string, string[]> RoleSkillMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -36,13 +42,13 @@ public static class AgentPromptBuilder
         [RolePlanner] = [SkillBrainstorm, SkillPlan],
         [RoleArchitect] = [SkillBrainstorm, SkillPlan],
         [RoleNavigator] = [SkillScout],
-        [RoleDeveloper] = [SkillPlan, "tdd", SkillVerify],
-        ["backend-developer"] = [SkillPlan, "tdd", SkillVerify],
-        ["frontend-developer"] = [SkillPlan, "tdd", SkillVerify],
-        ["fullstack-developer"] = [SkillPlan, "tdd", SkillVerify],
-        ["tester"] = ["tdd", "debug", SkillVerify],
-        ["reviewer"] = ["review", SkillVerify],
-        ["auditor"] = [SkillScout, "review", SkillVerify, "hygiene"],
+        [RoleDeveloper] = [SkillPlan, SkillTdd, SkillVerify],
+        ["backend-developer"] = [SkillPlan, SkillTdd, SkillVerify],
+        ["frontend-developer"] = [SkillPlan, SkillTdd, SkillVerify],
+        ["fullstack-developer"] = [SkillPlan, SkillTdd, SkillVerify],
+        ["tester"] = [SkillTdd, SkillDebug, SkillVerify],
+        ["reviewer"] = [SkillReview, SkillVerify],
+        ["auditor"] = [SkillScout, SkillReview, SkillVerify, SkillHygiene],
         ["ux"] = [SkillVerify],
         ["user"] = [SkillVerify],
         ["game-designer"] = [SkillBrainstorm, "review", SkillVerify],
@@ -75,18 +81,16 @@ public static class AgentPromptBuilder
         var role = state.Roles.FirstOrDefault(item => item.Slug == issue.RoleSlug);
         var activeMode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase))
             ?? state.Modes.FirstOrDefault();
-        var roleBody = role?.Body ?? $"# Role: {issue.RoleSlug}";
+        var roleCard = BuildRoleCard(role, issue.RoleSlug);
         var roleTools = role?.RequiredTools ?? [];
-        var skills = ResolveSkills(state, issue.RoleSlug);
+        var skills = ResolveSkills(state, issue.RoleSlug, issue);
         var questionBlock = BuildQuestionBlock(state);
         var tools = roleTools
             .Concat(skills.SelectMany(item => item.RequiredTools))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var skillBlock = string.Join(
-            "\n\n---\n\n",
-            skills.Select(item => item.Body.Trim()));
+        var skillManifest = BuildSkillManifest(skills);
         var availableRoles = string.Join(", ", state.Roles.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
         var availableSkills = skills.Count == 0
             ? NoneLiteral
@@ -114,11 +118,15 @@ public static class AgentPromptBuilder
         - Role: {issue.RoleSlug}
         - Area: {(string.IsNullOrWhiteSpace(issue.Area) ? NoneLiteral : issue.Area)}
 
-        Role instructions:
-        {roleBody.Trim()}
+        Role baseline:
+        {roleCard}
 
-        Relevant skills:
-        {skillBlock}
+        Skill manifest (load on demand):
+        {skillManifest}
+
+        Skill-loading rule:
+        Only load skill instructions when needed for the current step. Do not preload every skill.
+        Load a skill by reading its SourcePath using available tools, then follow only the relevant section.
 
         Relevant skill slugs:
         {availableSkills}
@@ -142,6 +150,7 @@ public static class AgentPromptBuilder
         - Any "should I do X or Y?" where both options are within your role's authority: decide and act.
 
         QUESTIONS are only for information that cannot be inferred, that is genuinely required to proceed, and that only the end user can supply (e.g. target platform, business logic, secret credentials). If you can make a reasonable decision autonomously, do so.
+        Non-blocking runtime/scheduling questions (timeouts, batching, ordering, retries, split strategy, issue closure policy) are auto-resolved by runtime policy and should not be emitted.
 
         Pipeline handoff context:
         {BuildPipelineContextBlock(state, issue)}
@@ -159,7 +168,12 @@ public static class AgentPromptBuilder
         {availableRoles}
         {BuildFileBoundaryBlock(issue.RoleSlug)}
         Task:
-        Work on the current issue using the available tools, active mode guardrails, and role guidance. Keep the scope narrow. If "Planning feedback to apply" is non-empty, treat it as an explicit revision request and address it directly in this run rather than redoing a generic plan. If you discover follow-on work, a blocker, a prerequisite, or a natural decomposition that should not be absorbed into the current issue, use the workspace MCP tools when available and also summarize the outcome under ISSUES for compatibility. Avoid manually creating obvious next-stage architect, developer, or tester follow-ups for the same issue family when the runtime can chain those automatically. If you are blocked by missing information, say so clearly. Do not try to ask the user interactively. Instead, put every needed user question in the QUESTIONS section and use the workspace MCP tools when available to persist them immediately.
+        Work on the current issue using the available tools, active mode guardrails, and role guidance. Keep the scope narrow.
+        First perform a fit check: if this issue is unlikely to fit one focused run, complete the safest meaningful subset and emit split follow-up ISSUES rather than timing out.
+        If "Planning feedback to apply" is non-empty, treat it as an explicit revision request and address it directly in this run rather than redoing a generic plan.
+        If you discover follow-on work, a blocker, a prerequisite, or a natural decomposition that should not be absorbed into the current issue, use the workspace MCP tools when available and also summarize the outcome under ISSUES for compatibility.
+        Avoid manually creating obvious next-stage architect, developer, or tester follow-ups for the same issue family when the runtime can chain those automatically.
+        If you are blocked by missing information, say so clearly. Do not try to ask the user interactively. Instead, put every needed user question in the QUESTIONS section and use the workspace MCP tools when available to persist them immediately.
         {BuildBrownfieldGuidanceBlock(state)}
 
         Reply in exactly this shape:
@@ -188,11 +202,9 @@ public static class AgentPromptBuilder
         var role = state.Roles.FirstOrDefault(item => string.Equals(item.Slug, roleSlug, StringComparison.OrdinalIgnoreCase));
         var activeMode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase))
             ?? state.Modes.FirstOrDefault();
-        var roleBody = role?.Body ?? $"# Role: {roleSlug}";
+        var roleCard = BuildRoleCard(role, roleSlug);
         var skills = ResolveSkills(state, roleSlug);
-        var skillBlock = skills.Count == 0
-            ? NoneLiteral
-            : string.Join("\n\n---\n\n", skills.Select(item => item.Body.Trim()));
+        var skillManifest = BuildSkillManifest(skills);
         var availableRoles = string.Join(", ", state.Roles.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
 
         return $"""
@@ -210,11 +222,14 @@ public static class AgentPromptBuilder
         Mode guardrails:
         {(activeMode?.Body.Trim() ?? NoneLiteral)}
 
-        Role instructions:
-        {roleBody.Trim()}
+        Role baseline:
+        {roleCard}
 
-        Relevant skills:
-        {skillBlock}
+        Skill manifest (load on demand):
+        {skillManifest}
+
+        Skill-loading rule:
+        Only load skill instructions when needed for the current step. Do not preload every skill.
 
         Workspace MCP:
         {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Use it to inspect current workspace state and to persist newly discovered issues, questions, and decisions. Use update_issue_status to set issue status. Call get_runtime_capabilities to see what the runtime manages automatically." : "No workspace MCP server is available in this session.")}
@@ -253,11 +268,9 @@ public static class AgentPromptBuilder
     public static string BuildOrchestratorPrompt(WorkspaceState state, IReadOnlyList<IssueItem> candidates, int maxSubagents)
     {
         var role = state.Roles.FirstOrDefault(item => string.Equals(item.Slug, RoleOrchestrator, StringComparison.OrdinalIgnoreCase));
-        var roleBody = role?.Body ?? "# Role: Orchestrator";
+        var roleCard = BuildRoleCard(role, RoleOrchestrator);
         var skills = ResolveSkills(state, RoleOrchestrator);
-        var skillBlock = string.Join(
-            "\n\n---\n\n",
-            skills.Select(item => item.Body.Trim()));
+        var skillManifest = BuildSkillManifest(skills);
 
         return $"""
         You are working inside the DevTeam runtime.
@@ -271,11 +284,14 @@ public static class AgentPromptBuilder
         Task:
         Choose the next execution batch for the runtime. Select at most {maxSubagents} ready issue leads. Prefer architect-first sequencing when architecture is still unresolved, keep conflicting areas out of the same batch, and choose the smallest safe batch that keeps progress moving. Use the workspace MCP tools to inspect the workspace and persist your selection with `select_execution_batch`. Also repeat the selected issue ids under SELECTED_ISSUES for compatibility.
 
-        Role instructions:
-        {roleBody.Trim()}
+        Role baseline:
+        {roleCard}
 
-        Relevant skills:
-        {skillBlock}
+        Skill manifest (load on demand):
+        {skillManifest}
+
+        Skill-loading rule:
+        Load only the skill files needed for the current scheduling decision.
 
         Execution candidates:
         {BuildCandidateBlock(candidates)}
@@ -368,9 +384,26 @@ public static class AgentPromptBuilder
         return normalized;
     }
 
-    private static List<SkillDefinition> ResolveSkills(WorkspaceState state, string roleSlug)
+    private static List<SkillDefinition> ResolveSkills(WorkspaceState state, string roleSlug, IssueItem? issue = null)
     {
-        if (!RoleSkillMap.TryGetValue(roleSlug, out var slugs))
+        var slugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (RoleSkillMap.TryGetValue(roleSlug, out var roleSlugs))
+        {
+            foreach (var slug in roleSlugs)
+            {
+                slugs.Add(slug);
+            }
+        }
+
+        if (issue is not null)
+        {
+            foreach (var inferredSlug in InferSkillSlugsForIssue(issue))
+            {
+                slugs.Add(inferredSlug);
+            }
+        }
+
+        if (slugs.Count == 0)
         {
             return [];
         }
@@ -378,6 +411,105 @@ public static class AgentPromptBuilder
         return state.Skills
             .Where(item => slugs.Contains(item.Slug, StringComparer.OrdinalIgnoreCase))
             .ToList();
+    }
+
+    private static IReadOnlyList<string> InferSkillSlugsForIssue(IssueItem issue)
+    {
+        var text = $"{issue.Title} {issue.Detail}".ToLowerInvariant();
+        var slugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (ContainsAny(text, "test", "unit", "integration", "regression", "coverage"))
+        {
+            slugs.Add(SkillTdd);
+            slugs.Add(SkillVerify);
+        }
+
+        if (ContainsAny(text, "debug", "exception", "error", "timeout", "flake"))
+        {
+            slugs.Add(SkillDebug);
+            slugs.Add(SkillVerify);
+        }
+
+        if (ContainsAny(text, "review", "audit", "security", "maintainability", "hygiene"))
+        {
+            slugs.Add(SkillReview);
+            slugs.Add(SkillHygiene);
+        }
+
+        if (ContainsAny(text, "scout", "recon", "map", "inventory"))
+        {
+            slugs.Add(SkillScout);
+        }
+
+        if (ContainsAny(text, "plan", "design", "architecture", "decompose", "split"))
+        {
+            slugs.Add(SkillPlan);
+        }
+
+        return slugs.ToList();
+    }
+
+    private static bool ContainsAny(string source, params string[] needles) =>
+        needles.Any(source.Contains);
+
+    private static string BuildRoleCard(RoleDefinition? role, string roleSlug)
+    {
+        if (role is null)
+        {
+            return $"- slug: {roleSlug}\n- source: (runtime default)\n- guidance: no custom role file found.";
+        }
+
+        var excerpt = ExtractRoleExcerpt(role.Body, RoleExcerptMaxLines);
+        var tools = role.RequiredTools.Count == 0 ? "(none declared)" : string.Join(", ", role.RequiredTools);
+        return $"""
+        - slug: {role.Slug}
+        - source: {role.SourcePath}
+        - tools: {tools}
+        - excerpt:
+          {excerpt}
+        """;
+    }
+
+    private static string ExtractRoleExcerpt(string body, int maxLines)
+    {
+        var lines = body.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Where(line => !line.StartsWith("#", StringComparison.Ordinal))
+            .Take(maxLines)
+            .ToList();
+        if (lines.Count == 0)
+        {
+            return "(empty role guidance)";
+        }
+
+        return string.Join("\n          ", lines);
+    }
+
+    private static string BuildSkillManifest(IReadOnlyList<SkillDefinition> skills)
+    {
+        if (skills.Count == 0)
+        {
+            return NoneLiteral;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var skill in skills.OrderBy(item => item.Slug, StringComparer.OrdinalIgnoreCase))
+        {
+            var tools = skill.RequiredTools.Count == 0 ? "(none)" : string.Join(", ", skill.RequiredTools);
+            builder.Append("- slug=")
+                .Append(skill.Slug)
+                .Append("; name=")
+                .Append(string.IsNullOrWhiteSpace(skill.Name) ? skill.Slug : skill.Name)
+                .Append("; source=")
+                .Append(string.IsNullOrWhiteSpace(skill.SourcePath) ? "(unknown)" : skill.SourcePath)
+                .Append("; tools=")
+                .Append(tools)
+                .AppendLine();
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     private static string BuildQuestionBlock(WorkspaceState state)

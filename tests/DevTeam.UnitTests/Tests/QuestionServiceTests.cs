@@ -10,6 +10,8 @@ internal static class QuestionServiceTests
         new("AnswerQuestion_SetsStatusToAnswered", AnswerQuestion_SetsStatusToAnswered),
         new("AnswerQuestion_Throws_WhenQuestionNotFound", AnswerQuestion_Throws_WhenQuestionNotFound),
         new("AddQuestion_NonBlocking_FlagRespected", AddQuestion_NonBlocking_FlagRespected),
+        new("AddQuestions_AutoResolvesRuntimeManagedNonBlockingQuestion", AddQuestions_AutoResolvesRuntimeManagedNonBlockingQuestion),
+        new("AddQuestions_KeepsBlockingQuestionOpen", AddQuestions_KeepsBlockingQuestionOpen),
     ];
 
     private static Task AddQuestion_AssignsIncrementingId()
@@ -86,6 +88,47 @@ internal static class QuestionServiceTests
 
         Assert.That(!question.IsBlocking, "Expected IsBlocking to be false");
         Assert.That(question.Status == QuestionStatus.Open, "Expected status Open");
+        return Task.CompletedTask;
+    }
+
+    private static Task AddQuestions_AutoResolvesRuntimeManagedNonBlockingQuestion()
+    {
+        var svc = new QuestionService(new FakeSystemClock());
+        var state = new WorkspaceState();
+
+        var created = svc.AddQuestions(state,
+        [
+            new ProposedQuestion
+            {
+                IsBlocking = false,
+                Text = "Issue #11 timed out at 600s twice. Should we split this into smaller issues or increase timeout?"
+            }
+        ]);
+
+        Assert.That(created.Count == 0, $"Expected no persisted questions but got {created.Count}.");
+        Assert.That(state.Questions.Count == 0, $"Expected zero open questions but got {state.Questions.Count}.");
+        Assert.That(state.Decisions.Any(item => string.Equals(item.Source, "runtime-policy", StringComparison.OrdinalIgnoreCase)),
+            "Expected runtime-policy decision to be recorded for auto-resolved question.");
+        return Task.CompletedTask;
+    }
+
+    private static Task AddQuestions_KeepsBlockingQuestionOpen()
+    {
+        var svc = new QuestionService(new FakeSystemClock());
+        var state = new WorkspaceState();
+
+        var created = svc.AddQuestions(state,
+        [
+            new ProposedQuestion
+            {
+                IsBlocking = true,
+                Text = "Which customer environment should we target for this rollout?"
+            }
+        ]);
+
+        Assert.That(created.Count == 1, $"Expected one created question but got {created.Count}.");
+        Assert.That(state.Questions.Count == 1, $"Expected one persisted question but got {state.Questions.Count}.");
+        Assert.That(state.Questions[0].IsBlocking, "Expected the persisted question to remain blocking.");
         return Task.CompletedTask;
     }
 }

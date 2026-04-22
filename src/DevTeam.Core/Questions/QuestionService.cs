@@ -55,11 +55,62 @@ public sealed class QuestionService : IQuestionService
 
     public IReadOnlyList<QuestionItem> AddQuestions(WorkspaceState state, IEnumerable<ProposedQuestion> questions)
     {
-        return questions
-            .Where(item => !string.IsNullOrWhiteSpace(item.Text))
-            .Select(item => AddQuestion(state, item.Text, item.IsBlocking))
-            .ToList();
+        var created = new List<QuestionItem>();
+        foreach (var candidate in questions.Where(item => !string.IsNullOrWhiteSpace(item.Text)))
+        {
+            if (ShouldAutoResolveRuntimeManagedQuestion(candidate))
+            {
+                RecordDecision(
+                    state,
+                    "Auto-resolved runtime-managed question",
+                    $"Question: {candidate.Text.Trim()}\n\nResolution: Runtime policy owns this operational decision and will continue without user input.",
+                    "runtime-policy");
+                continue;
+            }
+
+            created.Add(AddQuestion(state, candidate.Text, candidate.IsBlocking));
+        }
+
+        return created;
     }
+
+    private static bool ShouldAutoResolveRuntimeManagedQuestion(ProposedQuestion question)
+    {
+        if (question.IsBlocking)
+        {
+            return false;
+        }
+
+        var text = question.Text.Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var normalized = text.ToLowerInvariant();
+        return ContainsAny(normalized,
+            "timeout",
+            "retry",
+            "batch",
+            "pair",
+            "sequential",
+            "merge risk",
+            "subagent",
+            "split",
+            "dependency",
+            "depends on",
+            "close #",
+            "proactively close",
+            "save the credit",
+            "credit",
+            "budget",
+            "phase",
+            "pipeline",
+            "queue",
+            "scheduler");
+    }
+
+    private static bool ContainsAny(string source, params string[] needles) => needles.Any(source.Contains);
 
     private void RecordDecision(WorkspaceState state, string title, string detail, string source)
     {

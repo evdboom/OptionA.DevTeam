@@ -174,7 +174,8 @@ internal static class ReconServiceTests
 
         Assert.Contains("Relevant skill slugs:", prompt);
         Assert.Contains("scout", prompt);
-        Assert.Contains("# Skill: Scout", prompt);
+        Assert.Contains("Skill manifest (load on demand)", prompt);
+        Assert.Contains("source=.devteam-source/skills/scout/SKILL.md", prompt);
         return Task.CompletedTask;
     }
 
