@@ -15,6 +15,7 @@ internal static class FileSystemConfigurationLoaderTests
         new("LoadMcpServers_NormalizesRelativeCwd_WhenInsideRepo", LoadMcpServers_NormalizesRelativeCwd_WhenInsideRepo),
         new("LoadMcpServers_Throws_WhenCwdEscapesRepo", LoadMcpServers_Throws_WhenCwdEscapesRepo),
         new("ParseMarkdownAsset_StripsFrontmatter_AndExtractsTools", ParseMarkdownAsset_StripsFrontmatter_AndExtractsTools),
+        new("ParseMarkdownAsset_ExtractsAllowedToolsBracketList", ParseMarkdownAsset_ExtractsAllowedToolsBracketList),
     ];
 
     /// <summary>
@@ -271,6 +272,40 @@ internal static class FileSystemConfigurationLoaderTests
         Assert.That(roles[0].RequiredTools.Contains("git"), "Expected tool 'git'");
         Assert.That(roles[0].RequiredTools.Contains("dotnet"), "Expected tool 'dotnet'");
         Assert.That(!roles[0].Body.Contains("---"), "Expected frontmatter stripped from body");
+        return Task.CompletedTask;
+    }
+
+    private static Task ParseMarkdownAsset_ExtractsAllowedToolsBracketList()
+    {
+        var fs = new InMemoryFileSystem();
+        var loader = new FileSystemConfigurationLoader(fs);
+
+        var resolvedDir = FindResolvedDirectoryPath(Path.Combine(".devteam-source", "skills"))
+            ?? Path.Combine("C:\\nonexistent-test-root", ".devteam-source", "skills");
+
+        fs.CreateDirectory(resolvedDir);
+        var skillDir = Path.Combine(resolvedDir, "scout");
+        fs.CreateDirectory(skillDir);
+        var skillPath = Path.Combine(skillDir, "SKILL.md");
+        var content = """
+            ---
+            allowed-tools: [read_file, file_search, grep_search]
+            ---
+            # Skill: Scout
+
+            Scout the codebase.
+            """;
+        fs.WriteAllText(skillPath, content);
+
+        var skills = loader.LoadSkills("C:\\nonexistent-test-root");
+
+        Assert.That(skills.Count == 1, $"Expected 1 skill but got {skills.Count}");
+        Assert.That(skills[0].Slug == "scout", $"Expected slug 'scout' but got '{skills[0].Slug}'");
+        Assert.That(skills[0].RequiredTools.Count == 3, $"Expected 3 tools but got {skills[0].RequiredTools.Count}");
+        Assert.That(skills[0].RequiredTools.Contains("read_file"), "Expected tool 'read_file'");
+        Assert.That(skills[0].RequiredTools.Contains("file_search"), "Expected tool 'file_search'");
+        Assert.That(skills[0].RequiredTools.Contains("grep_search"), "Expected tool 'grep_search'");
+        Assert.That(!skills[0].Body.Contains("---"), "Expected frontmatter stripped from body");
         return Task.CompletedTask;
     }
 }

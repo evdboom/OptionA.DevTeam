@@ -379,9 +379,8 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
         for (var index = 1; index < endIndex; index++)
         {
             var line = lines[index].Trim();
-            if (line.StartsWith("tools:", StringComparison.OrdinalIgnoreCase))
+            if (TryGetToolsLineValue(line, out var inline))
             {
-                var inline = line["tools:".Length..].Trim();
                 if (!string.IsNullOrWhiteSpace(inline))
                 {
                     requiredTools.AddRange(ParseToolList(inline));
@@ -399,8 +398,39 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
         return new MarkdownAsset(body, requiredTools.Where(tool => !string.IsNullOrWhiteSpace(tool)).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
     }
 
-    private static IEnumerable<string> ParseToolList(string inline) =>
-        inline.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    private static bool TryGetToolsLineValue(string line, out string value)
+    {
+        const string toolsPrefix = "tools:";
+        const string allowedToolsPrefix = "allowed-tools:";
+
+        if (line.StartsWith(toolsPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            value = line[toolsPrefix.Length..].Trim();
+            return true;
+        }
+
+        if (line.StartsWith(allowedToolsPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            value = line[allowedToolsPrefix.Length..].Trim();
+            return true;
+        }
+
+        value = "";
+        return false;
+    }
+
+    private static IEnumerable<string> ParseToolList(string inline)
+    {
+        var normalized = inline.Trim();
+        if (normalized.StartsWith("[", StringComparison.Ordinal) &&
+            normalized.EndsWith("]", StringComparison.Ordinal) &&
+            normalized.Length >= 2)
+        {
+            normalized = normalized[1..^1];
+        }
+
+        return normalized.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
 
     private static string GetString(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
