@@ -171,23 +171,38 @@ internal static class ConnectCommandTests
             .ThenBy(r => r.IssueId)
             .ToList();
 
+    private static ActiveStream? FindActiveStreamHelper(
+        IReadOnlyList<ActiveStream> activeStreams,
+        Predicate<ActiveStream> predicate)
+    {
+        foreach (var activeStream in activeStreams)
+        {
+            if (predicate(activeStream))
+                return activeStream;
+        }
+
+        return null;
+    }
+
     private static ActiveStream? ResolveConnectedStreamTargetHelper(IReadOnlyList<ActiveStream> activeStreams, string? roleArg, string? issueArg)
     {
         if (string.IsNullOrWhiteSpace(roleArg))
             return activeStreams.Count == 1 ? activeStreams[0] : null;
 
         if (!string.IsNullOrWhiteSpace(issueArg) && int.TryParse(issueArg, out var issueFromSecondArg))
-            return activeStreams.FirstOrDefault(s =>
-                s.IssueId == issueFromSecondArg &&
-                string.Equals(s.RoleSlug, roleArg, StringComparison.OrdinalIgnoreCase));
+            return FindActiveStreamHelper(
+                activeStreams,
+                s => s.IssueId == issueFromSecondArg &&
+                     string.Equals(s.RoleSlug, roleArg, StringComparison.OrdinalIgnoreCase));
 
         if (TryParseStreamKeyHelper(roleArg, out var roleFromKey, out var issueFromKey))
-            return activeStreams.FirstOrDefault(s =>
-                s.IssueId == issueFromKey &&
-                string.Equals(s.RoleSlug, roleFromKey, StringComparison.OrdinalIgnoreCase));
+            return FindActiveStreamHelper(
+                activeStreams,
+                s => s.IssueId == issueFromKey &&
+                     string.Equals(s.RoleSlug, roleFromKey, StringComparison.OrdinalIgnoreCase));
 
         if (int.TryParse(roleArg, out var issueOnly))
-            return activeStreams.FirstOrDefault(s => s.IssueId == issueOnly);
+            return FindActiveStreamHelper(activeStreams, s => s.IssueId == issueOnly);
 
         var sameRole = activeStreams
             .Where(s => string.Equals(s.RoleSlug, roleArg, StringComparison.OrdinalIgnoreCase))
