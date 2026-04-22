@@ -59,10 +59,10 @@ function assertFrameIntegrity(buffer: string[][]): void {
 
   // Require all panel regions to contain expected markers in the same frame.
   // This catches transient blank-frame redraws that simple one-off text checks can miss.
-  expect(frame.includes("Phase:")).toBeTruthy();
-  expect(frame.includes("Progress")).toBeTruthy();
-  expect(frame.includes("help for commands")).toBeTruthy();
-  expect(frame.includes("> ")).toBeTruthy();
+  expect(frame).toContain("Phase:");
+  expect(frame).toContain("Progress");
+  expect(frame).toContain("help for commands");
+  expect(frame).toContain("> ");
 }
 
 test("shell renders 3 full-width panels", async ({ terminal }) => {
