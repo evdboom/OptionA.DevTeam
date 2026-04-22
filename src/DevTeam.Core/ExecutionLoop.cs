@@ -860,6 +860,12 @@ public class LoopExecutor(
             if (fallbackSelection.Count > 0)
             {
                 Log(log, options.Verbosity, "  Orchestrator did not persist a batch. Falling back to heuristic selection.");
+                _runtime.RecordDecision(
+                    state,
+                    "Execution batch fallback applied",
+                    "The orchestrator did not persist a selection, so the runtime used heuristic ready-issue selection.",
+                    "execution-orchestrator",
+                    sessionId: orchestratorSession.SessionId);
                 _runtime.SetExecutionSelection(
                     state,
                     fallbackSelection,

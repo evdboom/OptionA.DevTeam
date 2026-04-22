@@ -24,6 +24,8 @@ internal static class WorkspaceStoreTests
         new("Save_WritesExternalReferences_ToMirrors", Save_WritesExternalReferences_ToMirrors),
         new("Save_ThenLoad_RoundTrips_Budget", Save_ThenLoad_RoundTrips_Budget),
         new("Load_ThrowsInvalidOperation_WhenNoFile", Load_ThrowsInvalidOperation_WhenNoFile),
+        new("Save_NormalizesIssueScopePaths", Save_NormalizesIssueScopePaths),
+        new("Save_Throws_WhenIssueScopeEscapesRepo", Save_Throws_WhenIssueScopeEscapesRepo),
         new("Initialize_CreatesWorkspaceJson", Initialize_CreatesWorkspaceJson),
     ];
 
@@ -149,6 +151,60 @@ internal static class WorkspaceStoreTests
         Assert.Throws<InvalidOperationException>(
             () => store.Load(),
             "Expected InvalidOperationException when no workspace file exists");
+        return Task.CompletedTask;
+    }
+
+    private static Task Save_NormalizesIssueScopePaths()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = CreateStore(fs);
+        var state = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
+        };
+
+        state.Issues.Add(new IssueItem
+        {
+            Id = state.NextIssueId++,
+            Title = "Scoped issue",
+            RoleSlug = "developer",
+            FilesInScope =
+            [
+                "src/../src/App.cs",
+                "src/App.cs",
+                Path.Combine(RepoRoot, "src", "App.cs")
+            ]
+        });
+
+        store.Save(state);
+        var loaded = store.Load();
+        var filesInScope = loaded.Issues[0].FilesInScope;
+
+        Assert.That(filesInScope.Count == 1, $"Expected one normalized path but got {filesInScope.Count}");
+        Assert.That(filesInScope[0] == "src/App.cs", $"Expected 'src/App.cs' but got '{filesInScope[0]}'");
+        return Task.CompletedTask;
+    }
+
+    private static Task Save_Throws_WhenIssueScopeEscapesRepo()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = CreateStore(fs);
+        var state = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
+        };
+
+        state.Issues.Add(new IssueItem
+        {
+            Id = state.NextIssueId++,
+            Title = "Unsafe scope",
+            RoleSlug = "developer",
+            FilesInScope = ["..\\..\\outside.txt"]
+        });
+
+        Assert.Throws<InvalidOperationException>(() => store.Save(state));
         return Task.CompletedTask;
     }
 

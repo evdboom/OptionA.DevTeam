@@ -12,6 +12,8 @@ internal static class FileSystemConfigurationLoaderTests
         new("LoadRoles_ParsesMarkdownFiles_WhenPresent", LoadRoles_ParsesMarkdownFiles_WhenPresent),
         new("LoadModes_ReturnsDefaults_WhenDirectoryDoesNotExist", LoadModes_ReturnsDefaults_WhenDirectoryDoesNotExist),
         new("LoadMcpServers_ReturnsEmpty_WhenFileDoesNotExist", LoadMcpServers_ReturnsEmpty_WhenFileDoesNotExist),
+        new("LoadMcpServers_NormalizesRelativeCwd_WhenInsideRepo", LoadMcpServers_NormalizesRelativeCwd_WhenInsideRepo),
+        new("LoadMcpServers_Throws_WhenCwdEscapesRepo", LoadMcpServers_Throws_WhenCwdEscapesRepo),
         new("ParseMarkdownAsset_StripsFrontmatter_AndExtractsTools", ParseMarkdownAsset_StripsFrontmatter_AndExtractsTools),
     ];
 
@@ -189,6 +191,54 @@ internal static class FileSystemConfigurationLoaderTests
         var servers = loader.LoadMcpServers("C:\\nonexistent-test-root");
 
         Assert.That(servers.Count == 0, $"Expected 0 MCP servers but got {servers.Count}");
+        return Task.CompletedTask;
+    }
+
+    private static Task LoadMcpServers_NormalizesRelativeCwd_WhenInsideRepo()
+    {
+        var fs = new InMemoryFileSystem();
+        var loader = new FileSystemConfigurationLoader(fs);
+        var resolvedPath = FindResolvedFilePath(Path.Combine(".devteam-source", "MCP_SERVERS.json"))
+            ?? Path.Combine("C:\\nonexistent-test-root", ".devteam-source", "MCP_SERVERS.json");
+
+        fs.WriteAllText(resolvedPath, """
+            [
+              {
+                "Name": "workspace",
+                "Command": "devteam",
+                "Args": ["workspace-mcp"],
+                "Cwd": ".devteam-source"
+              }
+            ]
+            """);
+
+        var servers = loader.LoadMcpServers("C:\\nonexistent-test-root");
+
+        Assert.That(servers.Count == 1, $"Expected 1 MCP server but got {servers.Count}");
+        Assert.That(servers[0].Cwd == Path.GetFullPath("C:\\nonexistent-test-root\\.devteam-source"),
+            $"Expected cwd to be normalized inside repo but got '{servers[0].Cwd}'");
+        return Task.CompletedTask;
+    }
+
+    private static Task LoadMcpServers_Throws_WhenCwdEscapesRepo()
+    {
+        var fs = new InMemoryFileSystem();
+        var loader = new FileSystemConfigurationLoader(fs);
+        var resolvedPath = FindResolvedFilePath(Path.Combine(".devteam-source", "MCP_SERVERS.json"))
+            ?? Path.Combine("C:\\nonexistent-test-root", ".devteam-source", "MCP_SERVERS.json");
+
+        fs.WriteAllText(resolvedPath, """
+            [
+              {
+                "Name": "workspace",
+                "Command": "devteam",
+                "Args": ["workspace-mcp"],
+                "Cwd": "..\\..\\outside"
+              }
+            ]
+            """);
+
+        Assert.Throws<InvalidOperationException>(() => loader.LoadMcpServers("C:\\nonexistent-test-root"));
         return Task.CompletedTask;
     }
 

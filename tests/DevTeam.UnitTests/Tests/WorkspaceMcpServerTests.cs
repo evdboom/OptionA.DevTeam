@@ -16,6 +16,7 @@ internal static class WorkspaceMcpServerTests
         new("GetIssueTool_ReturnsError_WhenIssueNotFound", GetIssueTool_ReturnsError_WhenIssueNotFound),
         new("GetDecisionsTool_ReturnsOnlyRequestedDecisions", GetDecisionsTool_ReturnsOnlyRequestedDecisions),
         new("GetDecisionsTool_ReturnsEmpty_WhenNoIdsGiven", GetDecisionsTool_ReturnsEmpty_WhenNoIdsGiven),
+        new("CreateIssueTool_ReturnsError_WhenTitleTooLong", CreateIssueTool_ReturnsError_WhenTitleTooLong),
     ];
 
     private const string TestWorkspace = "test-ws";
@@ -316,5 +317,30 @@ internal static class WorkspaceMcpServerTests
                 Directory.Delete(workspacePath, recursive: true);
             }
         }
+    }
+
+    private static async Task CreateIssueTool_ReturnsError_WhenTitleTooLong()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore(TestWorkspace, fs);
+        store.Initialize(TestRepoRoot, 100, 20);
+
+        var server = new WorkspaceMcpServer(TestWorkspace);
+
+        await SendMcpRequest(server, McpInitialize);
+        using var response = await SendMcpRequest(server, McpToolsCall, new
+        {
+            name = "create_issue",
+            arguments = new
+            {
+                title = new string('x', 201),
+                detail = "too long title test"
+            }
+        });
+
+        var responseText = response.RootElement.ToString();
+        Assert.That(responseText.Contains("maximum length", StringComparison.OrdinalIgnoreCase) ||
+                    responseText.Contains("error", StringComparison.OrdinalIgnoreCase),
+            $"Expected create_issue validation error but got: {responseText}");
     }
 }

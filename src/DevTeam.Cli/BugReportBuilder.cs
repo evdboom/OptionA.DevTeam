@@ -13,8 +13,10 @@ internal static class BugReportBuilder
         ShellSessionDiagnostics? shellDiagnostics,
         bool redactPaths,
         int historyCount,
-        int errorCount)
+        int errorCount,
+        ISystemClock? clock = null)
     {
+        var effectiveClock = clock ?? new SystemClock();
         var replacements = CreatePathReplacements(store);
         var currentDirectory = Path.GetFullPath(Environment.CurrentDirectory);
         var shellCommands = shellDiagnostics?.GetRecentCommands(historyCount) ?? [];
@@ -54,7 +56,7 @@ internal static class BugReportBuilder
         sb.AppendLine();
         sb.AppendLine("## Environment");
         sb.AppendLine($"- DevTeam version: {Sanitize(version, redactPaths, replacements)}");
-        sb.AppendLine($"- Timestamp (UTC): {DateTimeOffset.UtcNow:O}");
+        sb.AppendLine($"- Timestamp (UTC): {effectiveClock.UtcNow:O}");
         sb.AppendLine($"- OS: {RuntimeInformation.OSDescription.Trim()}");
         sb.AppendLine($"- .NET runtime: {RuntimeInformation.FrameworkDescription}");
         sb.AppendLine($"- Process architecture: {RuntimeInformation.ProcessArchitecture}");

@@ -50,7 +50,7 @@ public sealed class WorkspaceMcpServer(
             JsonNode? response;
             try
             {
-                response = HandleRequest(root, method);
+                response = await HandleRequestAsync(root, method, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -64,7 +64,7 @@ public sealed class WorkspaceMcpServer(
         }
     }
 
-    private JsonNode? HandleRequest(JsonElement root, string method)
+    private async Task<JsonNode?> HandleRequestAsync(JsonElement root, string method, CancellationToken cancellationToken)
     {
         return method switch
         {
@@ -86,12 +86,12 @@ public sealed class WorkspaceMcpServer(
             {
                 ["tools"] = BuildToolDefinitions()
             }),
-            "tools/call" => CreateSuccessResponse(root, HandleToolCall(root)),
+            "tools/call" => CreateSuccessResponse(root, await HandleToolCallAsync(root, cancellationToken)),
             _ => CreateErrorResponse(root, -32601, $"Method '{method}' is not supported.")
         };
     }
 
-    private JsonNode HandleToolCall(JsonElement root)
+    private async Task<JsonNode> HandleToolCallAsync(JsonElement root, CancellationToken cancellationToken)
     {
         var parameters = root.TryGetProperty("params", out var paramsElement)
             ? paramsElement
@@ -123,14 +123,14 @@ public sealed class WorkspaceMcpServer(
                     state,
                     new IssueRequest
                     {
-                        Title = GetRequiredString(arguments, "title"),
-                        Detail = GetString(arguments, "detail"),
-                        RoleSlug = GetString(arguments, "roleSlug", "developer"),
+                        Title = GetRequiredString(arguments, "title", minLength: 3, maxLength: 200),
+                        Detail = GetString(arguments, "detail", maxLength: 20_000),
+                        RoleSlug = GetString(arguments, "roleSlug", "developer", maxLength: 64),
                         Priority = GetInt(arguments, "priority", 50),
                         RoadmapItemId = GetNullableInt(arguments, "roadmapItemId"),
                         DependsOn = GetIntList(arguments, "dependsOn"),
-                        Area = GetOptionalString(arguments, "area"),
-                        FamilyKey = GetOptionalString(arguments, "familyKey"),
+                        Area = GetOptionalString(arguments, "area", maxLength: 128),
+                        FamilyKey = GetOptionalString(arguments, "familyKey", maxLength: 128),
                         ParentIssueId = GetNullableInt(arguments, "parentIssueId"),
                         PipelineId = GetNullableInt(arguments, "pipelineId"),
                         PipelineStageIndex = GetNullableInt(arguments, "pipelineStageIndex"),
@@ -142,7 +142,7 @@ public sealed class WorkspaceMcpServer(
             {
                 var question = runtime.AddQuestion(
                     state,
-                    GetRequiredString(arguments, "text"),
+                    GetRequiredString(arguments, "text", minLength: 3, maxLength: 10_000),
                     GetBool(arguments, "blocking", true));
                 return new { question.Id, question.Text, question.IsBlocking };
             }, save: true)),
@@ -150,27 +150,27 @@ public sealed class WorkspaceMcpServer(
             {
                 var decision = runtime.RecordDecision(
                     state,
-                    GetRequiredString(arguments, "title"),
-                    GetRequiredString(arguments, "detail"),
-                    GetString(arguments, "source", "workspace-mcp"),
+                    GetRequiredString(arguments, "title", minLength: 3, maxLength: 200),
+                    GetRequiredString(arguments, "detail", minLength: 3, maxLength: 20_000),
+                    GetString(arguments, "source", "workspace-mcp", maxLength: 80),
                     GetNullableInt(arguments, "issueId"),
                     GetNullableInt(arguments, "runId"),
-                    GetOptionalString(arguments, "sessionId"));
+                    GetOptionalString(arguments, "sessionId", maxLength: 200));
                 return new { decision.Id, decision.Title, decision.Source };
             }, save: true)),
             "spawn_agent" when _subAgentRunner is not null => BuildToolResult(
-                _subAgentRunner(
+                await _subAgentRunner(
                     GetInt(arguments, "issueId", 0),
-                    GetOptionalString(arguments, "contextHint"),
-                    CancellationToken.None).GetAwaiter().GetResult()),
+                    GetOptionalString(arguments, "contextHint", maxLength: 2_000),
+                    cancellationToken)),
             "get_runtime_capabilities" => BuildToolResult(BuildRuntimeCapabilities()),
             "update_issue_status" => BuildToolResult(WithWorkspace((runtime, state) =>
             {
                 var issue = DevTeamRuntime.UpdateIssueStatus(
                     state,
                     GetInt(arguments, "issueId", 0),
-                    GetRequiredString(arguments, "status"),
-                    GetOptionalString(arguments, "notes"));
+                    GetRequiredString(arguments, "status", maxLength: 32),
+                    GetOptionalString(arguments, "notes", maxLength: 10_000));
                 return new { issue.Id, issue.Title, Status = issue.Status.ToString(), issue.Notes };
             }, save: true)),
             "get_issue" => BuildToolResult(WithWorkspace((_, state) =>
@@ -186,7 +186,7 @@ public sealed class WorkspaceMcpServer(
                     issue.Priority,
                     Status = issue.Status.ToString(),
                     RefinementState = issue.RefinementState.ToString(),
-                    issue.FilesInScope,
+                    FilesInScope = GetSafeFilesInScope(issue.FilesInScope),
                     issue.LinkedDecisionIds,
                     issue.DependsOnIssueIds,
                     issue.ParentIssueId,
@@ -573,30 +573,46 @@ public sealed class WorkspaceMcpServer(
         await writer.FlushAsync(cancellationToken);
     }
 
-    private static string GetRequiredString(JsonElement element, string propertyName)
+    private static string GetRequiredString(JsonElement element, string propertyName, int minLength = 1, int maxLength = 4096)
     {
-        var value = GetString(element, propertyName);
+        var value = GetString(element, propertyName, maxLength: maxLength);
         if (string.IsNullOrWhiteSpace(value))
         {
             throw new InvalidOperationException($"Argument '{propertyName}' is required.");
         }
 
+        if (value.Trim().Length < minLength)
+        {
+            throw new InvalidOperationException($"Argument '{propertyName}' must be at least {minLength} characters.");
+        }
+
         return value;
     }
 
-    private static string GetString(JsonElement element, string propertyName, string fallback = "")
+    private static string GetString(JsonElement element, string propertyName, string fallback = "", int maxLength = 4096)
     {
         if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
         {
             return fallback;
         }
 
-        return value.ValueKind == JsonValueKind.String ? value.GetString() ?? fallback : fallback;
+        if (value.ValueKind != JsonValueKind.String)
+        {
+            return fallback;
+        }
+
+        var parsed = value.GetString() ?? fallback;
+        if (parsed.Length > maxLength)
+        {
+            throw new InvalidOperationException($"Argument '{propertyName}' exceeds maximum length of {maxLength} characters.");
+        }
+
+        return parsed;
     }
 
-    private static string? GetOptionalString(JsonElement element, string propertyName)
+    private static string? GetOptionalString(JsonElement element, string propertyName, int maxLength = 4096)
     {
-        var value = GetString(element, propertyName);
+        var value = GetString(element, propertyName, maxLength: maxLength);
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
@@ -640,6 +656,16 @@ public sealed class WorkspaceMcpServer(
         return value.EnumerateArray()
             .Select(item => item.TryGetInt32(out var parsed) ? parsed : 0)
             .Where(item => item > 0)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> GetSafeFilesInScope(IReadOnlyList<string> files)
+    {
+        return files
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path.Trim().Replace('\\', '/'))
+            .Where(path => !path.StartsWith("../", StringComparison.Ordinal) && !path.StartsWith("/", StringComparison.Ordinal))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 }

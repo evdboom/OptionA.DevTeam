@@ -16,7 +16,7 @@ public static class GoalInputResolver
             return LoadGoalFile(goalFilePath!, workingDirectory);
         }
 
-        return hasInline ? inlineGoal!.Trim() : null;
+        return hasInline ? CliOptionParser.ValidateGoalTextOrThrow(inlineGoal!) : null;
     }
 
     public static string LoadGoalFile(string goalFilePath, string workingDirectory)
@@ -30,12 +30,12 @@ public static class GoalInputResolver
             throw new InvalidOperationException($"Goal file not found: {fullPath}");
         }
 
-        var content = File.ReadAllText(fullPath).Trim();
+        var content = File.ReadAllText(fullPath);
         if (string.IsNullOrWhiteSpace(content))
         {
             throw new InvalidOperationException($"Goal file is empty: {fullPath}");
         }
 
-        return content;
+        return CliOptionParser.ValidateGoalTextOrThrow(content);
     }
 }
