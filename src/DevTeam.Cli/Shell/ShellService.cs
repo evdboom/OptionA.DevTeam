@@ -1250,23 +1250,34 @@ internal sealed partial class ShellService(
             .ThenBy(r => r.IssueId)
             .ToList();
 
+    private static ActiveStream? FindActiveStream(IReadOnlyList<ActiveStream> activeStreams, Func<ActiveStream, bool> predicate)
+    {
+        foreach (var activeStream in activeStreams)
+        {
+            if (predicate(activeStream))
+                return activeStream;
+        }
+
+        return null;
+    }
+
     private static ActiveStream? ResolveConnectedStreamTarget(IReadOnlyList<ActiveStream> activeStreams, string? roleArg, string? issueArg)
     {
         if (string.IsNullOrWhiteSpace(roleArg))
             return activeStreams.Count == 1 ? activeStreams[0] : null;
 
         if (!string.IsNullOrWhiteSpace(issueArg) && int.TryParse(issueArg, out var issueFromSecondArg))
-            return activeStreams.FirstOrDefault(s =>
+            return FindActiveStream(activeStreams, s =>
                 s.IssueId == issueFromSecondArg &&
                 string.Equals(s.RoleSlug, roleArg, StringComparison.OrdinalIgnoreCase));
 
         if (TryParseStreamKey(roleArg, out var roleFromKey, out var issueFromKey))
-            return activeStreams.FirstOrDefault(s =>
+            return FindActiveStream(activeStreams, s =>
                 s.IssueId == issueFromKey &&
                 string.Equals(s.RoleSlug, roleFromKey, StringComparison.OrdinalIgnoreCase));
 
         if (int.TryParse(roleArg, out var issueOnly))
-            return activeStreams.FirstOrDefault(s => s.IssueId == issueOnly);
+            return FindActiveStream(activeStreams, s => s.IssueId == issueOnly);
 
         var sameRole = activeStreams
             .Where(s => string.Equals(s.RoleSlug, roleArg, StringComparison.OrdinalIgnoreCase))
