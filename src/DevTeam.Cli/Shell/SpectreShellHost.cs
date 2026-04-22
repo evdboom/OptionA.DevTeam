@@ -43,7 +43,10 @@ internal static class SpectreShellHost
         // This is the same mechanism used by vim, less, htop, etc.
         var useAltScreen = !Console.IsOutputRedirected && !Console.IsInputRedirected;
         if (useAltScreen)
+        {
             Console.Write("\x1b[?1049h"); // enter alternate screen
+            TerminalMouseScroll.EnableTracking();
+        }
 
         var commandChannel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
         var consumerTask = ConsumeCommandsAsync(commandChannel.Reader, shell, cancellationToken);
@@ -117,6 +120,7 @@ internal static class SpectreShellHost
             commandChannel.Writer.Complete();
             if (useAltScreen)
             {
+                TerminalMouseScroll.DisableTracking();
                 Console.Write("\x1b[?1049l"); // restore original screen
             }
             
@@ -178,6 +182,11 @@ internal static class SpectreShellHost
         while (Console.KeyAvailable)
         {
             var key = Console.ReadKey(intercept: true);
+            if (TerminalMouseScroll.TryHandleWheel(key, shell.Messages, ref scrollOffset, ProgressWidth()))
+            {
+                continue;
+            }
+
             var text = inputBuffer.ToString();
 
             // PageUp → scroll progress pane up (older lines)

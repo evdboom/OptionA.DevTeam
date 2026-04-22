@@ -22,9 +22,10 @@ internal static class TestRunner
         var r8 = await RunSuiteAsync("QuestionStatusMarkupTests", QuestionStatusMarkupTests.GetTests());
         var r9 = await RunSuiteAsync("OnboardingGuideBuilderTests", OnboardingGuideBuilderTests.GetTests());
         var r10 = await RunSuiteAsync("AdventureMapRendererTests", AdventureMapRendererTests.GetTests());
+        var r11 = await RunSuiteAsync("TerminalMouseScrollTests", TerminalMouseScrollTests.GetTests());
 
-        passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed + r7.Passed + r8.Passed + r9.Passed + r10.Passed;
-        failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed + r7.Failed + r8.Failed + r9.Failed + r10.Failed;
+        passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed + r7.Passed + r8.Passed + r9.Passed + r10.Passed + r11.Passed;
+        failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed + r7.Failed + r8.Failed + r9.Failed + r10.Failed + r11.Failed;
 
         Console.WriteLine();
         Console.WriteLine($"Results: {passed} passed, {failed} failed");

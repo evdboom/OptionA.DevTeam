@@ -101,6 +101,11 @@ internal static class AdventureShellHost
         while (Console.KeyAvailable)
         {
             var key = Console.ReadKey(intercept: true);
+            if (TerminalMouseScroll.TryHandleWheel(key, shell.Messages, ref scrollOffset, ProgressWidth()))
+            {
+                continue;
+            }
+
             if (HandleSharedScrollKeys(key, shell, ref scrollOffset))
             {
                 continue;
@@ -282,7 +287,7 @@ internal static class AdventureShellHost
         return Math.Max(3, ShellPanelBuilder.ContentRowCount(terminalHeight) / 2);
     }
 
-    private static int ProgressWidth()
+    internal static int ProgressWidth()
     {
         var terminalWidth = Console.IsOutputRedirected ? 120 : Math.Max(40, Console.WindowWidth);
         return Math.Max(20, terminalWidth - LeftColumnWidth - 4);
