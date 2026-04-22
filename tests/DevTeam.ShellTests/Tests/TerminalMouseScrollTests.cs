@@ -124,37 +124,43 @@ internal static class TerminalMouseScrollTests
     {
         TerminalMouseScroll.ClearPendingKeysForTests();
 
-        var sequence = new Queue<ConsoleKeyInfo>(
-        [
-            new ConsoleKeyInfo('[', ConsoleKey.Oem4, shift: false, alt: false, control: false),
-            new ConsoleKeyInfo('<', ConsoleKey.OemComma, shift: false, alt: false, control: false),
-            new ConsoleKeyInfo('6', ConsoleKey.D6, shift: false, alt: false, control: false),
-            new ConsoleKeyInfo('4', ConsoleKey.D4, shift: false, alt: false, control: false),
-            new ConsoleKeyInfo(';', ConsoleKey.Oem1, shift: false, alt: false, control: false),
-            new ConsoleKeyInfo('5', ConsoleKey.D5, shift: false, alt: false, control: false),
-            new ConsoleKeyInfo('2', ConsoleKey.D2, shift: false, alt: false, control: false),
-            new ConsoleKeyInfo(';', ConsoleKey.Oem1, shift: false, alt: false, control: false),
-            new ConsoleKeyInfo('1', ConsoleKey.D1, shift: false, alt: false, control: false),
-            new ConsoleKeyInfo('2', ConsoleKey.D2, shift: false, alt: false, control: false),
-            new ConsoleKeyInfo('M', ConsoleKey.M, shift: true, alt: false, control: false),
-        ]);
+        try
+        {
+            var sequence = new Queue<ConsoleKeyInfo>(
+            [
+                new ConsoleKeyInfo('[', ConsoleKey.Oem4, shift: false, alt: false, control: false),
+                new ConsoleKeyInfo('<', ConsoleKey.OemComma, shift: false, alt: false, control: false),
+                new ConsoleKeyInfo('6', ConsoleKey.D6, shift: false, alt: false, control: false),
+                new ConsoleKeyInfo('4', ConsoleKey.D4, shift: false, alt: false, control: false),
+                new ConsoleKeyInfo(';', ConsoleKey.Oem1, shift: false, alt: false, control: false),
+                new ConsoleKeyInfo('5', ConsoleKey.D5, shift: false, alt: false, control: false),
+                new ConsoleKeyInfo('2', ConsoleKey.D2, shift: false, alt: false, control: false),
+                new ConsoleKeyInfo(';', ConsoleKey.Oem1, shift: false, alt: false, control: false),
+                new ConsoleKeyInfo('1', ConsoleKey.D1, shift: false, alt: false, control: false),
+                new ConsoleKeyInfo('2', ConsoleKey.D2, shift: false, alt: false, control: false),
+                new ConsoleKeyInfo('M', ConsoleKey.M, shift: true, alt: false, control: false),
+            ]);
 
-        var probeCalls = 0;
-        var success = TerminalMouseScroll.TryGetWheelDelta(
-            new ConsoleKeyInfo('\x1b', ConsoleKey.Escape, shift: false, alt: false, control: false),
-            () =>
-            {
-                probeCalls++;
-                // Simulate a brief delay before terminal bytes become available.
-                return probeCalls > 2 && sequence.Count > 0;
-            },
-            () => sequence.Dequeue(),
-            out var delta);
+            var probeCalls = 0;
+            var success = TerminalMouseScroll.TryGetWheelDelta(
+                new ConsoleKeyInfo('\x1b', ConsoleKey.Escape, shift: false, alt: false, control: false),
+                () =>
+                {
+                    probeCalls++;
+                    // Simulate a brief delay before terminal bytes become available.
+                    return probeCalls > 2 && sequence.Count > 0;
+                },
+                () => sequence.Dequeue(),
+                out var delta);
 
-        Assert.That(success, "Expected delayed wheel sequence to parse successfully.");
-        Assert.That(delta == 1, $"Expected wheel-up delta 1 but got {delta}.");
-        Assert.That(!TerminalMouseScroll.TryReadInputKey(() => false, () => throw new InvalidOperationException("No pending keys expected."), out _), "Expected no pending keys after successful parse.");
-        TerminalMouseScroll.ClearPendingKeysForTests();
+            Assert.That(success, "Expected delayed wheel sequence to parse successfully.");
+            Assert.That(delta == 1, $"Expected wheel-up delta 1 but got {delta}.");
+            Assert.That(!TerminalMouseScroll.TryReadInputKey(() => false, () => throw new InvalidOperationException("No pending keys expected."), out _), "Expected no pending keys after successful parse.");
+        }
+        finally
+        {
+            TerminalMouseScroll.ClearPendingKeysForTests();
+        }
         return Task.CompletedTask;
     }
 }
