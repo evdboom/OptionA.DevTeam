@@ -30,6 +30,7 @@ internal static class SpectreShellHost
         var savedDraft = string.Empty; // preserves unsent input while browsing history
         var scrollOffset = 0;  // 0 = auto-follow latest; N = scrolled N lines up
         var adventureSession = new AdventureSessionState();
+        var normalLayout = BuildLayoutTree();
         var adventureLayout = AdventureShellHost.BuildLayoutTree();
         var lastUiVersion = -1L;
         var lastCursor = -1;
@@ -53,7 +54,8 @@ internal static class SpectreShellHost
 
         try
         {
-            var liveFrame = BuildFrame(shell, string.Empty, 0, scrollOffset);
+            UpdateLayout(normalLayout, shell, string.Empty, 0, scrollOffset);
+            IRenderable liveFrame = normalLayout;
             lastUiVersion = -1L;  // Force rebuild on first loop iteration once terminal is measured
             lastCursor = 0;
             lastScrollOffset = scrollOffset;
@@ -99,7 +101,8 @@ internal static class SpectreShellHost
                             }
                             else
                             {
-                                liveFrame = BuildFrame(shell, inputBuffer.ToString(), cursorPosition, scrollOffset);
+                                UpdateLayout(normalLayout, shell, inputBuffer.ToString(), cursorPosition, scrollOffset);
+                                liveFrame = normalLayout;
                             }
 
                             context.UpdateTarget(liveFrame);
@@ -161,18 +164,20 @@ internal static class SpectreShellHost
         }
     }
 
-    /// <summary>Builds the full stacked frame for the current shell state.</summary>
-    private static IRenderable BuildFrame(ShellService shell, string activeInput, int cursorPosition, int scrollOffset)
+    private static Layout BuildLayoutTree() =>
+        new Layout("Root")
+            .SplitRows(
+                new Layout("Header").Size(ShellPanelBuilder.HeaderSize),
+                new Layout("Body"),
+                new Layout("Input").Size(ShellPanelBuilder.InputSize));
+
+    private static void UpdateLayout(Layout root, ShellService shell, string activeInput, int cursorPosition, int scrollOffset)
     {
         var snapshot = shell.LayoutSnapshot;
-        var messages = shell.Messages;
 
-        return new Rows(new IRenderable[]
-        {
-            ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning, snapshot.CurrentCycle),
-            ShellPanelBuilder.BuildProgressPanel(messages, scrollOffset),
-            ShellPanelBuilder.BuildInput(shell.PromptText, activeInput, cursorPosition)
-        });
+        root["Header"].Update(ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning, snapshot.CurrentCycle));
+        root["Body"].Update(ShellPanelBuilder.BuildProgressPanel(shell.Messages, scrollOffset));
+        root["Input"].Update(ShellPanelBuilder.BuildInput(shell.PromptText, activeInput, cursorPosition));
     }
 
     // ── Input handling ─────────────────────────────────────────────────────────
