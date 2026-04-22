@@ -711,7 +711,7 @@ public class LoopExecutor(
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
                 ExternalMcpServers = state.McpServers,
-                OnToken = options.TokenReporter is null ? null : token => options.TokenReporter(queuedRun.RoleSlug, token)
+                OnToken = options.TokenReporter is null ? null : token => options.TokenReporter($"{queuedRun.RoleSlug}#{queuedRun.IssueId}", token)
             }, cancellationToken);
             var parsed = AgentPromptBuilder.ParseResponse(response);
             return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Approach, parsed.Rationale, parsed.Issues, parsed.SkillsUsed, parsed.ToolsUsed, parsed.Questions);
