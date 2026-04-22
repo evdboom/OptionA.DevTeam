@@ -319,7 +319,31 @@ public class LoopExecutor(
         _store.Save(state);
 
         var gitStatusBeforeRun = _git.TryCaptureStatus(state.RepoRoot);
-        var result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, cancellationToken: cancellationToken);
+        AgentExecutionResult result;
+        try
+        {
+            result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, cancellationToken: cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            result = new AgentExecutionResult(
+                queuedRun,
+                new AgentInvocationResult
+                {
+                    BackendName = backend,
+                    SessionId = session.SessionId,
+                    ExitCode = 1,
+                    StdErr = "Cancelled by user request."
+                },
+                "blocked",
+                "Cancelled by user request.",
+                "",
+                "",
+                [],
+                [],
+                [],
+                []);
+        }
 
         DevTeamRuntime.MergeWorkspaceAdditions(state, _store.Load());
         var createdQuestionIds = result.Questions.Count > 0

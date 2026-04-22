@@ -54,6 +54,8 @@ internal sealed class GitHubIssueSyncService(ICommandRunner? runner = null)
 
     private async Task<List<GitHubIssuePayload>> LoadOpenIssuesAsync(string workingDirectory, CancellationToken cancellationToken)
     {
+        await EnsureGitHubAuthAsync(workingDirectory, cancellationToken);
+
         var result = await _runner.RunAsync(
             new CommandExecutionSpec
             {
@@ -88,6 +90,36 @@ internal sealed class GitHubIssueSyncService(ICommandRunner? runner = null)
         }
 
         return payloads;
+    }
+
+    private async Task EnsureGitHubAuthAsync(string workingDirectory, CancellationToken cancellationToken)
+    {
+        var result = await _runner.RunAsync(
+            new CommandExecutionSpec
+            {
+                FileName = ResolveGitHubCliPath(),
+                Arguments = ["auth", "status"],
+                WorkingDirectory = workingDirectory,
+                Timeout = TimeSpan.FromSeconds(30)
+            },
+            cancellationToken);
+
+        if (result.ExitCode == 0)
+        {
+            return;
+        }
+
+        var stderr = result.StdErr?.Trim();
+        var stdout = result.StdOut?.Trim();
+        var details = string.Join(
+            "\n",
+            new[] { stderr, stdout }
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.Ordinal));
+        var error = string.IsNullOrWhiteSpace(details)
+            ? "GitHub CLI is not authenticated. Run `gh auth login` and retry."
+            : details;
+        throw new InvalidOperationException(error);
     }
 
     private static GitHubIssuePayload ParsePayload(int number, string title, string body, IReadOnlyList<string> labels)
