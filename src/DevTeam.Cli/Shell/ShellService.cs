@@ -833,7 +833,7 @@ internal sealed partial class ShellService(
                     var values = GetPositionalValues(options);
                     if (values.Count > 2)
                     {
-                        AddHint("Usage: [cyan]/connect-to[/] [[slug [[issue-id]] | slug#issue-id | issue-id]]");
+                        AddHint("Usage: [cyan]/connect[/] [[slug [[issue-id]] | slug#issue-id | issue-id]]");
                         break;
                     }
 
@@ -853,17 +853,17 @@ internal sealed partial class ShellService(
 
                         if (string.IsNullOrWhiteSpace(roleArg))
                         {
-                            AddHint($"Multiple agents running: {FormatStreamList(activeStreams)}. Specify one: [cyan]/connect-to <slug> <issue-id>[/]");
+                            AddHint($"Multiple agents running: {FormatStreamList(activeStreams)}. Specify one: [cyan]/connect <slug> <issue-id>[/]");
                             break;
                         }
 
                         if (!string.IsNullOrWhiteSpace(issueArg) && !int.TryParse(issueArg, out _))
                         {
-                            AddHint("Issue id must be a number. Usage: [cyan]/connect-to <slug> <issue-id>[/]");
+                            AddHint("Issue id must be a number. Usage: [cyan]/connect <slug> <issue-id>[/]");
                             break;
                         }
 
-                        if (TryParseStreamKey(roleArg!, out var roleFromKey, out var issueFromKey))
+                        if (TryParseStreamKey(roleArg!, out _, out _))
                         {
                             AddHint($"No active stream matches [cyan]{Markup.Escape(roleArg!)}[/]. Active streams: {FormatStreamList(activeStreams)}.");
                             break;
@@ -880,7 +880,7 @@ internal sealed partial class ShellService(
                             .ToList();
                         if (sameRole.Count > 1)
                         {
-                            AddHint($"Multiple [cyan]{Markup.Escape(roleArg!)}[/] agents running: {FormatStreamList(sameRole)}. Specify one: [cyan]/connect-to {Markup.Escape(roleArg!)} <issue-id>[/]");
+                            AddHint($"Multiple [cyan]{Markup.Escape(roleArg!)}[/] agents running: {FormatStreamList(sameRole)}. Specify one: [cyan]/connect {Markup.Escape(roleArg!)} <issue-id>[/]");
                             break;
                         }
 
@@ -1186,7 +1186,7 @@ internal sealed partial class ShellService(
     /// <summary>
     /// Returns a token reporter that buffers streaming tokens per active stream key
     /// and flushes completed lines (plus partial chunks) to the progress panel.
-    /// Use [cyan]/connect-to[/] to attach and [cyan]/disconnect[/] to detach.
+    /// Use [cyan]/connect[/] or [cyan]/connect-to[/] to attach and [cyan]/disconnect[/] to detach.
     /// </summary>
     private Action<string, string> MakeTokenReporter()
     {

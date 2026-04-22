@@ -1,0 +1,14 @@
+{
+  "files.exclude": {
+    "**/DevTeam.TuiTests/.tui-test": true
+  },
+  "search.exclude": {
+    "**/DevTeam.TuiTests/.tui-test": true
+  },
+  "typescript.tsserver.excludeDirs": [
+    "**/DevTeam.TuiTests/.tui-test"
+  ],
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  }
+}

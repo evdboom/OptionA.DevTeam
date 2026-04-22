@@ -18,31 +18,9 @@ public sealed class BudgetService : IBudgetService
             ? remaining / state.Budget.TotalCreditCap
             : 0;
 
-        if (policy.ModelPool.Count > 0)
-        {
-            var affordable = policy.ModelPool
-                .Select(name => state.Models.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)))
-                .Where(m => m is not null
-                    && CanAffordModel(state, m)
-                    && (!m.IsPremium || policy.AllowPremium)
-                    && IsBudgetComfortable(state, m, budgetRatio))
-                .ToList();
-            if (affordable.Count > 0)
-            {
-                if (excludeFamily is null)
-                {
-                    return affordable[PoolRng.Next(affordable.Count)]!;
-                }
-
-                var crossFamily = affordable
-                    .Where(m => !string.Equals(m!.EffectiveFamily, excludeFamily, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                if (crossFamily.Count > 0)
-                {
-                    return crossFamily[PoolRng.Next(crossFamily.Count)]!;
-                }
-            }
-        }
+        var poolResult = TrySelectFromPool(state, policy, budgetRatio, excludeFamily);
+        if (poolResult is not null)
+            return poolResult;
 
         var primary = state.Models.FirstOrDefault(model => string.Equals(model.Name, policy.PrimaryModel, StringComparison.OrdinalIgnoreCase))
             ?? defaultModel;
@@ -52,17 +30,9 @@ public sealed class BudgetService : IBudgetService
         // Prefer cross-family candidates when excludeFamily is set
         if (excludeFamily is not null)
         {
-            var crossCandidates = new[] { primary, fallback }
-                .Where(m => m.Cost > 0
-                    && !string.Equals(m.EffectiveFamily, excludeFamily, StringComparison.OrdinalIgnoreCase)
-                    && CanAffordModel(state, m)
-                    && (!m.IsPremium || policy.AllowPremium)
-                    && IsBudgetComfortable(state, m, budgetRatio))
-                .ToList();
-            if (crossCandidates.Count > 0)
-            {
-                return crossCandidates[0];
-            }
+            var cross = TrySelectCrossFamily(state, policy, budgetRatio, primary, fallback, excludeFamily);
+            if (cross is not null)
+                return cross;
         }
 
         if (CanAffordModel(state, primary)
@@ -84,11 +54,44 @@ public sealed class BudgetService : IBudgetService
             .OrderBy(model => model.Cost)
             .FirstOrDefault();
         if (light is not null && CanAffordModel(state, light))
-        {
             return light;
-        }
 
         return defaultModel;
+    }
+
+    private ModelDefinition? TrySelectFromPool(WorkspaceState state, RoleModelPolicy policy, double budgetRatio, string? excludeFamily)
+    {
+        if (policy.ModelPool.Count == 0)
+            return null;
+
+        var affordable = policy.ModelPool
+            .Select(name => state.Models.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)))
+            .Where(m => m is not null
+                && CanAffordModel(state, m)
+                && (!m.IsPremium || policy.AllowPremium)
+                && IsBudgetComfortable(state, m, budgetRatio))
+            .ToList();
+
+        if (affordable.Count == 0)
+            return null;
+
+        if (excludeFamily is null)
+            return affordable[PoolRng.Next(affordable.Count)];
+
+        var crossFamily = affordable
+            .Where(m => !string.Equals(m!.EffectiveFamily, excludeFamily, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return crossFamily.Count > 0 ? crossFamily[PoolRng.Next(crossFamily.Count)] : null;
+    }
+
+    private ModelDefinition? TrySelectCrossFamily(WorkspaceState state, RoleModelPolicy policy, double budgetRatio, ModelDefinition primary, ModelDefinition fallback, string excludeFamily)
+    {
+        return new[] { primary, fallback }
+            .FirstOrDefault(m => m.Cost > 0
+                && !string.Equals(m.EffectiveFamily, excludeFamily, StringComparison.OrdinalIgnoreCase)
+                && CanAffordModel(state, m)
+                && (!m.IsPremium || policy.AllowPremium)
+                && IsBudgetComfortable(state, m, budgetRatio));
     }
 
     public void CommitCredits(WorkspaceState state, ModelDefinition model)
@@ -121,9 +124,9 @@ public sealed class BudgetService : IBudgetService
         return true;
     }
 
-    private bool IsBudgetComfortable(WorkspaceState state, ModelDefinition model, double budgetRatio)
+    private static bool IsBudgetComfortable(WorkspaceState state, ModelDefinition model, double budgetRatio)
     {
-        if (model.Cost == 0) return true;
+        if (model.Cost <= 0) return true;
         
         // Check if model cost exceeds per-run limits even if project budget is low
         // This allows expensive models for critical single-run tasks

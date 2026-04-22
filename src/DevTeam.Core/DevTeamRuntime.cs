@@ -155,6 +155,21 @@ public class DevTeamRuntime
 
     public IssueItem AddIssue(WorkspaceState state, IssueRequest request) => _issueService.CreateIssue(state, request);
 
+    public static IssueItem GetIssue(WorkspaceState state, int issueId) =>
+        state.Issues.FirstOrDefault(i => i.Id == issueId)
+            ?? throw new InvalidOperationException($"Issue #{issueId} not found.");
+
+    public static IReadOnlyList<DecisionRecord> GetDecisions(WorkspaceState state, IReadOnlyList<int> decisionIds)
+    {
+        if (decisionIds.Count == 0)
+        {
+            return [];
+        }
+
+        var idSet = new HashSet<int>(decisionIds);
+        return state.Decisions.Where(d => idSet.Contains(d.Id)).OrderBy(d => d.Id).ToList();
+    }
+
     public static IssueItem UpdateIssueStatus(WorkspaceState state, int issueId, string status, string? notes = null)
     {
         var issue = state.Issues.FirstOrDefault(i => i.Id == issueId)
@@ -443,30 +458,10 @@ public class DevTeamRuntime
             throw new InvalidOperationException("Execution batch did not include any ready issue candidates.");
         }
 
-        var filtered = new List<int>();
-        var seenAreas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var seenPipelines = new HashSet<int>();
         var droppedAreas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var droppedPipelines = new HashSet<int>();
 
-        foreach (var issueId in selected)
-        {
-            var issue = candidateMap[issueId];
-
-            if (!string.IsNullOrWhiteSpace(issue.Area) && !seenAreas.Add(issue.Area))
-            {
-                droppedAreas.Add(issue.Area);
-                continue;
-            }
-
-            if (issue.PipelineId is int pipelineId && !seenPipelines.Add(pipelineId))
-            {
-                droppedPipelines.Add(pipelineId);
-                continue;
-            }
-
-            filtered.Add(issueId);
-        }
+        var filtered = FilterByAreaAndPipeline(selected, candidateMap, droppedAreas, droppedPipelines);
 
         if (droppedAreas.Count > 0)
         {
@@ -508,8 +503,39 @@ public class DevTeamRuntime
         return state.ExecutionSelection;
     }
 
-    private static string BuildExecutionSelectionDecisionDetail(WorkspaceState state)
+    private static List<int> FilterByAreaAndPipeline(
+        List<int> selected,
+        Dictionary<int, IssueItem> candidateMap,
+        HashSet<string> droppedAreas,
+        HashSet<int> droppedPipelines)
     {
+        var filtered = new List<int>();
+        var seenAreas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenPipelines = new HashSet<int>();
+
+        foreach (var issueId in selected)
+        {
+            var issue = candidateMap[issueId];
+
+            if (!string.IsNullOrWhiteSpace(issue.Area) && !seenAreas.Add(issue.Area))
+            {
+                droppedAreas.Add(issue.Area);
+                continue;
+            }
+
+            if (issue.PipelineId is int pipelineId && !seenPipelines.Add(pipelineId))
+            {
+                droppedPipelines.Add(pipelineId);
+                continue;
+            }
+
+            filtered.Add(issueId);
+        }
+
+        return filtered;
+    }
+
+    private static string BuildExecutionSelectionDecisionDetail(WorkspaceState state)    {
         if (state.ExecutionSelection.SelectedIssueIds.Count == 0)
         {
             return string.IsNullOrWhiteSpace(state.ExecutionSelection.Rationale)

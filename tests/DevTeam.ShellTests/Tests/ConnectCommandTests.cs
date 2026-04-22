@@ -1,13 +1,15 @@
 using DevTeam.Cli;
-using DevTeam.Cli.Shell;
 using DevTeam.Core;
-using DevTeam.ShellTests;
 
 namespace DevTeam.ShellTests.Tests;
 
-/// <summary>Tests for /connect and /connect-to command semantics with multiple agent streams.</summary>
+/// <summary>Tests for /connect and /connect command semantics with multiple agent streams.</summary>
 internal static class ConnectCommandTests
 {
+    private const string DeveloperRole = "developer";
+    private const string ArchitectRole = "architect";
+    private const string Gpt4Model = "gpt-4";
+
     public static IEnumerable<TestCase> GetTests() =>
     [
         new("Connect_SingleAgent_AutoSelectsAndConfirms", Connect_SingleAgent_AutoSelectsAndConfirms),
@@ -25,11 +27,11 @@ internal static class ConnectCommandTests
     {
         var state = UiHarness.BuildExecutionScenario(Path.GetTempPath());
         state.AgentRuns.Clear();
-        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s1", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s1", Status = AgentRunStatus.Running });
         
         var streams = GetActiveStreamsHelper(state);
         Assert.That(streams.Count == 1, $"Expected 1 stream, got {streams.Count}");
-        Assert.That(streams[0].RoleSlug == "developer", $"Expected developer role, got {streams[0].RoleSlug}");
+        Assert.That(streams[0].RoleSlug == DeveloperRole, $"Expected {DeveloperRole} role, got {streams[0].RoleSlug}");
         Assert.That(streams[0].IssueId == 42, $"Expected issue 42, got {streams[0].IssueId}");
         return Task.CompletedTask;
     }
@@ -38,14 +40,14 @@ internal static class ConnectCommandTests
     {
         var state = UiHarness.BuildExecutionScenario(Path.GetTempPath());
         state.AgentRuns.Clear();
-        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s1", Status = AgentRunStatus.Running });
-        state.AgentRuns.Add(new AgentRun { Id = 2, IssueId = 43, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s2", Status = AgentRunStatus.Running });
-        state.AgentRuns.Add(new AgentRun { Id = 3, IssueId = 44, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s3", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s1", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 2, IssueId = 43, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s2", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 3, IssueId = 44, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s3", Status = AgentRunStatus.Running });
         
         var streams = GetActiveStreamsHelper(state);
         Assert.That(streams.Count == 3, $"Expected 3 streams, got {streams.Count}");
         
-        var developerStreams = streams.Where(s => s.RoleSlug == "developer").ToList();
+        var developerStreams = streams.Where(s => s.RoleSlug == DeveloperRole).ToList();
         Assert.That(developerStreams.Count == 3, $"Expected 3 developer streams, got {developerStreams.Count}");
         Assert.That(developerStreams.Select(s => s.IssueId).Contains(42), "Expected issue 42 in developer streams");
         Assert.That(developerStreams.Select(s => s.IssueId).Contains(43), "Expected issue 43 in developer streams");
@@ -57,15 +59,15 @@ internal static class ConnectCommandTests
     {
         var state = UiHarness.BuildExecutionScenario(Path.GetTempPath());
         state.AgentRuns.Clear();
-        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s1", Status = AgentRunStatus.Running });
-        state.AgentRuns.Add(new AgentRun { Id = 2, IssueId = 43, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s2", Status = AgentRunStatus.Running });
-        state.AgentRuns.Add(new AgentRun { Id = 3, IssueId = 10, RoleSlug = "architect", ModelName = "gpt-4", SessionId = "s3", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s1", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 2, IssueId = 43, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s2", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 3, IssueId = 10, RoleSlug = ArchitectRole, ModelName = Gpt4Model, SessionId = "s3", Status = AgentRunStatus.Running });
         
         var streams = GetActiveStreamsHelper(state);
-        var target = ResolveConnectedStreamTargetHelper(streams, "developer", "43");
+        var target = ResolveConnectedStreamTargetHelper(streams, DeveloperRole, "43");
         
         Assert.That(target is not null, "Expected to resolve target");
-        Assert.That(target.Value.RoleSlug == "developer", $"Expected developer role, got {target.Value.RoleSlug}");
+        Assert.That(target!.Value.RoleSlug == DeveloperRole, $"Expected {DeveloperRole} role, got {target.Value.RoleSlug}");
         Assert.That(target.Value.IssueId == 43, $"Expected issue 43, got {target.Value.IssueId}");
         return Task.CompletedTask;
     }
@@ -74,14 +76,14 @@ internal static class ConnectCommandTests
     {
         var state = UiHarness.BuildExecutionScenario(Path.GetTempPath());
         state.AgentRuns.Clear();
-        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s1", Status = AgentRunStatus.Running });
-        state.AgentRuns.Add(new AgentRun { Id = 2, IssueId = 10, RoleSlug = "architect", ModelName = "gpt-4", SessionId = "s2", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s1", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 2, IssueId = 10, RoleSlug = ArchitectRole, ModelName = Gpt4Model, SessionId = "s2", Status = AgentRunStatus.Running });
         
         var streams = GetActiveStreamsHelper(state);
-        var target = ResolveConnectedStreamTargetHelper(streams, "developer#42", null);
+        var target = ResolveConnectedStreamTargetHelper(streams, $"{DeveloperRole}#42", null);
         
         Assert.That(target is not null, "Expected to resolve target with stream key format");
-        Assert.That(target.Value.RoleSlug == "developer", $"Expected developer role, got {target.Value.RoleSlug}");
+        Assert.That(target!.Value.RoleSlug == DeveloperRole, $"Expected {DeveloperRole} role, got {target.Value.RoleSlug}");
         Assert.That(target.Value.IssueId == 42, $"Expected issue 42, got {target.Value.IssueId}");
         return Task.CompletedTask;
     }
@@ -90,16 +92,16 @@ internal static class ConnectCommandTests
     {
         var state = UiHarness.BuildExecutionScenario(Path.GetTempPath());
         state.AgentRuns.Clear();
-        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s1", Status = AgentRunStatus.Running });
-        state.AgentRuns.Add(new AgentRun { Id = 2, IssueId = 43, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s2", Status = AgentRunStatus.Running });
-        state.AgentRuns.Add(new AgentRun { Id = 3, IssueId = 10, RoleSlug = "architect", ModelName = "gpt-4", SessionId = "s3", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s1", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 2, IssueId = 43, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s2", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 3, IssueId = 10, RoleSlug = ArchitectRole, ModelName = Gpt4Model, SessionId = "s3", Status = AgentRunStatus.Running });
         
         var streams = GetActiveStreamsHelper(state);
         var target = ResolveConnectedStreamTargetHelper(streams, "42", null);
         
         Assert.That(target is not null, "Expected to resolve target by issue ID alone");
-        Assert.That(target.Value.IssueId == 42, $"Expected issue 42, got {target.Value.IssueId}");
-        Assert.That(target.Value.RoleSlug == "developer", $"Expected developer role, got {target.Value.RoleSlug}");
+        Assert.That(target!.Value.IssueId == 42, $"Expected issue 42, got {target.Value.IssueId}");
+        Assert.That(target!.Value.RoleSlug == DeveloperRole, $"Expected {DeveloperRole} role, got {target.Value.RoleSlug}");
         return Task.CompletedTask;
     }
 
@@ -110,16 +112,24 @@ internal static class ConnectCommandTests
         // This test validates the resolver logic exists and resolver pattern works.
         var state = UiHarness.BuildExecutionScenario(Path.GetTempPath());
         state.AgentRuns.Clear();
-        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s1", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s1", Status = AgentRunStatus.Running });
         
         var streams = GetActiveStreamsHelper(state);
         Assert.That(streams.Count >= 1, "Expected at least one stream");
         
         // Calling resolver multiple ways should work without exception
-        var result1 = ResolveConnectedStreamTargetHelper(streams, "developer", "42");
-        var result2 = ResolveConnectedStreamTargetHelper(streams, "developer", null);
+        var result1 = ResolveConnectedStreamTargetHelper(streams, DeveloperRole, "42");
+        var result2 = ResolveConnectedStreamTargetHelper(streams, DeveloperRole, null);
         var result3 = ResolveConnectedStreamTargetHelper(streams, "42", null);
         
+        Assert.That(result1 is not null, "Expected to resolve with role and issue args");   
+        Assert.That(result2 is not null, "Expected to resolve with role only");
+        Assert.That(result3 is not null, "Expected to resolve with issue only");
+
+        Assert.That(result1!.Value.IssueId == 42, $"Expected issue 42, got {result1.Value.IssueId}");
+        Assert.That(result2!.Value.IssueId == 42, $"Expected issue 42, got {result2.Value.IssueId}");
+        Assert.That(result3!.Value.IssueId == 42, $"Expected issue 42, got {result3.Value.IssueId}");
+
         return Task.CompletedTask;
     }
 
@@ -127,8 +137,8 @@ internal static class ConnectCommandTests
     {
         var state = UiHarness.BuildExecutionScenario(Path.GetTempPath());
         state.AgentRuns.Clear();
-        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = "developer", ModelName = "gpt-4", SessionId = "s1", Status = AgentRunStatus.Running });
-        state.AgentRuns.Add(new AgentRun { Id = 2, IssueId = 10, RoleSlug = "architect", ModelName = "gpt-4", SessionId = "s2", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 1, IssueId = 42, RoleSlug = DeveloperRole, ModelName = Gpt4Model, SessionId = "s1", Status = AgentRunStatus.Running });
+        state.AgentRuns.Add(new AgentRun { Id = 2, IssueId = 10, RoleSlug = ArchitectRole, ModelName = Gpt4Model, SessionId = "s2", Status = AgentRunStatus.Running });
         
         var streams = GetActiveStreamsHelper(state);
         var target = ResolveConnectedStreamTargetHelper(streams, "nonexistent-role", null);

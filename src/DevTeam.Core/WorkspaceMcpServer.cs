@@ -173,6 +173,44 @@ public sealed class WorkspaceMcpServer(
                     GetOptionalString(arguments, "notes"));
                 return new { issue.Id, issue.Title, Status = issue.Status.ToString(), issue.Notes };
             }, save: true)),
+            "get_issue" => BuildToolResult(WithWorkspace((_, state) =>
+            {
+                var issue = DevTeamRuntime.GetIssue(state, GetInt(arguments, "issueId", 0));
+                return new
+                {
+                    issue.Id,
+                    issue.Title,
+                    issue.Detail,
+                    issue.Area,
+                    issue.RoleSlug,
+                    issue.Priority,
+                    Status = issue.Status.ToString(),
+                    RefinementState = issue.RefinementState.ToString(),
+                    issue.FilesInScope,
+                    issue.LinkedDecisionIds,
+                    issue.DependsOnIssueIds,
+                    issue.ParentIssueId,
+                    issue.ComplexityHint,
+                    issue.Notes
+                };
+            })),
+            "get_decisions" => BuildToolResult(WithWorkspace((_, state) =>
+            {
+                var ids = GetIntList(arguments, "decisionIds");
+                var decisions = DevTeamRuntime.GetDecisions(state, ids);
+                return new
+                {
+                    decisions = decisions.Select(d => new
+                    {
+                        d.Id,
+                        d.Title,
+                        d.Detail,
+                        d.Source,
+                        d.IssueId,
+                        CreatedAtUtc = d.CreatedAtUtc.ToString("O")
+                    }).ToList()
+                };
+            })),
             _ => throw new InvalidOperationException($"Tool '{toolName}' is not supported.")
         };
     }
@@ -283,6 +321,36 @@ public sealed class WorkspaceMcpServer(
                         ["sessionId"] = StringSchema()
                     },
                     ["required"] = new JsonArray("title", "detail"),
+                    ["additionalProperties"] = false
+                }),
+            BuildToolDefinition(
+                "get_issue",
+                "Fetch a single issue by id, including its FilesInScope and LinkedDecisionIds set during refinement. Use this instead of get_workspace_summary when you only need to work on a specific issue.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject
+                    {
+                        ["issueId"] = IntegerSchema()
+                    },
+                    ["required"] = new JsonArray("issueId"),
+                    ["additionalProperties"] = false
+                }),
+            BuildToolDefinition(
+                "get_decisions",
+                "Fetch specific decision records by id. Use the LinkedDecisionIds from get_issue to retrieve only the decisions relevant to the current issue, rather than reading all decisions.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject
+                    {
+                        ["decisionIds"] = new JsonObject
+                        {
+                            ["type"] = "array",
+                            ["items"] = IntegerSchema()
+                        }
+                    },
+                    ["required"] = new JsonArray("decisionIds"),
                     ["additionalProperties"] = false
                 }),
             BuildToolDefinition(
