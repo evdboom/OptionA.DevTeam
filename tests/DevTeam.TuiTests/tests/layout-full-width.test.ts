@@ -50,6 +50,21 @@ function assertRowEndsAtTerminalEdge(buffer: string[][], needle: string): void {
   }
 }
 
+function frameToText(buffer: string[][]): string {
+  return buffer.map(rowToString).join("\n");
+}
+
+function assertFrameIntegrity(buffer: string[][]): void {
+  const frame = frameToText(buffer);
+
+  // Require all panel regions to contain expected markers in the same frame.
+  // This catches transient blank-frame redraws that simple one-off text checks can miss.
+  expect(frame.includes("Phase:")).toBeTruthy();
+  expect(frame.includes("Progress")).toBeTruthy();
+  expect(frame.includes("help for commands")).toBeTruthy();
+  expect(frame.includes("> ")).toBeTruthy();
+}
+
 test("shell renders 3 full-width panels", async ({ terminal }) => {
   await expect(terminal.getByText("Phase:")).toBeVisible({ timeout: BUILD_TIMEOUT });
   await expect(terminal.getByText("Workspace:")).toBeVisible();
@@ -69,4 +84,10 @@ test("shell renders 3 full-width panels", async ({ terminal }) => {
   expect(renderedRows.some((line) => line.includes("- DevTeam -"))).toBeTruthy();
   expect(renderedRows.some((line) => line.includes("- Progress -"))).toBeTruthy();
   expect(renderedRows.some((line) => line.includes("- devteam -"))).toBeTruthy();
+
+  // Verify frame integrity across several render cycles to catch intermittent corruption.
+  for (let i = 0; i < 4; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assertFrameIntegrity(terminal.getViewableBuffer());
+  }
 });

@@ -12,6 +12,7 @@ internal static class TerminalMouseScrollTests
         new("TryParseWheelDelta_NonWheelSequence_ReturnsFalse", TryParseWheelDelta_NonWheelSequence_ReturnsFalse),
         new("TryGetWheelDelta_EscapeThenNormalKey_PreservesBufferedKey", TryGetWheelDelta_EscapeThenNormalKey_PreservesBufferedKey),
         new("TryGetWheelDelta_PartialMouseSequence_PreservesBufferedKeys", TryGetWheelDelta_PartialMouseSequence_PreservesBufferedKeys),
+        new("TryGetWheelDelta_DelayedMouseSequence_ParsesWheelDelta", TryGetWheelDelta_DelayedMouseSequence_ParsesWheelDelta),
         new("ApplyWheelDelta_ClampsAtBounds", ApplyWheelDelta_ClampsAtBounds),
     ];
 
@@ -116,6 +117,44 @@ internal static class TerminalMouseScrollTests
 
         Assert.That(belowZero == 0, $"Expected clamp to 0 but got {belowZero}.");
         Assert.That(aboveMax == 20, $"Expected clamp to max offset 20 but got {aboveMax}.");
+        return Task.CompletedTask;
+    }
+
+    private static Task TryGetWheelDelta_DelayedMouseSequence_ParsesWheelDelta()
+    {
+        TerminalMouseScroll.ClearPendingKeysForTests();
+
+        var sequence = new Queue<ConsoleKeyInfo>(
+        [
+            new ConsoleKeyInfo('[', ConsoleKey.Oem4, shift: false, alt: false, control: false),
+            new ConsoleKeyInfo('<', ConsoleKey.OemComma, shift: false, alt: false, control: false),
+            new ConsoleKeyInfo('6', ConsoleKey.D6, shift: false, alt: false, control: false),
+            new ConsoleKeyInfo('4', ConsoleKey.D4, shift: false, alt: false, control: false),
+            new ConsoleKeyInfo(';', ConsoleKey.Oem1, shift: false, alt: false, control: false),
+            new ConsoleKeyInfo('5', ConsoleKey.D5, shift: false, alt: false, control: false),
+            new ConsoleKeyInfo('2', ConsoleKey.D2, shift: false, alt: false, control: false),
+            new ConsoleKeyInfo(';', ConsoleKey.Oem1, shift: false, alt: false, control: false),
+            new ConsoleKeyInfo('1', ConsoleKey.D1, shift: false, alt: false, control: false),
+            new ConsoleKeyInfo('2', ConsoleKey.D2, shift: false, alt: false, control: false),
+            new ConsoleKeyInfo('M', ConsoleKey.M, shift: true, alt: false, control: false),
+        ]);
+
+        var probeCalls = 0;
+        var success = TerminalMouseScroll.TryGetWheelDelta(
+            new ConsoleKeyInfo('\x1b', ConsoleKey.Escape, shift: false, alt: false, control: false),
+            () =>
+            {
+                probeCalls++;
+                // Simulate a brief delay before terminal bytes become available.
+                return probeCalls > 2 && sequence.Count > 0;
+            },
+            () => sequence.Dequeue(),
+            out var delta);
+
+        Assert.That(success, "Expected delayed wheel sequence to parse successfully.");
+        Assert.That(delta == 1, $"Expected wheel-up delta 1 but got {delta}.");
+        Assert.That(!TerminalMouseScroll.TryReadInputKey(() => false, () => throw new InvalidOperationException("No pending keys expected."), out _), "Expected no pending keys after successful parse.");
+        TerminalMouseScroll.ClearPendingKeysForTests();
         return Task.CompletedTask;
     }
 }
