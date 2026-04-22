@@ -98,9 +98,8 @@ internal static class AdventureShellHost
             return;
         }
 
-        while (Console.KeyAvailable)
+        while (TerminalMouseScroll.TryReadInputKey(() => Console.KeyAvailable, () => Console.ReadKey(intercept: true), out var key))
         {
-            var key = Console.ReadKey(intercept: true);
             if (TerminalMouseScroll.TryHandleWheel(key, shell.Messages, ref scrollOffset, ProgressWidth()))
             {
                 continue;
@@ -287,7 +286,7 @@ internal static class AdventureShellHost
         return Math.Max(3, ShellPanelBuilder.ContentRowCount(terminalHeight) / 2);
     }
 
-    internal static int ProgressWidth()
+    private static int ProgressWidth()
     {
         var terminalWidth = Console.IsOutputRedirected ? 120 : Math.Max(40, Console.WindowWidth);
         return Math.Max(20, terminalWidth - LeftColumnWidth - 4);

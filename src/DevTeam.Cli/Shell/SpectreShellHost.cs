@@ -179,9 +179,8 @@ internal static class SpectreShellHost
     {
         if (Console.IsInputRedirected) return;
 
-        while (Console.KeyAvailable)
+        while (TerminalMouseScroll.TryReadInputKey(() => Console.KeyAvailable, () => Console.ReadKey(intercept: true), out var key))
         {
-            var key = Console.ReadKey(intercept: true);
             if (TerminalMouseScroll.TryHandleWheel(key, shell.Messages, ref scrollOffset, ProgressWidth()))
             {
                 continue;

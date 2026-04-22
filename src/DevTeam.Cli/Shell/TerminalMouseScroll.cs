@@ -9,6 +9,9 @@ internal static class TerminalMouseScroll
     private const string DisableMouseTrackingSequence = "\x1b[?1000l\x1b[?1006l";
     private const int WheelUpButtonCode = 64;
     private const int WheelDownButtonCode = 65;
+    private const int ModifierBitsMask = 4 | 8 | 16;
+    private const int MaxEscapeSequenceLength = 32;
+    private static readonly Queue<ConsoleKeyInfo> PendingKeys = new();
 
     internal static void EnableTracking()
     {
@@ -41,6 +44,23 @@ internal static class TerminalMouseScroll
         return true;
     }
 
+    internal static bool TryReadInputKey(Func<bool> isKeyAvailable, Func<ConsoleKeyInfo> readKey, out ConsoleKeyInfo key)
+    {
+        if (TryReadPendingKey(out key))
+        {
+            return true;
+        }
+
+        if (!isKeyAvailable())
+        {
+            key = default;
+            return false;
+        }
+
+        key = readKey();
+        return true;
+    }
+
     internal static int ApplyWheelDelta(int scrollOffset, int delta, int maxScrollOffset) =>
         Math.Clamp(scrollOffset + delta, 0, Math.Max(0, maxScrollOffset));
 
@@ -60,14 +80,22 @@ internal static class TerminalMouseScroll
             return false;
         }
 
-        var sequence = ReadEscapeSequence(key, isKeyAvailable, readKey);
-        return TryParseWheelDelta(sequence, out delta);
+        var sequence = ReadEscapeSequence(key, isKeyAvailable, readKey, out var consumedKeys);
+        if (TryParseWheelDelta(sequence, out delta))
+        {
+            return true;
+        }
+
+        EnqueuePendingKeys(consumedKeys);
+        return false;
     }
 
     internal static bool TryParseWheelDelta(string sequence, out int delta)
     {
         delta = 0;
-        if (!sequence.StartsWith("\x1b[<", StringComparison.Ordinal))
+        if (!sequence.StartsWith("\x1b[<", StringComparison.Ordinal)
+            || sequence.Length < 7
+            || sequence[^1] is not ('M' or 'm'))
         {
             return false;
         }
@@ -78,13 +106,19 @@ internal static class TerminalMouseScroll
             return false;
         }
 
+        if (sequence.IndexOf(';', firstSeparator + 1) < 0)
+        {
+            return false;
+        }
+
         var buttonText = sequence[3..firstSeparator];
         if (!int.TryParse(buttonText, NumberStyles.None, CultureInfo.InvariantCulture, out var buttonCode))
         {
             return false;
         }
 
-        delta = buttonCode switch
+        var normalizedButtonCode = buttonCode & ~ModifierBitsMask;
+        delta = normalizedButtonCode switch
         {
             WheelUpButtonCode => 1,
             WheelDownButtonCode => -1,
@@ -94,15 +128,47 @@ internal static class TerminalMouseScroll
         return delta != 0;
     }
 
-    private static string ReadEscapeSequence(ConsoleKeyInfo firstKey, Func<bool> isKeyAvailable, Func<ConsoleKeyInfo> readKey)
+    internal static void ClearPendingKeysForTests()
+    {
+        PendingKeys.Clear();
+    }
+
+    private static bool TryReadPendingKey(out ConsoleKeyInfo key)
+    {
+        if (PendingKeys.Count > 0)
+        {
+            key = PendingKeys.Dequeue();
+            return true;
+        }
+
+        key = default;
+        return false;
+    }
+
+    private static string ReadEscapeSequence(ConsoleKeyInfo firstKey, Func<bool> isKeyAvailable, Func<ConsoleKeyInfo> readKey, out List<ConsoleKeyInfo> consumedKeys)
     {
         var builder = new StringBuilder();
         builder.Append(firstKey.KeyChar);
-        while (isKeyAvailable())
+        consumedKeys = [];
+        while (isKeyAvailable() && builder.Length < MaxEscapeSequenceLength)
         {
-            builder.Append(readKey().KeyChar);
+            var key = readKey();
+            consumedKeys.Add(key);
+            builder.Append(key.KeyChar);
+            if (key.KeyChar is 'M' or 'm')
+            {
+                break;
+            }
         }
 
         return builder.ToString();
+    }
+
+    private static void EnqueuePendingKeys(IEnumerable<ConsoleKeyInfo> keys)
+    {
+        foreach (var key in keys)
+        {
+            PendingKeys.Enqueue(key);
+        }
     }
 }
