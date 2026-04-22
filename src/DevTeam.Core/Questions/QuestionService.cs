@@ -87,8 +87,7 @@ public sealed class QuestionService : IQuestionService
             return false;
         }
 
-        var normalized = text.ToLowerInvariant();
-        return ContainsAny(normalized,
+        return ContainsAny(text,
             "timeout",
             "retry",
             "batch",
@@ -110,7 +109,8 @@ public sealed class QuestionService : IQuestionService
             "scheduler");
     }
 
-    private static bool ContainsAny(string source, params string[] needles) => needles.Any(source.Contains);
+    private static bool ContainsAny(string source, params string[] needles) =>
+        needles.Any(needle => source.Contains(needle, StringComparison.OrdinalIgnoreCase));
 
     private void RecordDecision(WorkspaceState state, string title, string detail, string source)
     {

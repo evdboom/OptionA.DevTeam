@@ -166,6 +166,8 @@ public static class AgentPromptBuilder
 
         Valid role slugs for ISSUES:
         {availableRoles}
+        {BuildAuditorBoundaryBlock(issue.RoleSlug)}
+        {BuildDesignRoleTestabilityBlock(issue.RoleSlug)}
         {BuildFileBoundaryBlock(issue.RoleSlug)}
         Task:
         Work on the current issue using the available tools, active mode guardrails, and role guidance. Keep the scope narrow.
@@ -409,13 +411,13 @@ public static class AgentPromptBuilder
         }
 
         return state.Skills
-            .Where(item => slugs.Contains(item.Slug, StringComparer.OrdinalIgnoreCase))
+            .Where(item => slugs.Contains(item.Slug))
             .ToList();
     }
 
     private static IReadOnlyList<string> InferSkillSlugsForIssue(IssueItem issue)
     {
-        var text = $"{issue.Title} {issue.Detail}".ToLowerInvariant();
+        var text = $"{issue.Title} {issue.Detail}";
         var slugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         if (ContainsAny(text, "test", "unit", "integration", "regression", "coverage"))
@@ -450,7 +452,40 @@ public static class AgentPromptBuilder
     }
 
     private static bool ContainsAny(string source, params string[] needles) =>
-        needles.Any(source.Contains);
+        needles.Any(needle => source.Contains(needle, StringComparison.OrdinalIgnoreCase));
+
+    private static string BuildDesignRoleTestabilityBlock(string roleSlug)
+    {
+        if (!DesignOnlyRoles.Contains(roleSlug))
+        {
+            return "";
+        }
+
+        return """
+
+        DESIGN TESTABILITY CONTRACT (for issues you create):
+        - Require constructor injection for non-trivial collaborators.
+        - Call out explicit abstractions for file system dependencies.
+        - Call out explicit abstractions for clock dependencies.
+        """;
+    }
+
+    private static string BuildAuditorBoundaryBlock(string roleSlug)
+    {
+        if (!string.Equals(roleSlug, "auditor", StringComparison.OrdinalIgnoreCase))
+        {
+            return "";
+        }
+
+        return """
+
+        AUDITOR BOUNDARIES:
+        - Focus on legacy drift, recent drift, and active regression risk.
+        - Reviewer handles line-level code quality checks; do not duplicate Reviewer scope.
+        - Navigator handles codebase mapping/scouting; do not duplicate Navigator scope.
+        - Security handles deep threat modeling/compliance; do not duplicate Security scope.
+        """;
+    }
 
     private static string BuildRoleCard(RoleDefinition? role, string roleSlug)
     {
@@ -461,12 +496,14 @@ public static class AgentPromptBuilder
 
         var excerpt = ExtractRoleExcerpt(role.Body, RoleExcerptMaxLines);
         var tools = role.RequiredTools.Count == 0 ? "(none declared)" : string.Join(", ", role.RequiredTools);
-        return $"""
+                var indentedExcerpt = excerpt.Replace("\n", "\n    ", StringComparison.Ordinal);
+
+                return $"""
         - slug: {role.Slug}
         - source: {role.SourcePath}
         - tools: {tools}
         - excerpt:
-          {excerpt}
+                        {indentedExcerpt}
         """;
     }
 
@@ -484,7 +521,7 @@ public static class AgentPromptBuilder
             return "(empty role guidance)";
         }
 
-        return string.Join("\n          ", lines);
+        return string.Join("\n", lines);
     }
 
     private static string BuildSkillManifest(IReadOnlyList<SkillDefinition> skills)

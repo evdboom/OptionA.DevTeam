@@ -109,9 +109,16 @@ internal sealed class GitHubIssueSyncService(ICommandRunner? runner = null)
             return;
         }
 
-        var error = string.IsNullOrWhiteSpace(result.StdErr)
+        var stderr = result.StdErr?.Trim();
+        var stdout = result.StdOut?.Trim();
+        var details = string.Join(
+            "\n",
+            new[] { stderr, stdout }
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.Ordinal));
+        var error = string.IsNullOrWhiteSpace(details)
             ? "GitHub CLI is not authenticated. Run `gh auth login` and retry."
-            : result.StdErr.Trim();
+            : details;
         throw new InvalidOperationException(error);
     }
 
