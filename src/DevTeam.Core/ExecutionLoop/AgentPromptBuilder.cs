@@ -17,6 +17,8 @@ public static class AgentPromptBuilder
     private const string RoleArchitect = "architect";
     private const string RoleNavigator = "navigator";
     private const string RoleDeveloper = "developer";
+    private const string RoleReviewer = "reviewer";
+    private const string RoleAuditor = "auditor";
     private const string SkillBrainstorm = "brainstorm";
     private const string SkillPlan = "plan";
     private const string SkillScout = "scout";
@@ -49,8 +51,8 @@ public static class AgentPromptBuilder
         ["frontend-developer"] = [SkillPlan, SkillTdd, SkillVerify],
         ["fullstack-developer"] = [SkillPlan, SkillTdd, SkillVerify],
         ["tester"] = [SkillTdd, SkillDebug, SkillVerify],
-        ["reviewer"] = [SkillReview, SkillVerify, SkillRefine],
-        ["auditor"] = [SkillScout, SkillReview, SkillVerify, SkillHygiene, SkillRefine],
+        [RoleReviewer] = [SkillReview, SkillVerify, SkillRefine],
+        [RoleAuditor] = [SkillScout, SkillReview, SkillVerify, SkillHygiene, SkillRefine],
         ["ux"] = [SkillVerify],
         ["user"] = [SkillVerify],
         ["game-designer"] = [SkillBrainstorm, "review", SkillVerify],
@@ -59,12 +61,12 @@ public static class AgentPromptBuilder
 
     private static readonly HashSet<string> DesignOnlyRoles = new(StringComparer.OrdinalIgnoreCase)
     {
-        RolePlanner, RoleOrchestrator, RoleArchitect, RoleNavigator, "analyst", "security", "reviewer", "auditor"
+        RolePlanner, RoleOrchestrator, RoleArchitect, RoleNavigator, "analyst", "security", RoleReviewer, RoleAuditor
     };
 
     private static readonly HashSet<string> WideResearchRoles = new(StringComparer.OrdinalIgnoreCase)
     {
-        RolePlanner, RoleOrchestrator, RoleArchitect, RoleNavigator, "analyst", "security", "reviewer", "auditor"
+        RolePlanner, RoleOrchestrator, RoleArchitect, RoleNavigator, "analyst", "security", RoleReviewer, RoleAuditor
     };
 
     private static readonly HashSet<string> ScopedExecutionRoles = new(StringComparer.OrdinalIgnoreCase)
@@ -300,6 +302,8 @@ public static class AgentPromptBuilder
 
         Task:
         Choose the next execution batch for the runtime. Select at most {maxSubagents} ready issue leads. Prefer architect-first sequencing when architecture is still unresolved, keep conflicting areas out of the same batch, and choose the smallest safe batch that keeps progress moving. Use the workspace MCP tools to inspect the workspace and persist your selection with `select_execution_batch`. Also repeat the selected issue ids under SELECTED_ISSUES for compatibility.
+        Route implementation work to specialized roles whenever clear: `frontend-developer` for UI/Blazor/client, `backend-developer` for API/data/server, `fullstack-developer` only when one issue must span both sides. Use base `developer` only when specialization is unclear.
+        Reviewer and auditor are guardrail roles. Runtime may auto-inject these based on change footprint/cadence, so avoid duplicate guardrail issues unless you need a distinct scoped follow-up.
 
         Role baseline:
         {roleCard}
@@ -541,7 +545,7 @@ public static class AgentPromptBuilder
 
     private static string BuildAuditorBoundaryBlock(string roleSlug)
     {
-        if (!string.Equals(roleSlug, "auditor", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(roleSlug, RoleAuditor, StringComparison.OrdinalIgnoreCase))
         {
             return "";
         }
