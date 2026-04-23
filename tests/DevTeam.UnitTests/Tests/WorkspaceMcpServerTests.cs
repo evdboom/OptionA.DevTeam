@@ -10,12 +10,14 @@ internal static class WorkspaceMcpServerTests
         new("ToolsList_ExcludesSpawnAgent_WhenNoRunner", ToolsList_ExcludesSpawnAgent_WhenNoRunner),
         new("ToolsList_IncludesSpawnAgent_WhenRunnerProvided", ToolsList_IncludesSpawnAgent_WhenRunnerProvided),
         new("SpawnAgentTool_InvokesRunner_WithCorrectIssueId", SpawnAgentTool_InvokesRunner_WithCorrectIssueId),
+        new("SpawnAgentTool_ForwardsContextHint", SpawnAgentTool_ForwardsContextHint),
         new("Initialize_RespondsWithServerInfo", Initialize_RespondsWithServerInfo),
         new("ToolsList_IncludesGetIssueAndGetDecisions", ToolsList_IncludesGetIssueAndGetDecisions),
         new("GetIssueTool_ReturnsIssueWithRefinementFields", GetIssueTool_ReturnsIssueWithRefinementFields),
         new("GetIssueTool_ReturnsError_WhenIssueNotFound", GetIssueTool_ReturnsError_WhenIssueNotFound),
         new("GetDecisionsTool_ReturnsOnlyRequestedDecisions", GetDecisionsTool_ReturnsOnlyRequestedDecisions),
         new("GetDecisionsTool_ReturnsEmpty_WhenNoIdsGiven", GetDecisionsTool_ReturnsEmpty_WhenNoIdsGiven),
+        new("CreateIssueTool_ReturnsError_WhenTitleTooLong", CreateIssueTool_ReturnsError_WhenTitleTooLong),
     ];
 
     private const string TestWorkspace = "test-ws";
@@ -122,6 +124,34 @@ internal static class WorkspaceMcpServerTests
         });
 
         Assert.That(capturedIssueId == 42, $"Expected runner called with issueId=42 but got {capturedIssueId}");
+    }
+
+    private static async Task SpawnAgentTool_ForwardsContextHint()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore(TestWorkspace, fs);
+        store.Initialize(TestRepoRoot, 100, 20);
+
+        var capturedIssueId = -1;
+        string? capturedContextHint = null;
+        Func<int, string?, CancellationToken, Task<string>> runner = (issueId, contextHint, _) =>
+        {
+            capturedIssueId = issueId;
+            capturedContextHint = contextHint;
+            return Task.FromResult($"Issue #{issueId} completed");
+        };
+        var server = new WorkspaceMcpServer(TestWorkspace, runner);
+
+        await SendMcpRequest(server, McpInitialize);
+        await SendMcpRequest(server, McpToolsCall, new
+        {
+            name = "spawn_agent",
+            arguments = new { issueId = 42, contextHint = "Use the release-branch API notes already gathered by orchestrator." }
+        });
+
+        Assert.That(capturedIssueId == 42, $"Expected runner called with issueId=42 but got {capturedIssueId}");
+        Assert.That(string.Equals(capturedContextHint, "Use the release-branch API notes already gathered by orchestrator.", StringComparison.Ordinal),
+            $"Expected contextHint to be forwarded but got: {capturedContextHint}");
     }
 
     private static async Task Initialize_RespondsWithServerInfo()
@@ -308,6 +338,44 @@ internal static class WorkspaceMcpServerTests
 
             var decisions = decisionsJson.GetProperty("decisions");
             Assert.That(decisions.GetArrayLength() == 0, $"Expected 0 decisions but got {decisions.GetArrayLength()}");
+        }
+        finally
+        {
+            if (Directory.Exists(workspacePath))
+            {
+                Directory.Delete(workspacePath, recursive: true);
+            }
+        }
+    }
+
+    private static async Task CreateIssueTool_ReturnsError_WhenTitleTooLong()
+    {
+        var workspacePath = Path.Combine(Path.GetTempPath(), $"devteam-test-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new WorkspaceStore(workspacePath);
+            store.Initialize(TestRepoRoot, 100, 20);
+
+            var server = new WorkspaceMcpServer(workspacePath);
+
+            await SendMcpRequest(server, McpInitialize);
+            using var response = await SendMcpRequest(server, McpToolsCall, new
+            {
+                name = "create_issue",
+                arguments = new
+                {
+                    title = new string('x', 201),
+                    detail = "too long title test"
+                }
+            });
+
+            var error = response.RootElement.GetProperty("error");
+            var code = error.GetProperty("code").GetInt32();
+            var message = error.GetProperty("message").GetString() ?? string.Empty;
+
+            Assert.That(code == -32000, $"Expected JSON-RPC application error code -32000 but got {code}");
+            Assert.That(message.Contains("Argument 'title' exceeds maximum length of 200 characters.", StringComparison.Ordinal),
+                $"Expected specific title max-length validation message but got: {message}");
         }
         finally
         {

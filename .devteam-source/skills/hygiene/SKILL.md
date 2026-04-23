@@ -1,12 +1,18 @@
 ---
 name: hygiene
 description: Enforce file-size, separation-of-concerns, and maintainability hygiene.
+allowed-tools: [read_file, file_search, grep_search, apply_patch]
 ---
 # Skill: Hygiene
 
 ## Purpose
 Apply project hygiene rules consistently across all code you produce or review.
 Load this Skill when reviewing or scaffolding new files.
+
+## Stack Neutrality
+- These rules apply to any language/framework.
+- Use repository-native boundaries when they differ (for example: React/Vue/Svelte component + hook/service separation, Java Spring controller/service/repository split, Python API module/service split).
+- Apply Blazor-specific rules only when the project actually uses Blazor.
 
 ## Rules
 
@@ -16,12 +22,12 @@ Load this Skill when reviewing or scaffolding new files.
 - Prefer more small, focused files over fewer large ones.
 
 ### Separation of concerns
-- Blazor `.razor` files contain markup and binding glue **only** — no `@code { }` blocks with real logic.
-- All component logic goes in the paired `.razor.cs` partial class (code-behind).
+- If the project uses Blazor, `.razor` files contain markup and binding glue **only** — no `@code { }` blocks with real logic.
+- If the project uses Blazor, all component logic goes in the paired `.razor.cs` partial class (code-behind).
 - The same principle applies broadly: never mix rendering/presentation with domain/business logic in the same file.
 
 ### Entry points
-- `Program.cs` (or equivalent top-level file) must be ≤ ~30 lines.
+- The top-level application bootstrap file (for example `Program.cs`, `main.ts`, `main.py`, `App.java`) should be ≤ ~30 lines when practical.
 - Its only job: wire DI, resolve the dispatcher or entry point, call it.
 - All logic belongs in focused service classes.
 
@@ -31,7 +37,7 @@ Load this Skill when reviewing or scaffolding new files.
 
 ## Checklist (apply before submitting)
 - [ ] No new file exceeds ~400 lines
-- [ ] No `.razor` file has a meaningful `@code { }` block — use `.razor.cs` instead
-- [ ] `Program.cs` (or equivalent) is still ≤ ~30 lines
+- [ ] If Blazor is used, no `.razor` file has a meaningful `@code { }` block — use `.razor.cs` instead
+- [ ] Entry-point/bootstrap file remains lean (≈30 lines when practical)
 - [ ] Each new class/file owns exactly one concern
 

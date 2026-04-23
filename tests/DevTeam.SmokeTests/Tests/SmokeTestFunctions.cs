@@ -764,11 +764,11 @@ internal static class SmokeTestFunctions
             "Normal verbosity should emit iteration logs.");
         AssertTrue(messages.Any(message => message.Contains("Execution", StringComparison.Ordinal)),
             "Normal verbosity should include the current phase.");
-        AssertTrue(harness.State.Decisions.Count >= 3, "Loop should persist decisions.");
+        AssertTrue(harness.State.Decisions.Count >= 2, "Planning and approval decisions should persist.");
         AssertTrue(harness.State.AgentRuns.Any(run => !string.IsNullOrWhiteSpace(run.SessionId)),
             "Runs should record session ids.");
-        AssertTrue(Directory.GetFiles(Path.Combine(harness.Store.WorkspacePath, "decisions"), "decision-*.md").Length > 0,
-            "Decision artifacts should be written to the workspace.");
+        AssertTrue(Directory.GetFiles(Path.Combine(harness.Store.WorkspacePath, "runs"), "run-*.md").Length > 0,
+            "Run artifacts should be written to the workspace.");
     }
     
     internal static void TestExecutionLoopUsesOrchestratorSelectedBatch()

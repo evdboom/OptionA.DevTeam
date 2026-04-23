@@ -5,6 +5,7 @@ internal static class LoopExecutorTests
     public static IEnumerable<TestCase> GetTests() =>
     [
         new("SpawnIssueAsync_CompletesIssue_AndPersistsToStore", SpawnIssueAsync_CompletesIssue_AndPersistsToStore),
+        new("SpawnIssueAsync_IncludesContextHintInPrompt", SpawnIssueAsync_IncludesContextHintInPrompt),
         new("SpawnIssueAsync_PersistsChangedPathsToArtifacts", SpawnIssueAsync_PersistsChangedPathsToArtifacts),
         new("SpawnIssueAsync_ThrowsForUnknownIssue", SpawnIssueAsync_ThrowsForUnknownIssue),
         new("SpawnIssueAsync_ReturnsOutcomeSummary", SpawnIssueAsync_ReturnsOutcomeSummary),
@@ -48,6 +49,28 @@ internal static class LoopExecutorTests
         Assert.That(issue.Status == ItemStatus.Done, $"Expected issue to be Done but was {issue.Status}");
     }
 
+    private static async Task SpawnIssueAsync_IncludesContextHintInPrompt()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Implement feature with cached context");
+        var issueId = state.Issues[^1].Id;
+
+        var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDone.");
+        var factory = new FuncAgentClientFactory(_ => agent);
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        await executor.SpawnIssueAsync(issueId, "The orchestrator already confirmed this should follow decision #12 and reuse the release naming.", "fake", TimeSpan.FromSeconds(30), CancellationToken.None);
+
+        var prompt = agent.LastPrompt ?? throw new InvalidOperationException("Expected spawned issue prompt to be captured.");
+        Assert.That(prompt.Contains("Supplemental caller context:", StringComparison.Ordinal),
+            $"Expected prompt to include supplemental caller context heading but got: {prompt}");
+        Assert.That(prompt.Contains("follow decision #12", StringComparison.Ordinal),
+            $"Expected prompt to include contextHint content but got: {prompt}");
+        Assert.That(prompt.Contains("The issue record and linked decisions remain the source of truth.", StringComparison.Ordinal),
+            $"Expected prompt to clarify contextHint precedence but got: {prompt}");
+    }
+
     private static async Task SpawnIssueAsync_PersistsChangedPathsToArtifacts()
     {
         var fs = new InMemoryFileSystem();
@@ -73,10 +96,8 @@ internal static class LoopExecutorTests
         var runArtifact = fs.ReadAllText(Path.Combine(store.WorkspacePath, "runs", "run-001.md"));
         Assert.That(runArtifact.Contains("src/Feature.cs", StringComparison.Ordinal),
             $"Expected run artifact to mention changed file, got: {runArtifact}");
-
-        var decisionArtifact = fs.ReadAllText(Path.Combine(store.WorkspacePath, "decisions", "decision-001.md"));
-        Assert.That(decisionArtifact.Contains("tests/FeatureTests.cs", StringComparison.Ordinal),
-            $"Expected decision artifact to mention changed file, got: {decisionArtifact}");
+        Assert.That(runArtifact.Contains("tests/FeatureTests.cs", StringComparison.Ordinal),
+            $"Expected run artifact to mention changed file, got: {runArtifact}");
     }
 
     private static async Task SpawnIssueAsync_ThrowsForUnknownIssue()

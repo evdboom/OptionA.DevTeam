@@ -1,6 +1,7 @@
 ---
 name: scout
 description: Run a read-only reconnaissance pass and produce a file manifest.
+allowed-tools: [read_file, file_search, grep_search, semantic_search]
 ---
 # Skill: Scout
 

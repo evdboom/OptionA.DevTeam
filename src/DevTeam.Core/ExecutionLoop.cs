@@ -142,7 +142,7 @@ public class LoopExecutor(
                 pendingRuns.Add(new PendingAgentRun(
                     queuedRun,
                     sessionId,
-                    ExecuteRunAsync(state, options, queuedRun, sessionId, worktreePath, cancellationToken),
+                    ExecuteRunAsync(state, options, queuedRun, sessionId, overrideWorkingDirectory: worktreePath, cancellationToken: cancellationToken),
                     _clock.UtcNow,
                     workingDirectory,
                     gitStatusBeforeRun));
@@ -176,6 +176,7 @@ public class LoopExecutor(
                 var completedIssue = state.Issues.First(issue => issue.Id == completed.Run.IssueId);
                 var model = state.Models.FirstOrDefault(item => string.Equals(item.Name, completed.Run.ModelName, StringComparison.OrdinalIgnoreCase));
                 var usageTelemetry = UsageTelemetryExtractor.Extract(model, completed.Response);
+                var decisionCountBeforeCompletion = state.Decisions.Count;
                 _runtime.CompleteRun(
                     state,
                     new CompleteRunRequest
@@ -193,10 +194,12 @@ public class LoopExecutor(
                         OutputTokens = usageTelemetry.OutputTokens,
                         EstimatedCostUsd = usageTelemetry.EstimatedCostUsd
                     });
-                var decision = state.Decisions[^1];
                 var persistedRun = state.AgentRuns.First(run => run.Id == completed.Run.RunId);
                 WriteRunArtifact(_store.WorkspacePath, completed.Run, persistedRun, completed.Response, completed.Outcome, completed.Summary);
-                WriteDecisionArtifact(_store.WorkspacePath, decision, persistedRun);
+                if (state.Decisions.Count > decisionCountBeforeCompletion)
+                {
+                    WriteDecisionArtifact(_store.WorkspacePath, state.Decisions[^1], persistedRun);
+                }
                 if (!string.IsNullOrWhiteSpace(state.CodebaseContext) && string.Equals(completed.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
                 {
                     WriteBrownfieldDeltaLog(_store.WorkspacePath, completedIssue, persistedRun, completed.Approach, completed.Rationale);
@@ -333,7 +336,7 @@ public class LoopExecutor(
         AgentExecutionResult result;
         try
         {
-            result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, cancellationToken: cancellationToken);
+            result = await ExecuteRunAsync(state, options, queuedRun, session.SessionId, contextHint: contextHint, cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -367,6 +370,7 @@ public class LoopExecutor(
         var completedIssue = state.Issues.First(issue => issue.Id == result.Run.IssueId);
         var model = state.Models.FirstOrDefault(item => string.Equals(item.Name, result.Run.ModelName, StringComparison.OrdinalIgnoreCase));
         var usageTelemetry = UsageTelemetryExtractor.Extract(model, result.Response);
+        var decisionCountBeforeCompletion = state.Decisions.Count;
         _runtime.CompleteRun(
             state,
             new CompleteRunRequest
@@ -386,7 +390,10 @@ public class LoopExecutor(
             });
         var persistedRun = state.AgentRuns.First(r => r.Id == result.Run.RunId);
         WriteRunArtifact(_store.WorkspacePath, result.Run, persistedRun, result.Response, result.Outcome, result.Summary);
-        WriteDecisionArtifact(_store.WorkspacePath, state.Decisions[^1], persistedRun);
+        if (state.Decisions.Count > decisionCountBeforeCompletion)
+        {
+            WriteDecisionArtifact(_store.WorkspacePath, state.Decisions[^1], persistedRun);
+        }
         if (!string.IsNullOrWhiteSpace(state.CodebaseContext) && string.Equals(result.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
         {
             WriteBrownfieldDeltaLog(_store.WorkspacePath, completedIssue, persistedRun, result.Approach, result.Rationale);
@@ -701,11 +708,12 @@ public class LoopExecutor(
         QueuedRunInfo queuedRun,
         string sessionId,
         string? overrideWorkingDirectory = null,
+        string? contextHint = null,
         CancellationToken cancellationToken = default)
     {
         var client = _agentClientFactory.Create(options.Backend);
         var issue = state.Issues.First(item => item.Id == queuedRun.IssueId);
-        var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue, contextHint);
         var workingDirectory = overrideWorkingDirectory ?? state.RepoRoot;
         try
         {
@@ -860,6 +868,12 @@ public class LoopExecutor(
             if (fallbackSelection.Count > 0)
             {
                 Log(log, options.Verbosity, "  Orchestrator did not persist a batch. Falling back to heuristic selection.");
+                _runtime.RecordDecision(
+                    state,
+                    "Execution batch fallback applied",
+                    "The orchestrator did not persist a selection, so the runtime used heuristic ready-issue selection.",
+                    "execution-orchestrator",
+                    sessionId: orchestratorSession.SessionId);
                 _runtime.SetExecutionSelection(
                     state,
                     fallbackSelection,

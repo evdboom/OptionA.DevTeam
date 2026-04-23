@@ -1,6 +1,7 @@
 ---
 name: debug
 description: Perform systematic root-cause debugging before proposing fixes.
+allowed-tools: [read_file, file_search, grep_search, execution_subagent]
 ---
 # Skill: Systematic Debugging
 

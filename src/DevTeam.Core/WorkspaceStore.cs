@@ -9,6 +9,12 @@ namespace DevTeam.Core;
 public class WorkspaceStore
 {
     private const int CurrentFormatVersion = 4;
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+    private static readonly IEqualityComparer<string> PathComparer = OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -84,6 +90,7 @@ public class WorkspaceStore
             }
 
             var hydratedMetadata = SeedData.HydrateMissingWorkspaceMetadata(state, _configLoader);
+            NormalizeIssueScopeMetadata(state);
             if (migratedFromLegacy || hydratedMetadata)
             {
                 Save(state);
@@ -97,6 +104,7 @@ public class WorkspaceStore
     {
         WithWorkspaceLock(() =>
         {
+            NormalizeIssueScopeMetadata(state);
             _fs.CreateDirectory(WorkspacePath);
             _fs.CreateDirectory(Path.Combine(WorkspacePath, "runs"));
             _fs.CreateDirectory(Path.Combine(WorkspacePath, "decisions"));
@@ -109,6 +117,53 @@ public class WorkspaceStore
             WriteCodebaseContextFile(state);
             return 0;
         });
+    }
+
+    private static void NormalizeIssueScopeMetadata(WorkspaceState state)
+    {
+        var repoRoot = Path.GetFullPath(state.RepoRoot);
+        var repoRootWithSeparator = EnsureTrailingSeparator(repoRoot);
+
+        foreach (var issue in state.Issues)
+        {
+            var normalizedFiles = new List<string>();
+            foreach (var file in issue.FilesInScope.Where(path => !string.IsNullOrWhiteSpace(path)))
+            {
+                var trimmed = file.Trim();
+                var fullPath = Path.GetFullPath(
+                    Path.IsPathRooted(trimmed)
+                        ? trimmed
+                        : Path.Combine(repoRoot, trimmed));
+                if (!fullPath.StartsWith(repoRootWithSeparator, PathComparison))
+                {
+                    throw new InvalidOperationException($"Issue #{issue.Id} contains a file scope path outside the repository root: '{trimmed}'.");
+                }
+
+                var relativePath = Path.GetRelativePath(repoRoot, fullPath).Replace('\\', '/');
+                if (!normalizedFiles.Contains(relativePath, PathComparer))
+                {
+                    normalizedFiles.Add(relativePath);
+                }
+            }
+
+            issue.FilesInScope = normalizedFiles;
+            issue.LinkedDecisionIds = issue.LinkedDecisionIds
+                .Where(id => id > 0)
+                .Distinct()
+                .OrderBy(id => id)
+                .ToList();
+        }
+    }
+
+    private static string EnsureTrailingSeparator(string path)
+    {
+        var normalized = Path.GetFullPath(path);
+        if (!normalized.EndsWith(Path.DirectorySeparatorChar) && !normalized.EndsWith(Path.AltDirectorySeparatorChar))
+        {
+            normalized += Path.DirectorySeparatorChar;
+        }
+
+        return normalized;
     }
 
     private void ResetWorkspaceArtifacts()

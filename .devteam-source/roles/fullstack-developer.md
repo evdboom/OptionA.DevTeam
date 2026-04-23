@@ -27,4 +27,4 @@ You implement **end-to-end features spanning both client and server**. You can w
 - Document both API changes AND UI changes in your handoff
 - If the codebase has clear frontend/backend boundaries, respect them
 - **Keep files small and focused.** No file should own multiple concerns. When a file exceeds ~400 lines, split it by theme. Prefer more smaller files over fewer large ones.
-- **Blazor code-behind rule:** Always use `.razor.cs` partial class files for component logic. `.razor` files contain only markup and minimal binding glue — no `@code { }` blocks with real logic.
+- **If using Blazor:** use `.razor.cs` partial class files for component logic. `.razor` files contain only markup and minimal binding glue — no `@code { }` blocks with real logic.

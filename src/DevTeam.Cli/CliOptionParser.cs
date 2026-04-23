@@ -5,6 +5,9 @@ namespace DevTeam.Cli;
 
 internal static class CliOptionParser
 {
+    internal const int MaxGoalLength = 100_000;
+    internal const int MaxWorkspacePathLength = 512;
+
     internal static Dictionary<string, List<string>> ParseOptions(string[] tokens)
     {
         var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -79,6 +82,40 @@ internal static class CliOptionParser
 
     internal static string NormalizeCommand(string value) =>
         value.Trim().TrimStart('/').ToLowerInvariant();
+
+    internal static string NormalizeWorkspacePathOrThrow(string? workspacePath, string fallback = ".devteam")
+    {
+        var candidate = string.IsNullOrWhiteSpace(workspacePath) ? fallback : workspacePath.Trim();
+        if (candidate.Length > MaxWorkspacePathLength)
+        {
+            throw new InvalidOperationException($"Workspace path is too long. Maximum length is {MaxWorkspacePathLength} characters.");
+        }
+
+        if (candidate.IndexOf('\0') >= 0)
+        {
+            throw new InvalidOperationException("Workspace path contains invalid control characters.");
+        }
+
+        // Keep compatibility with absolute workspace paths used by smoke tests and automation,
+        // while still normalizing to a canonical path.
+        return Path.GetFullPath(candidate);
+    }
+
+    internal static string ValidateGoalTextOrThrow(string goalText)
+    {
+        var normalized = goalText.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new InvalidOperationException("Goal text cannot be empty.");
+        }
+
+        if (normalized.Length > MaxGoalLength)
+        {
+            throw new InvalidOperationException($"Goal text is too long. Maximum length is {MaxGoalLength} characters.");
+        }
+
+        return normalized;
+    }
 
     internal static string? GetOption(Dictionary<string, List<string>> options, string key) =>
         ResolveOptionValues(options, key) is { Count: > 0 } values ? string.Join(" ", values) : null;

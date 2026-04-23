@@ -5,6 +5,9 @@ namespace DevTeam.Core;
 
 public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
 {
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
     private static readonly string[] RoleDirectoryCandidates = [Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.Roles)];
     private static readonly string[] ModeDirectoryCandidates = [Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.Modes)];
     private static readonly string[] SkillDirectoryCandidates = [Path.Combine(CoreConstants.Paths.DevTeamSource, CoreConstants.Paths.Skills)];
@@ -259,11 +262,12 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
             return [];
         }
 
+        var repoRootFullPath = Path.GetFullPath(repoRoot);
         using var doc = JsonDocument.Parse(_fs.ReadAllText(filePath));
         var servers = new List<McpServerDefinition>();
         foreach (var element in doc.RootElement.EnumerateArray())
         {
-            servers.Add(new McpServerDefinition
+            var definition = new McpServerDefinition
             {
                 Name = element.GetProperty("Name").GetString() ?? "",
                 Command = element.GetProperty("Command").GetString() ?? "",
@@ -273,10 +277,82 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
                 Cwd = element.TryGetProperty("Cwd", out var cwd) ? cwd.GetString() : null,
                 Description = element.TryGetProperty("Description", out var desc) ? desc.GetString() ?? "" : "",
                 Enabled = !element.TryGetProperty("Enabled", out var enabled) || enabled.GetBoolean()
-            });
+            };
+            ValidateMcpServerDefinition(definition, repoRootFullPath);
+            servers.Add(definition);
         }
 
         return servers;
+    }
+
+    private static void ValidateMcpServerDefinition(McpServerDefinition definition, string repoRootFullPath)
+    {
+        if (string.IsNullOrWhiteSpace(definition.Name))
+        {
+            throw new InvalidOperationException("MCP server name is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(definition.Command))
+        {
+            throw new InvalidOperationException($"MCP server '{definition.Name}' must define a command.");
+        }
+
+        if (definition.Command.IndexOf('\0') >= 0)
+        {
+            throw new InvalidOperationException($"MCP server '{definition.Name}' contains an invalid command value.");
+        }
+
+        if (!Path.IsPathRooted(definition.Command) && definition.Command.Contains(Path.DirectorySeparatorChar))
+        {
+            throw new InvalidOperationException($"MCP server '{definition.Name}' command must be a bare executable name or an absolute path.");
+        }
+
+        if (!Path.IsPathRooted(definition.Command) && definition.Command.Contains(Path.AltDirectorySeparatorChar))
+        {
+            throw new InvalidOperationException($"MCP server '{definition.Name}' command must be a bare executable name or an absolute path.");
+        }
+
+        if (definition.Args.Count > 64)
+        {
+            throw new InvalidOperationException($"MCP server '{definition.Name}' has too many command arguments (max 64).");
+        }
+
+        foreach (var arg in definition.Args)
+        {
+            if (arg.IndexOf('\0') >= 0)
+            {
+                throw new InvalidOperationException($"MCP server '{definition.Name}' contains an invalid command argument.");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(definition.Cwd))
+        {
+            return;
+        }
+
+        var resolvedCwd = Path.GetFullPath(
+            Path.IsPathRooted(definition.Cwd)
+                ? definition.Cwd
+                : Path.Combine(repoRootFullPath, definition.Cwd));
+        var normalizedRepoRoot = EnsureTrailingSeparator(Path.GetFullPath(repoRootFullPath));
+        var normalizedCwd = EnsureTrailingSeparator(resolvedCwd);
+        if (!normalizedCwd.StartsWith(normalizedRepoRoot, PathComparison))
+        {
+            throw new InvalidOperationException($"MCP server '{definition.Name}' cwd must remain inside the repository root.");
+        }
+
+        definition.Cwd = resolvedCwd;
+    }
+
+    private static string EnsureTrailingSeparator(string path)
+    {
+        var normalized = Path.GetFullPath(path);
+        if (!normalized.EndsWith(Path.DirectorySeparatorChar) && !normalized.EndsWith(Path.AltDirectorySeparatorChar))
+        {
+            normalized += Path.DirectorySeparatorChar;
+        }
+
+        return normalized;
     }
 
     private MarkdownAsset ParseMarkdownAsset(string path)
@@ -303,9 +379,8 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
         for (var index = 1; index < endIndex; index++)
         {
             var line = lines[index].Trim();
-            if (line.StartsWith("tools:", StringComparison.OrdinalIgnoreCase))
+            if (TryGetToolsLineValue(line, out var inline))
             {
-                var inline = line["tools:".Length..].Trim();
                 if (!string.IsNullOrWhiteSpace(inline))
                 {
                     requiredTools.AddRange(ParseToolList(inline));
@@ -323,8 +398,39 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
         return new MarkdownAsset(body, requiredTools.Where(tool => !string.IsNullOrWhiteSpace(tool)).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
     }
 
-    private static IEnumerable<string> ParseToolList(string inline) =>
-        inline.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    private static bool TryGetToolsLineValue(string line, out string value)
+    {
+        const string toolsPrefix = "tools:";
+        const string allowedToolsPrefix = "allowed-tools:";
+
+        if (line.StartsWith(toolsPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            value = line[toolsPrefix.Length..].Trim();
+            return true;
+        }
+
+        if (line.StartsWith(allowedToolsPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            value = line[allowedToolsPrefix.Length..].Trim();
+            return true;
+        }
+
+        value = "";
+        return false;
+    }
+
+    private static IEnumerable<string> ParseToolList(string inline)
+    {
+        var normalized = inline.Trim();
+        if (normalized.StartsWith("[", StringComparison.Ordinal) &&
+            normalized.EndsWith("]", StringComparison.Ordinal) &&
+            normalized.Length >= 2)
+        {
+            normalized = normalized[1..^1];
+        }
+
+        return normalized.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
 
     private static string GetString(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String

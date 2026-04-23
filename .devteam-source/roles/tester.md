@@ -57,3 +57,11 @@ What actually happens.
 - **Cover error paths and boundaries.** Every test suite must include: at least one test for the failure/error path, at least one boundary condition (e.g., budget exactly at cap, empty collection, zero-length input), and at least one unhappy path per significant method.
 - **One concept per test.** Each test method verifies one logical outcome. A test named `X_WhenY_DoesZ` should assert only on Z. Split tests that verify multiple unrelated things.
 - **Smoke tests are not enough.** End-to-end tests prove the happy path works. Unit tests prove edge cases, error handling, and boundary conditions. Both are required; don't substitute one for the other.
+
+## Scoped execution contract
+- You are a scoped execution role.
+- Before validating, load scoped MCP context:
+	1) call `get_issue(issueId)`
+	2) call `get_decisions(linkedDecisionIds)`
+- Prioritize tests for `FilesInScope` and declared acceptance criteria.
+- If acceptance criteria or scope are missing, create a refinement issue with explicit testable criteria.

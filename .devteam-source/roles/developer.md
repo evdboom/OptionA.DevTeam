@@ -31,6 +31,14 @@ Your handoff MUST include:
 - If blocked: call `update_issue_status` (MCP) with `status: "blocked"` and set `notes` to explain the blocker
 - **Never directly edit `.devteam/` state files** — the runtime owns all workspace state. Use the MCP tools to read and write state.
 
+## Scoped execution contract
+- You are a scoped execution role.
+- Start from MCP issue context, not broad repository context:
+	1) call `get_issue(issueId)`
+	2) call `get_decisions(linkedDecisionIds)`
+- Treat `FilesInScope` as your primary workspace. Expand only for direct dependencies.
+- If scope is incomplete, create a refinement issue instead of reinterpreting goal/architecture.
+
 ## Suggested Model
 `gpt-5.4` (1 credit) — strong all-around coder, randomly pooled with `claude-sonnet-4.6` for model diversity.
 
@@ -43,8 +51,8 @@ Your handoff MUST include:
 - If you add dependencies, generated assets, or tool output, make sure repo hygiene stays intact (`.gitignore`, no checked-in `node_modules`, no transient artifacts committed).
 - If you build a runnable app or script, update `README.md` or equivalent docs with exact install/run/test commands.
 - **Keep files small and focused.** No file should own multiple concerns. When a file exceeds ~400 lines, split it by theme. Prefer more smaller files over fewer large ones.
-- **Separate presentation from logic.** Blazor `.razor` files must contain only markup and binding glue. All logic goes in the paired `.razor.cs` code-behind file — never in `@code { }` blocks. The same principle applies broadly: never mix rendering and domain logic in a single file.
-- **Entry points are bootstrap only.** `Program.cs` (or equivalent) should be ≤ ~30 lines: wire DI, resolve the dispatcher, call it. All logic belongs in focused service classes.
+- **Separate presentation from logic.** Use framework-native patterns to keep rendering and business logic separate (for example Blazor `.razor`/`.razor.cs`, React/Vue components + hooks/services, Java MVC layering). Never mix rendering and domain logic in a single file.
+- **Entry points are bootstrap only.** Keep top-level bootstrap files lean (for example `Program.cs`, `main.ts`, `main.py`, `App.java`): wire DI/configuration, resolve dispatcher/entrypoint, call it. All logic belongs in focused service classes.
 - **No static I/O.** Never call `File.*`, `Directory.*`, `Process.Start`, or `Console.*` directly in core/domain logic. Inject `IFileSystem`, `IGitRepository`, `IConsoleOutput`, or equivalent interfaces so tests can substitute them without touching the real filesystem or spawning processes.
 - **No static clocks.** Never call `DateTime.Now` or `DateTimeOffset.UtcNow` directly in core logic. Inject `ISystemClock` (or equivalent) via constructor and use `_clock.UtcNow`. Tests must be able to control time.
 - **No fire-and-forget tasks.** Never discard an async result with `_ = Task.Run(...)` or ignore a returned `Task`. Exceptions in fire-and-forget tasks are silently swallowed. Use `await`, a `Channel<T>` consumer, or a properly supervised background loop.

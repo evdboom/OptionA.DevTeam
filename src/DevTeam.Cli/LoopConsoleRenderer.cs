@@ -1,9 +1,17 @@
 using DevTeam.Core;
+using System.Text.RegularExpressions;
 
 namespace DevTeam.Cli;
 
 internal sealed class LoopConsoleRenderer : IDisposable
 {
+    private static readonly Regex SecretLikeKeyValueRegex = new(
+        @"(?ix)(?<key>api[_-]?key|bearer[_-]?token|token|secret|password)\s*[:=]\s*(?<value>[^\s,;]+)",
+        RegexOptions.Compiled);
+    private static readonly Regex GitHubTokenRegex = new(
+        @"\bgh[pousr]_[A-Za-z0-9_]{20,}\b",
+        RegexOptions.Compiled);
+
     private readonly object _gate = new();
     private int _progressLineCount;
     private bool _disposed;
@@ -13,7 +21,7 @@ internal sealed class LoopConsoleRenderer : IDisposable
         lock (_gate)
         {
             ClearProgressBlock();
-            Console.WriteLine(message);
+            Console.WriteLine(RedactSecrets(message));
         }
     }
 
@@ -77,5 +85,17 @@ internal sealed class LoopConsoleRenderer : IDisposable
         }
 
         return value[..Math.Max(0, maxLength - 1)] + "…";
+    }
+
+    private static string RedactSecrets(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        var redacted = SecretLikeKeyValueRegex.Replace(value, "${key}: [REDACTED]");
+        redacted = GitHubTokenRegex.Replace(redacted, "[REDACTED_GITHUB_TOKEN]");
+        return redacted;
     }
 }

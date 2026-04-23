@@ -29,5 +29,5 @@ You implement **UI, client-side logic, and user-facing features**. You own every
 - Prefer CSS/design tokens over inline styles
 - If you need a new API endpoint, request it via an issue assigned to Backend Developer
 - Test visually — describe what the UI looks like after your changes
-- **Blazor code-behind rule:** Always use `.razor.cs` partial class files for component logic. `.razor` files contain only markup and minimal binding glue — no `@code { }` blocks with real logic.
+- **If using Blazor:** use `.razor.cs` partial class files for component logic. `.razor` files contain only markup and minimal binding glue — no `@code { }` blocks with real logic.
 - **Keep files small and focused.** No component file should exceed ~300 lines of markup. Split large components into smaller focused components. Prefer more small files over fewer large ones.

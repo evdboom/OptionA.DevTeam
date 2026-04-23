@@ -13,6 +13,7 @@ internal static class SetGoalCommandHandlerTests
         new("ExecuteAsync_ThrowsInvalidOp_WhenNoGoalProvided", ExecuteAsync_ThrowsInvalidOp_WhenNoGoalProvided),
         new("ExecuteAsync_PrintsSuccessMessage", ExecuteAsync_PrintsSuccessMessage),
         new("ExecuteAsync_SavesStateToWorkspace", ExecuteAsync_SavesStateToWorkspace),
+        new("ExecuteAsync_ThrowsInvalidOp_WhenGoalIsTooLong", ExecuteAsync_ThrowsInvalidOp_WhenGoalIsTooLong),
     ];
 
     private static async Task ExecuteAsync_SetsGoal_WhenGoalProvided()
@@ -119,6 +120,32 @@ internal static class SetGoalCommandHandlerTests
             var state2 = store2.Load();
             Assert.That(state2.ActiveGoal?.GoalText == RoverGoal, $"Expected persisted goal '{RoverGoal}' but got '{state2.ActiveGoal?.GoalText}'");
             return Task.CompletedTask;
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { /* Best-effort temp cleanup. */ }
+        }
+    }
+
+    private static async Task ExecuteAsync_ThrowsInvalidOp_WhenGoalIsTooLong()
+    {
+        var output = new FakeConsoleOutput();
+        var tempDir = Path.Combine(Path.GetTempPath(), $"devteam-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var store = new WorkspaceStore(tempDir);
+            var runtime = new DevTeamRuntime();
+            var handler = new SetGoalCommandHandler(store, runtime, output);
+
+            store.Initialize(tempDir, 25, 6);
+            var tooLongGoal = new string('g', CliOptionParser.MaxGoalLength + 1);
+            var options = new Dictionary<string, List<string>>
+            {
+                ["__positional"] = new List<string> { tooLongGoal }
+            };
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => handler.ExecuteAsync(options));
         }
         finally
         {

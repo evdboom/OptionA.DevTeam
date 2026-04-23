@@ -2,7 +2,7 @@ using DevTeam.Cli;
 
 var command = CliOptionParser.NormalizeCommand(args.Length == 0 ? "help" : args[0]);
 var options = CliOptionParser.ParseOptions(args.Skip(1).ToArray());
-var workspacePath = CliOptionParser.GetOption(options, "workspace") ?? ".devteam";
+var workspacePath = CliOptionParser.NormalizeWorkspacePathOrThrow(CliOptionParser.GetOption(options, "workspace"));
 using var toolUpdateService = new ToolUpdateService();
 
 try
