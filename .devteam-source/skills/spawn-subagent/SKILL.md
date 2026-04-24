@@ -19,9 +19,9 @@ These share the parent session's MCP servers and skill directories but have a re
 | `backlog-manager` | `orchestrator` | Audit backlog via MCP: triage, close duplicates, resolve stale questions |
 | `refiner` | `architect` | Scope an ambiguous issue: read files, produce REFINEMENT notes, update via MCP |
 | `analyst` | `architect`, `auditor`, `security` | ATM health check on a file set: size, mixed concerns, static I/O, missing seams |
-| `inline-reviewer` | `developer`/*-developer, `refactorer`, `reviewer` | Pre-handoff diff review: correctness, scope violations, missing tests |
-| `security-scanner` | `developer`/*-developer | OWASP scan of changed files: injection, secrets, path traversal |
-| `verifier` | `developer`/*-developer, `refactorer`, `tester` | Run build/test command, return pass/fail evidence |
+| `inline-reviewer` | `developer`, `*-developer`, `refactorer`, `reviewer` | Pre-handoff diff review: correctness, scope violations, missing tests |
+| `security-scanner` | `developer`, `*-developer` | OWASP scan of changed files: injection, secrets, path traversal |
+| `verifier` | `developer`, `*-developer`, `refactorer`, `tester` | Run build/test command, return pass/fail evidence |
 
 ## Two paths
 

@@ -15,6 +15,7 @@ internal static class WorkspaceMcpSessionConfigFactoryTests
         new("CustomAgentDefinition_Navigator_HasReadOnlyTools", CustomAgentDefinition_Navigator_HasReadOnlyTools),
         new("ScoutAgentDefinitions_NavigatorIfRequested_ReturnsEmptyWhenFalse", ScoutAgentDefinitions_NavigatorIfRequested_ReturnsEmptyWhenFalse),
         new("ScoutAgentDefinitions_NavigatorIfRequested_ReturnsNavigatorWhenTrue", ScoutAgentDefinitions_NavigatorIfRequested_ReturnsNavigatorWhenTrue),
+        new("ScoutAgentDefinitions_GetAgentsForRole_NormalizesRoleSlug", ScoutAgentDefinitions_GetAgentsForRole_NormalizesRoleSlug),
     ];
 
     // ── SessionHooks mapping ────────────────────────────────────────────────
@@ -162,6 +163,21 @@ internal static class WorkspaceMcpSessionConfigFactoryTests
         var result = ScoutAgentDefinitions.NavigatorIfRequested(true);
         Assert.That(result.Count == 1, $"Expected 1 agent when includeScout=true but got {result.Count}");
         Assert.That(result[0].Name == "navigator", $"Expected name 'navigator' but got: {result[0].Name}");
+        return Task.CompletedTask;
+    }
+
+    private static Task ScoutAgentDefinitions_GetAgentsForRole_NormalizesRoleSlug()
+    {
+        var developerAgents = ScoutAgentDefinitions.GetAgentsForRole("  Developer  ");
+        Assert.That(developerAgents.Any(agent => agent.Name == "inline-reviewer"),
+            $"Expected developer role to include inline-reviewer agent but got: {string.Join(", ", developerAgents.Select(a => a.Name))}");
+        Assert.That(developerAgents.Any(agent => agent.Name == "security-scanner"),
+            $"Expected developer role to include security-scanner agent but got: {string.Join(", ", developerAgents.Select(a => a.Name))}");
+
+        var reviewerAgents = ScoutAgentDefinitions.GetAgentsForRole("REVIEWER");
+        Assert.That(reviewerAgents.Any(agent => agent.Name == "inline-reviewer"),
+            $"Expected reviewer role to include inline-reviewer agent but got: {string.Join(", ", reviewerAgents.Select(a => a.Name))}");
+
         return Task.CompletedTask;
     }
 }

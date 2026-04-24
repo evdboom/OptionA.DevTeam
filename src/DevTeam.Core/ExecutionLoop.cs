@@ -464,14 +464,14 @@ public class LoopExecutor(
 
         return new SessionHooksConfig
         {
-            OnPreToolUse = (toolName, args) =>
+            OnPreToolUse = (toolName, _) =>
             {
-                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][tool↓] {toolName}  {(args.Length > 80 ? args[..80] + "…" : args)}");
+                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][tool↓] {toolName}");
                 return PreToolDecision.Allow;
             },
-            OnPostToolUse = (toolName, _, result) =>
+            OnPostToolUse = (toolName, _, _) =>
             {
-                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][tool↑] {toolName}  {(result.Length > 120 ? result[..120] + "…" : result)}");
+                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][tool↑] {toolName}");
             },
             OnSessionStart = source =>
             {
@@ -480,7 +480,7 @@ public class LoopExecutor(
             OnErrorOccurred = (context, error) =>
             {
                 log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][error] {context}: {error}");
-                return ErrorHandlingDecision.Retry;
+                return ErrorHandlingDecision.Abort;
             }
         };
     }
@@ -1067,7 +1067,7 @@ public class LoopExecutor(
                 }
                 else if (verbosity == LoopVerbosity.Detailed)
                 {
-                    log($"    [orchestrator][tool↓] {toolName}  {(args.Length > 80 ? args[..80] + "…" : args)}");
+                    log($"    [orchestrator][tool↓] {toolName}");
                 }
 
                 return PreToolDecision.Allow;
@@ -1091,13 +1091,13 @@ public class LoopExecutor(
                 }
                 else if (verbosity == LoopVerbosity.Detailed)
                 {
-                    log($"    [orchestrator][tool↑] {toolName}  {(result.Length > 120 ? result[..120] + "…" : result)}");
+                    log($"    [orchestrator][tool↑] {toolName}");
                 }
             },
             OnErrorOccurred = (context, error) =>
             {
                 log($"    [orchestrator][error] {context}: {error}");
-                return ErrorHandlingDecision.Retry;
+                return ErrorHandlingDecision.Abort;
             }
         };
     }

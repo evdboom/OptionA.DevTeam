@@ -16,8 +16,10 @@ internal static class LoopExecutorTests
         new("DetailedVerbosity_PassesHooksToRequest", DetailedVerbosity_PassesHooksToRequest),
         new("NormalVerbosity_DoesNotPassHooksToRequest", NormalVerbosity_DoesNotPassHooksToRequest),
         new("DetailedVerbosity_HooksLogPreAndPostToolUse", DetailedVerbosity_HooksLogPreAndPostToolUse),
+        new("DetailedVerbosity_HooksAbortOnError", DetailedVerbosity_HooksAbortOnError),
         new("NormalVerbosity_OrchestratorRequest_PassesVisibilityHooks", NormalVerbosity_OrchestratorRequest_PassesVisibilityHooks),
         new("OrchestratorVisibilityHooks_LogSpawnAndInlineEvents", OrchestratorVisibilityHooks_LogSpawnAndInlineEvents),
+        new("OrchestratorVisibilityHooks_AbortOnError", OrchestratorVisibilityHooks_AbortOnError),
     ];
 
     private static WorkspaceState BuildStateWithIssue(WorkspaceStore store, string title, string role = "developer")
@@ -379,6 +381,42 @@ internal static class LoopExecutorTests
             $"Expected pre-tool log line with '[tool↓]' and 'grep'. Log: {string.Join("|", logLines)}");
         Assert.That(logLines.Any(l => l.Contains("[tool↑]") && l.Contains("grep")),
             $"Expected post-tool log line with '[tool↑]' and 'grep'. Log: {string.Join("|", logLines)}");
+        Assert.That(!logLines.Any(l => l.Contains("{\"pattern\":\"foo\"}", StringComparison.Ordinal)),
+            $"Detailed logging should not include raw tool args. Log: {string.Join("|", logLines)}");
+        Assert.That(!logLines.Any(l => l.Contains("3 matches", StringComparison.Ordinal)),
+            $"Detailed logging should not include raw tool results. Log: {string.Join("|", logLines)}");
+    }
+
+    private static async Task DetailedVerbosity_HooksAbortOnError()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Hooks error handling", "developer");
+        var issueId = state.Issues[^1].Id;
+        state.Phase = WorkflowPhase.Execution;
+        state.ExecutionSelection = new ExecutionSelectionState
+        {
+            SelectedIssueIds = [issueId],
+            Rationale = "test"
+        };
+
+        var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDone.");
+        var factory = new FuncAgentClientFactory(_ => agent);
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var options = new LoopExecutionOptions
+        {
+            MaxIterations = 1,
+            AgentTimeout = TimeSpan.FromSeconds(30),
+            Verbosity = LoopVerbosity.Detailed
+        };
+
+        await executor.RunAsync(state, options, log: _ => { });
+
+        var hooks = agent.Requests.Last().Hooks!;
+        var decision = hooks.OnErrorOccurred!("tool", "fatal");
+        Assert.That(decision == ErrorHandlingDecision.Abort,
+            $"Expected detailed hook errors to abort, got: {decision}");
     }
 
     private static async Task NormalVerbosity_OrchestratorRequest_PassesVisibilityHooks()
@@ -454,5 +492,35 @@ internal static class LoopExecutorTests
             $"Expected inline start visibility log, got: {string.Join("|", logLines)}");
         Assert.That(logLines.Any(l => l.Contains("[orchestrator][inline] inline subagent task finished", StringComparison.Ordinal)),
             $"Expected inline completion visibility log, got: {string.Join("|", logLines)}");
+    }
+
+    private static async Task OrchestratorVisibilityHooks_AbortOnError()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Orchestrator error handling", "developer");
+        state.Phase = WorkflowPhase.Execution;
+        state.ExecutionSelection = new ExecutionSelectionState();
+
+        var orchestratorOutput = "OUTCOME: completed\nSUMMARY:\nOrchestrator done.";
+        var workerOutput = "OUTCOME: completed\nSUMMARY:\nWorker done.";
+        var agent = new RecordingAgentClient(orchestratorOutput, workerOutput);
+        var factory = new FuncAgentClientFactory(_ => agent);
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var options = new LoopExecutionOptions
+        {
+            MaxIterations = 1,
+            MaxSubagents = 1,
+            AgentTimeout = TimeSpan.FromSeconds(30),
+            Verbosity = LoopVerbosity.Normal
+        };
+
+        await executor.RunAsync(state, options, log: _ => { });
+
+        var hooks = agent.Requests[0].Hooks!;
+        var decision = hooks.OnErrorOccurred!("tool", "fatal");
+        Assert.That(decision == ErrorHandlingDecision.Abort,
+            $"Expected orchestrator visibility hook errors to abort, got: {decision}");
     }
 }

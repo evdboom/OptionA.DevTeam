@@ -311,8 +311,10 @@ public static class ScoutAgentDefinitions
     /// Each role gets a tailored combination that covers its most common auxiliary tasks
     /// without adding unnecessary context weight.
     /// </summary>
-    public static IReadOnlyList<CustomAgentDefinition> GetAgentsForRole(string roleSlug) =>
-        roleSlug switch
+    public static IReadOnlyList<CustomAgentDefinition> GetAgentsForRole(string roleSlug)
+    {
+        var normalizedRole = roleSlug.Trim().ToLowerInvariant();
+        return normalizedRole switch
         {
             // Orchestrator: needs backlog health + file scouting
             "orchestrator" => [Navigator, BacklogManager],
@@ -347,6 +349,7 @@ public static class ScoutAgentDefinitions
             // Default: navigator for any role not listed above
             _ => [Navigator]
         };
+    }
 
     /// <summary>
     /// Returns the navigator definition if <paramref name="includeScout"/> is true,
