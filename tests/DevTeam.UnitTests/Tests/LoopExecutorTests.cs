@@ -374,16 +374,22 @@ internal static class LoopExecutorTests
 
         // Verify the hooks were built with the right tool logging format by invoking them directly
         var hooks = agent.Requests.Last().Hooks!;
-        hooks.OnPreToolUse!("grep", "{\"pattern\":\"foo\"}");
-        hooks.OnPostToolUse!("grep", "{}", "3 matches");
+        var toolArgsPayload = "{\"pattern\":\"foo\"}";
+        var toolResultPayload = "3 matches";
+        hooks.OnPreToolUse!("grep", toolArgsPayload);
+        hooks.OnPostToolUse!("grep", "{}", toolResultPayload);
 
         Assert.That(logLines.Any(l => l.Contains("[tool↓]") && l.Contains("grep")),
             $"Expected pre-tool log line with '[tool↓]' and 'grep'. Log: {string.Join("|", logLines)}");
         Assert.That(logLines.Any(l => l.Contains("[tool↑]") && l.Contains("grep")),
             $"Expected post-tool log line with '[tool↑]' and 'grep'. Log: {string.Join("|", logLines)}");
-        Assert.That(!logLines.Any(l => l.Contains("{\"pattern\":\"foo\"}", StringComparison.Ordinal)),
+        Assert.That(logLines.Any(l => string.Equals(l, $"    [developer#{issueId}][tool↓] grep", StringComparison.Ordinal)),
+            $"Expected sanitized pre-tool log line with only tool name. Log: {string.Join("|", logLines)}");
+        Assert.That(logLines.Any(l => string.Equals(l, $"    [developer#{issueId}][tool↑] grep", StringComparison.Ordinal)),
+            $"Expected sanitized post-tool log line with only tool name. Log: {string.Join("|", logLines)}");
+        Assert.That(logLines.All(l => !l.Contains(toolArgsPayload, StringComparison.Ordinal)),
             $"Detailed logging should not include raw tool args. Log: {string.Join("|", logLines)}");
-        Assert.That(!logLines.Any(l => l.Contains("3 matches", StringComparison.Ordinal)),
+        Assert.That(logLines.All(l => !l.Contains(toolResultPayload, StringComparison.Ordinal)),
             $"Detailed logging should not include raw tool results. Log: {string.Join("|", logLines)}");
     }
 

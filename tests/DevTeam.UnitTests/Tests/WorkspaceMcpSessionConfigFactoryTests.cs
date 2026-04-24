@@ -168,11 +168,21 @@ internal static class WorkspaceMcpSessionConfigFactoryTests
 
     private static Task ScoutAgentDefinitions_GetAgentsForRole_NormalizesRoleSlug()
     {
+        var normalizedDeveloperAgents = ScoutAgentDefinitions.GetAgentsForRole("developer");
+        Assert.That(normalizedDeveloperAgents.Any(agent => agent.Name == "inline-reviewer"),
+            $"Expected normalized developer role to include inline-reviewer agent but got: {string.Join(", ", normalizedDeveloperAgents.Select(a => a.Name))}");
+        Assert.That(normalizedDeveloperAgents.Any(agent => agent.Name == "security-scanner"),
+            $"Expected normalized developer role to include security-scanner agent but got: {string.Join(", ", normalizedDeveloperAgents.Select(a => a.Name))}");
+
         var developerAgents = ScoutAgentDefinitions.GetAgentsForRole("  Developer  ");
         Assert.That(developerAgents.Any(agent => agent.Name == "inline-reviewer"),
             $"Expected developer role to include inline-reviewer agent but got: {string.Join(", ", developerAgents.Select(a => a.Name))}");
         Assert.That(developerAgents.Any(agent => agent.Name == "security-scanner"),
             $"Expected developer role to include security-scanner agent but got: {string.Join(", ", developerAgents.Select(a => a.Name))}");
+
+        var mixedCaseDeveloperAgents = ScoutAgentDefinitions.GetAgentsForRole("DeVeLoPeR");
+        Assert.That(mixedCaseDeveloperAgents.Any(agent => agent.Name == "inline-reviewer"),
+            $"Expected mixed-case developer role to include inline-reviewer agent but got: {string.Join(", ", mixedCaseDeveloperAgents.Select(a => a.Name))}");
 
         var reviewerAgents = ScoutAgentDefinitions.GetAgentsForRole("REVIEWER");
         Assert.That(reviewerAgents.Any(agent => agent.Name == "inline-reviewer"),
