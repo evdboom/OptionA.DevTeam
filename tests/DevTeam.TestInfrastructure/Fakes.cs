@@ -74,7 +74,9 @@ public sealed class RecordingAgentClient : IAgentClient
                 Prompt = request.Prompt,
                 SessionId = request.SessionId ?? "",
                 Model = request.Model ?? "",
-                WorkingDirectory = request.WorkingDirectory
+                WorkingDirectory = request.WorkingDirectory,
+                Hooks = request.Hooks,
+                CustomAgents = request.CustomAgents
             });
             output = _outputs[Math.Min(_invocationCount, _outputs.Count - 1)];
             _invocationCount++;
@@ -96,6 +98,8 @@ public sealed class RecordedAgentRequest
     public string SessionId { get; init; } = "";
     public string Model { get; init; } = "";
     public string WorkingDirectory { get; init; } = "";
+    public SessionHooksConfig? Hooks { get; init; }
+    public IReadOnlyList<CustomAgentDefinition> CustomAgents { get; init; } = [];
 }
 
 public sealed class FileWritingAgentClient(string fileName, string output) : IAgentClient

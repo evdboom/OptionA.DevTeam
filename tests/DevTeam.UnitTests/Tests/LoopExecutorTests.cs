@@ -13,6 +13,11 @@ internal static class LoopExecutorTests
         new("QueueIssues_SkipsAlreadyDoneIssue", QueueIssues_SkipsAlreadyDoneIssue),
         new("TokenReporter_IsInvokedWithRoleAndTokens_DuringRunAsync", TokenReporter_IsInvokedWithRoleAndTokens_DuringRunAsync),
         new("TokenReporter_ReceivesAllTokens_AcrossMultipleWords", TokenReporter_ReceivesAllTokens_AcrossMultipleWords),
+        new("DetailedVerbosity_PassesHooksToRequest", DetailedVerbosity_PassesHooksToRequest),
+        new("NormalVerbosity_DoesNotPassHooksToRequest", NormalVerbosity_DoesNotPassHooksToRequest),
+        new("DetailedVerbosity_HooksLogPreAndPostToolUse", DetailedVerbosity_HooksLogPreAndPostToolUse),
+        new("NormalVerbosity_OrchestratorRequest_PassesVisibilityHooks", NormalVerbosity_OrchestratorRequest_PassesVisibilityHooks),
+        new("OrchestratorVisibilityHooks_LogSpawnAndInlineEvents", OrchestratorVisibilityHooks_LogSpawnAndInlineEvents),
     ];
 
     private static WorkspaceState BuildStateWithIssue(WorkspaceStore store, string title, string role = "developer")
@@ -273,5 +278,181 @@ internal static class LoopExecutorTests
             Assert.That(combined.Contains(word, StringComparison.Ordinal),
                 $"Expected streamed output to contain '{word}' but combined was: {combined}");
         }
+    }
+
+    private static async Task DetailedVerbosity_PassesHooksToRequest()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Implement feature X");
+        var issueId = state.Issues[^1].Id;
+        state.Phase = WorkflowPhase.Execution;
+        state.ExecutionSelection = new ExecutionSelectionState
+        {
+            SelectedIssueIds = [issueId],
+            Rationale = "test"
+        };
+
+        var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDone.");
+        var factory = new FuncAgentClientFactory(_ => agent);
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var options = new LoopExecutionOptions
+        {
+            MaxIterations = 1,
+            AgentTimeout = TimeSpan.FromSeconds(30),
+            Verbosity = LoopVerbosity.Detailed
+        };
+
+        await executor.RunAsync(state, options);
+
+        Assert.That(agent.Requests.Count >= 1, $"Expected at least 1 request but got {agent.Requests.Count}");
+        var request = agent.Requests.Last();
+        Assert.That(request.Hooks is not null, "Expected Hooks to be set on request when verbosity is Detailed");
+        Assert.That(request.Hooks!.OnPreToolUse is not null, "Expected OnPreToolUse hook to be populated at Detailed verbosity");
+        Assert.That(request.Hooks.OnPostToolUse is not null, "Expected OnPostToolUse hook to be populated at Detailed verbosity");
+    }
+
+    private static async Task NormalVerbosity_DoesNotPassHooksToRequest()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Implement feature Y");
+        var issueId = state.Issues[^1].Id;
+        state.Phase = WorkflowPhase.Execution;
+        state.ExecutionSelection = new ExecutionSelectionState
+        {
+            SelectedIssueIds = [issueId],
+            Rationale = "test"
+        };
+
+        var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDone.");
+        var factory = new FuncAgentClientFactory(_ => agent);
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var options = new LoopExecutionOptions
+        {
+            MaxIterations = 1,
+            AgentTimeout = TimeSpan.FromSeconds(30),
+            Verbosity = LoopVerbosity.Normal
+        };
+
+        await executor.RunAsync(state, options);
+
+        var request = agent.Requests.Last();
+        Assert.That(request.Hooks is null, "Expected Hooks to be null on request when verbosity is Normal");
+    }
+
+    private static async Task DetailedVerbosity_HooksLogPreAndPostToolUse()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Hooks log verification", "developer");
+        var issueId = state.Issues[^1].Id;
+        state.Phase = WorkflowPhase.Execution;
+        state.ExecutionSelection = new ExecutionSelectionState
+        {
+            SelectedIssueIds = [issueId],
+            Rationale = "test"
+        };
+
+        var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDone.");
+        var factory = new FuncAgentClientFactory(_ => agent);
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var logLines = new List<string>();
+        var options = new LoopExecutionOptions
+        {
+            MaxIterations = 1,
+            AgentTimeout = TimeSpan.FromSeconds(30),
+            Verbosity = LoopVerbosity.Detailed
+        };
+
+        await executor.RunAsync(state, options, log: logLines.Add);
+
+        // Verify the hooks were built with the right tool logging format by invoking them directly
+        var hooks = agent.Requests.Last().Hooks!;
+        hooks.OnPreToolUse!("grep", "{\"pattern\":\"foo\"}");
+        hooks.OnPostToolUse!("grep", "{}", "3 matches");
+
+        Assert.That(logLines.Any(l => l.Contains("[tool↓]") && l.Contains("grep")),
+            $"Expected pre-tool log line with '[tool↓]' and 'grep'. Log: {string.Join("|", logLines)}");
+        Assert.That(logLines.Any(l => l.Contains("[tool↑]") && l.Contains("grep")),
+            $"Expected post-tool log line with '[tool↑]' and 'grep'. Log: {string.Join("|", logLines)}");
+    }
+
+    private static async Task NormalVerbosity_OrchestratorRequest_PassesVisibilityHooks()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Implement feature with orchestration", "developer");
+        state.Phase = WorkflowPhase.Execution;
+        state.ExecutionSelection = new ExecutionSelectionState();
+
+        var orchestratorOutput = "OUTCOME: completed\nSUMMARY:\nOrchestrator done.";
+        var workerOutput = "OUTCOME: completed\nSUMMARY:\nWorker done.";
+        var agent = new RecordingAgentClient(orchestratorOutput, workerOutput);
+        var factory = new FuncAgentClientFactory(_ => agent);
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var options = new LoopExecutionOptions
+        {
+            MaxIterations = 1,
+            MaxSubagents = 1,
+            AgentTimeout = TimeSpan.FromSeconds(30),
+            Verbosity = LoopVerbosity.Normal
+        };
+
+        await executor.RunAsync(state, options, log: _ => { });
+
+        Assert.That(agent.Requests.Count >= 1, $"Expected at least one request but got {agent.Requests.Count}");
+        var orchestratorRequest = agent.Requests[0];
+        Assert.That(orchestratorRequest.Hooks is not null,
+            "Expected orchestrator request to carry visibility hooks at Normal verbosity.");
+        Assert.That(orchestratorRequest.Hooks!.OnPreToolUse is not null,
+            "Expected orchestrator visibility pre-tool hook to be present.");
+        Assert.That(orchestratorRequest.Hooks.OnPostToolUse is not null,
+            "Expected orchestrator visibility post-tool hook to be present.");
+    }
+
+    private static async Task OrchestratorVisibilityHooks_LogSpawnAndInlineEvents()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Orchestrator visibility", "developer");
+        state.Phase = WorkflowPhase.Execution;
+        state.ExecutionSelection = new ExecutionSelectionState();
+
+        var orchestratorOutput = "OUTCOME: completed\nSUMMARY:\nOrchestrator done.";
+        var workerOutput = "OUTCOME: completed\nSUMMARY:\nWorker done.";
+        var agent = new RecordingAgentClient(orchestratorOutput, workerOutput);
+        var factory = new FuncAgentClientFactory(_ => agent);
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var logLines = new List<string>();
+        var options = new LoopExecutionOptions
+        {
+            MaxIterations = 1,
+            MaxSubagents = 1,
+            AgentTimeout = TimeSpan.FromSeconds(30),
+            Verbosity = LoopVerbosity.Normal
+        };
+
+        await executor.RunAsync(state, options, log: logLines.Add);
+
+        var hooks = agent.Requests[0].Hooks!;
+        hooks.OnPreToolUse!("spawn_agent", "{\"issueId\":42}");
+        hooks.OnPostToolUse!("spawn_agent", "{\"issueId\":42}", "Issue #42 completed");
+        hooks.OnPreToolUse!("task", "{\"prompt\":\"scan\"}");
+        hooks.OnPostToolUse!("task", "{\"prompt\":\"scan\"}", "done");
+
+        Assert.That(logLines.Any(l => l.Contains("[orchestrator][spawn] starting issue #42", StringComparison.Ordinal)),
+            $"Expected spawn start visibility log, got: {string.Join("|", logLines)}");
+        Assert.That(logLines.Any(l => l.Contains("[orchestrator][spawn] completed issue #42", StringComparison.Ordinal)),
+            $"Expected spawn completion visibility log, got: {string.Join("|", logLines)}");
+        Assert.That(logLines.Any(l => l.Contains("[orchestrator][inline] running inline subagent task", StringComparison.Ordinal)),
+            $"Expected inline start visibility log, got: {string.Join("|", logLines)}");
+        Assert.That(logLines.Any(l => l.Contains("[orchestrator][inline] inline subagent task finished", StringComparison.Ordinal)),
+            $"Expected inline completion visibility log, got: {string.Join("|", logLines)}");
     }
 }

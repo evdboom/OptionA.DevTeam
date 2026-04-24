@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace DevTeam.Core;
@@ -142,7 +143,7 @@ public class LoopExecutor(
                 pendingRuns.Add(new PendingAgentRun(
                     queuedRun,
                     sessionId,
-                    ExecuteRunAsync(state, options, queuedRun, sessionId, overrideWorkingDirectory: worktreePath, cancellationToken: cancellationToken),
+                    ExecuteRunAsync(state, options, queuedRun, sessionId, overrideWorkingDirectory: worktreePath, log: log, cancellationToken: cancellationToken),
                     _clock.UtcNow,
                     workingDirectory,
                     gitStatusBeforeRun));
@@ -454,6 +455,36 @@ public class LoopExecutor(
         }
     }
 
+    private static SessionHooksConfig? BuildDetailedHooks(QueuedRunInfo queuedRun, Action<string>? log, LoopVerbosity verbosity)
+    {
+        if (verbosity != LoopVerbosity.Detailed)
+        {
+            return null;
+        }
+
+        return new SessionHooksConfig
+        {
+            OnPreToolUse = (toolName, args) =>
+            {
+                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][tool↓] {toolName}  {(args.Length > 80 ? args[..80] + "…" : args)}");
+                return PreToolDecision.Allow;
+            },
+            OnPostToolUse = (toolName, _, result) =>
+            {
+                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][tool↑] {toolName}  {(result.Length > 120 ? result[..120] + "…" : result)}");
+            },
+            OnSessionStart = source =>
+            {
+                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][session] started ({source})");
+            },
+            OnErrorOccurred = (context, error) =>
+            {
+                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][error] {context}: {error}");
+                return ErrorHandlingDecision.Retry;
+            }
+        };
+    }
+
     private static void LogBudget(WorkspaceState state, Action<string>? log, LoopVerbosity verbosity)
     {
         var b = state.Budget;
@@ -709,6 +740,7 @@ public class LoopExecutor(
         string sessionId,
         string? overrideWorkingDirectory = null,
         string? contextHint = null,
+        Action<string>? log = null,
         CancellationToken cancellationToken = default)
     {
         var client = _agentClientFactory.Create(options.Backend);
@@ -730,7 +762,9 @@ public class LoopExecutor(
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
                 ExternalMcpServers = state.McpServers,
-                OnToken = options.TokenReporter is null ? null : token => options.TokenReporter($"{queuedRun.RoleSlug}#{queuedRun.IssueId}", token)
+                OnToken = options.TokenReporter is null ? null : token => options.TokenReporter($"{queuedRun.RoleSlug}#{queuedRun.IssueId}", token),
+                Hooks = BuildDetailedHooks(queuedRun, log, options.Verbosity),
+                CustomAgents = ScoutAgentDefinitions.GetAgentsForRole(queuedRun.RoleSlug)
             }, cancellationToken);
             var parsed = AgentPromptBuilder.ParseResponse(response);
             return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Approach, parsed.Rationale, parsed.Issues, parsed.SkillsUsed, parsed.ToolsUsed, parsed.Questions);
@@ -820,7 +854,9 @@ public class LoopExecutor(
                 Timeout = options.AgentTimeout,
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
-                ExternalMcpServers = state.McpServers
+                ExternalMcpServers = state.McpServers,
+                Hooks = BuildOrchestratorVisibilityHooks(log, options.Verbosity),
+                CustomAgents = ScoutAgentDefinitions.GetAgentsForRole("orchestrator")
             }, cancellationToken),
             options,
             log,
@@ -1001,6 +1037,95 @@ public class LoopExecutor(
                 options.ProgressReporter.Invoke([snapshotFactory(elapsed)]);
             }
         }
+    }
+
+    private static SessionHooksConfig? BuildOrchestratorVisibilityHooks(Action<string>? log, LoopVerbosity verbosity)
+    {
+        if (verbosity == LoopVerbosity.Quiet || log is null)
+        {
+            return null;
+        }
+
+        return new SessionHooksConfig
+        {
+            OnPreToolUse = (toolName, args) =>
+            {
+                if (string.Equals(toolName, "spawn_agent", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (TryExtractIssueId(args, out var issueId))
+                    {
+                        log($"    [orchestrator][spawn] starting issue #{issueId}");
+                    }
+                    else
+                    {
+                        log("    [orchestrator][spawn] starting child issue");
+                    }
+                }
+                else if (string.Equals(toolName, "task", StringComparison.OrdinalIgnoreCase))
+                {
+                    log("    [orchestrator][inline] running inline subagent task");
+                }
+                else if (verbosity == LoopVerbosity.Detailed)
+                {
+                    log($"    [orchestrator][tool↓] {toolName}  {(args.Length > 80 ? args[..80] + "…" : args)}");
+                }
+
+                return PreToolDecision.Allow;
+            },
+            OnPostToolUse = (toolName, args, result) =>
+            {
+                if (string.Equals(toolName, "spawn_agent", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (TryExtractIssueId(args, out var issueId))
+                    {
+                        log($"    [orchestrator][spawn] completed issue #{issueId}");
+                    }
+                    else
+                    {
+                        log("    [orchestrator][spawn] child issue finished");
+                    }
+                }
+                else if (string.Equals(toolName, "task", StringComparison.OrdinalIgnoreCase))
+                {
+                    log("    [orchestrator][inline] inline subagent task finished");
+                }
+                else if (verbosity == LoopVerbosity.Detailed)
+                {
+                    log($"    [orchestrator][tool↑] {toolName}  {(result.Length > 120 ? result[..120] + "…" : result)}");
+                }
+            },
+            OnErrorOccurred = (context, error) =>
+            {
+                log($"    [orchestrator][error] {context}: {error}");
+                return ErrorHandlingDecision.Retry;
+            }
+        };
+    }
+
+    private static bool TryExtractIssueId(string args, out int issueId)
+    {
+        issueId = 0;
+        if (string.IsNullOrWhiteSpace(args))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(args);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("issueId", out var issue)
+                && issue.ValueKind == JsonValueKind.Number)
+            {
+                return issue.TryGetInt32(out issueId);
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        return false;
     }
 
     // ── Worktree helpers ─────────────────────────────────────────────────────────

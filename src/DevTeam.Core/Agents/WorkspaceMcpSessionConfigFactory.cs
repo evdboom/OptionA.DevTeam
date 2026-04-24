@@ -54,7 +54,96 @@ public static class WorkspaceMcpSessionConfigFactory
             sessionConfig.McpServers = allMcpServers;
         }
 
+        if (request.Hooks is not null)
+        {
+            sessionConfig.Hooks = BuildSessionHooks(request.Hooks);
+        }
+
+        if (request.CustomAgents.Count > 0)
+        {
+            sessionConfig.CustomAgents = request.CustomAgents
+                .Select(a => new CustomAgentConfig
+                {
+                    Name = a.Name,
+                    DisplayName = a.DisplayName,
+                    Description = a.Description,
+                    Tools = a.Tools.ToList(),
+                    Prompt = a.Prompt,
+                    Infer = a.Infer
+                })
+                .ToList();
+        }
+
         return sessionConfig;
+    }
+
+    public static SessionHooks BuildSessionHooks(SessionHooksConfig config)
+    {
+        var hooks = new SessionHooks();
+
+        if (config.OnPreToolUse is not null)
+        {
+            var callback = config.OnPreToolUse;
+            hooks.OnPreToolUse = (input, _) =>
+            {
+                var decision = callback(input.ToolName ?? "", input.ToolArgs?.ToString() ?? "");
+                var kind = decision switch
+                {
+                    PreToolDecision.Deny => "deny",
+                    PreToolDecision.Ask  => "ask",
+                    _                    => "allow"
+                };
+                return Task.FromResult<PreToolUseHookOutput?>(new PreToolUseHookOutput { PermissionDecision = kind });
+            };
+        }
+
+        if (config.OnPostToolUse is not null)
+        {
+            var callback = config.OnPostToolUse;
+            hooks.OnPostToolUse = (input, _) =>
+            {
+                callback(input.ToolName ?? "", input.ToolArgs?.ToString() ?? "", input.ToolResult?.ToString() ?? "");
+                return Task.FromResult<PostToolUseHookOutput?>(null);
+            };
+        }
+
+        if (config.OnSessionStart is not null)
+        {
+            var callback = config.OnSessionStart;
+            hooks.OnSessionStart = (input, _) =>
+            {
+                callback(input.Source ?? "");
+                return Task.FromResult<SessionStartHookOutput?>(null);
+            };
+        }
+
+        if (config.OnSessionEnd is not null)
+        {
+            var callback = config.OnSessionEnd;
+            hooks.OnSessionEnd = (input, _) =>
+            {
+                callback(input.Reason ?? "");
+                return Task.FromResult<SessionEndHookOutput?>(null);
+            };
+        }
+
+        if (config.OnErrorOccurred is not null)
+        {
+            var callback = config.OnErrorOccurred;
+            hooks.OnErrorOccurred = (input, _) =>
+            {
+                var decision = callback(input.ErrorContext ?? "", input.Error ?? "");
+                var kind = decision switch
+                {
+                    ErrorHandlingDecision.Skip  => "skip",
+                    ErrorHandlingDecision.Abort => "abort",
+                    _                           => "retry"
+                };
+                return Task.FromResult<ErrorOccurredHookOutput?>(new ErrorOccurredHookOutput { ErrorHandling = kind });
+            };
+        }
+
+        return hooks;
     }
 
     public static ProviderConfig BuildProviderConfig(ProviderDefinition provider)

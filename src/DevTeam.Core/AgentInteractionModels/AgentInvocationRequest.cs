@@ -20,4 +20,14 @@ public sealed class AgentInvocationRequest
     /// The callback receives raw text fragments; may be called from any thread.
     /// </summary>
     public Action<string>? OnToken { get; init; }
+
+    /// <summary>
+    /// Optional lifecycle and tool-interception hooks. Only used by the Copilot SDK backend.
+    /// </summary>
+    public SessionHooksConfig? Hooks { get; init; }
+
+    /// <summary>
+    /// Named sub-agents with isolated tool surfaces. Only used by the Copilot SDK backend.
+    /// </summary>
+    public IReadOnlyList<CustomAgentDefinition> CustomAgents { get; init; } = [];
 }
