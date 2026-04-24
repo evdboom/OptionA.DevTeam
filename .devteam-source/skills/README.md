@@ -18,16 +18,18 @@ Skill folder names use lowercase and hyphens.
 
 | Skill | Purpose |
 |-------|---------|
+| `backlog-manager` | Audit and triage backlog health (duplicates, stale questions, refinement routing). |
 | `brainstorm` | Explore alternatives and trade-offs before implementation. |
-| `plan` | Break work into small, verifiable tasks before coding. |
-| `tdd` | Apply red-green-refactor test-driven development. |
 | `debug` | Run systematic root-cause analysis before fixing. |
-| `verify` | Validate claims with fresh command output and evidence. |
+| `hygiene` | Enforce maintainability rules and file-boundary hygiene. |
+| `plan` | Break work into small, verifiable tasks before coding. |
+| `refine` | Turn ambiguous issues into exhaustive, executable scoped work packets. |
+| `resolve-conflict` | Resolve git merge conflicts safely and completely. |
 | `review` | Perform self-review before handoff. |
 | `scout` | Do a read-only reconnaissance pass and map affected files. |
-| `hygiene` | Enforce maintainability rules and file-boundary hygiene. |
-| `resolve-conflict` | Resolve git merge conflicts safely and completely. |
-| `refine` | Turn ambiguous issues into exhaustive, executable scoped work packets. |
+| `spawn-subagent` | Choose inline agent vs full spawned session routing and delegation strategy. |
+| `tdd` | Apply red-green-refactor test-driven development. |
+| `verify` | Validate claims with fresh command output and evidence. |
 
 ## Typical Flow
 
@@ -41,3 +43,9 @@ Skill folder names use lowercase and hyphens.
 
 - DevTeam loads these skills from `.devteam-source/skills/`.
 - During `/init` and `/customize`, DevTeam can export them to `.github/skills/` for native Copilot skill discovery.
+
+## Maintenance
+
+- Keep this README in sync with folders under `.devteam-source/skills/`.
+- When adding, removing, or renaming a skill, update this file in the same change.
+- Keep each row aligned to the current `name` and intent in that skill's `SKILL.md`.
