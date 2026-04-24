@@ -4,6 +4,9 @@ namespace DevTeam.Core;
 
 public class DevTeamRuntime
 {
+    private const string RoleDeveloper = "developer";
+    private const string RoleReviewer = "reviewer";
+
     private readonly ISystemClock _clock;
     private readonly IIssueService _issueService;
     private readonly IQuestionService _questionService;
@@ -11,6 +14,7 @@ public class DevTeamRuntime
     private readonly IBudgetService _budgetService;
     private readonly IPlanningService _planningService;
     private readonly ISessionManager _sessionManager;
+    private readonly GuardrailFollowUpPolicy _guardrailFollowUpPolicy;
 
     public DevTeamRuntime(
         ISystemClock? clock = null,
@@ -28,6 +32,7 @@ public class DevTeamRuntime
         _budgetService = budgetService ?? new BudgetService();
         _planningService = planningService ?? new PlanningService(_clock);
         _sessionManager = sessionManager ?? new SessionManager(_clock);
+        _guardrailFollowUpPolicy = new GuardrailFollowUpPolicy(_issueService);
     }
 
     public GoalState SetGoal(WorkspaceState state, string goalText)
@@ -617,6 +622,13 @@ public class DevTeamRuntime
         {
             var normalizedTitle = proposal.Title.Trim();
             var normalizedRole = _issueService.ResolveRoleSlug(state, proposal.RoleSlug);
+            normalizedRole = DeveloperRoleInference.InferSpecializedRole(
+                state,
+                proposal.RoleSlug,
+                normalizedRole,
+                normalizedTitle,
+                proposal.Detail,
+                proposal.Area);
 
             if (state.Phase == WorkflowPhase.Planning
                 && string.Equals(normalizedRole, CoreConstants.Roles.Architect, StringComparison.OrdinalIgnoreCase)
@@ -745,6 +757,7 @@ public class DevTeamRuntime
                 run.Status = AgentRunStatus.Completed;
                 issue.Status = ItemStatus.Done;
                 _issueService.AdvancePipelineAfterCompletion(state, issue);
+                _guardrailFollowUpPolicy.EnsureFollowUps(state, issue, run);
                 break;
             case "failed":
                 run.Status = AgentRunStatus.Failed;
@@ -925,15 +938,15 @@ public class DevTeamRuntime
     private static bool IsReviewRole(string roleSlug)
     {
         var normalized = roleSlug.Trim().ToLowerInvariant();
-        return normalized is "reviewer" or "review" or "security" or "tester";
+        return normalized is RoleReviewer or "review" or "security" or "tester";
     }
 
     private static List<string> GetModeDefaultPipelineRoles(string modeSlug) =>
         modeSlug.Trim().ToLowerInvariant() switch
         {
-            "creative-writing" => ["architect", "developer", "reviewer"],
-            "github" => ["developer", "reviewer"],
-            _ => ["architect", "developer", "tester"]
+            "creative-writing" => ["architect", RoleDeveloper, RoleReviewer],
+            "github" => [RoleDeveloper, RoleReviewer],
+            _ => ["architect", RoleDeveloper, "tester"]
         };
 
     private static string BuildIssueEditDecisionDetail(IssueEditRequest request, IssueItem issue)

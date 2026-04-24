@@ -45,6 +45,7 @@
 - Do not rely on `NEXT_ROLE` handoffs. The issue board is the workload queue, and each issue already names the role that should execute it.
 - Default runtime verbosity is `normal`. Use `--verbosity detailed` when diagnosing loop behavior and `--verbosity quiet` when embedding the command in automation.
 - Keep user-facing CLI documentation in sync with features. When adding or changing commands such as `/bug` / `bug-report`, update `README.md` and this `.github\copilot-instructions.md` file in the same change unless there is a strong reason not to.
+- Keep skills documentation in sync with behavior assets. When adding, removing, or renaming anything under `.devteam-source\skills\`, update `.devteam-source\skills\README.md` in the same change.
 - `bug-report` is the non-interactive command and `/bug` is the interactive-shell alias for generating a GitHub-issue-ready bug report draft with version, environment, workspace snapshot, and recent shell diagnostics.
 
 ## Code hygiene conventions

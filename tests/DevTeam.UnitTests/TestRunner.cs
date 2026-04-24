@@ -32,10 +32,12 @@ internal static class TestRunner
         var r20 = await RunSuiteAsync("BugReportBuilderTests", BugReportBuilderTests.GetTests());
         var r21 = await RunSuiteAsync("IssueRefinementTests", IssueRefinementTests.GetTests());
         var r22 = await RunSuiteAsync("CliOptionParserTests", CliOptionParserTests.GetTests());
+        var r23 = await RunSuiteAsync("DevTeamRuntimeGuardrailTests", DevTeamRuntimeGuardrailTests.GetTests());
+        var r24 = await RunSuiteAsync("WorkspaceMcpSessionConfigFactoryTests", WorkspaceMcpSessionConfigFactoryTests.GetTests());
 
-        var passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed + r7.Passed + r8.Passed + r9.Passed + r10.Passed + r11.Passed + r12.Passed + r13.Passed + r14.Passed + r15.Passed + r16.Passed + r17.Passed + r18.Passed + r19.Passed + r20.Passed + r21.Passed + r22.Passed;
+        var passed = r1.Passed + r2.Passed + r3.Passed + r4.Passed + r5.Passed + r6.Passed + r7.Passed + r8.Passed + r9.Passed + r10.Passed + r11.Passed + r12.Passed + r13.Passed + r14.Passed + r15.Passed + r16.Passed + r17.Passed + r18.Passed + r19.Passed + r20.Passed + r21.Passed + r22.Passed + r23.Passed + r24.Passed;
         // NOTE: r4 (BudgetServiceTests) owns 19 tests after the per-run limit additions — no new runner variable needed.
-        var failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed + r7.Failed + r8.Failed + r9.Failed + r10.Failed + r11.Failed + r12.Failed + r13.Failed + r14.Failed + r15.Failed + r16.Failed + r17.Failed + r18.Failed + r19.Failed + r20.Failed + r21.Failed + r22.Failed;
+        var failed = r1.Failed + r2.Failed + r3.Failed + r4.Failed + r5.Failed + r6.Failed + r7.Failed + r8.Failed + r9.Failed + r10.Failed + r11.Failed + r12.Failed + r13.Failed + r14.Failed + r15.Failed + r16.Failed + r17.Failed + r18.Failed + r19.Failed + r20.Failed + r21.Failed + r22.Failed + r23.Failed + r24.Failed;
 
         Console.WriteLine();
         Console.WriteLine($"Results: {passed} passed, {failed} failed");
