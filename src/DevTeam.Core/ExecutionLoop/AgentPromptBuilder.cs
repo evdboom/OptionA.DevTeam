@@ -171,6 +171,7 @@ public static class AgentPromptBuilder
         - Any "should I do X or Y?" where both options are within your role's authority: decide and act.
 
         QUESTIONS are only for information that cannot be inferred, that is genuinely required to proceed, and that only the end user can supply (e.g. target platform, business logic, secret credentials). If you can make a reasonable decision autonomously, do so.
+        Every question must be self-contained. Do not reference "above", "the previous line", or implied context without restating the concrete evidence in the same question entry.
         Non-blocking runtime/scheduling questions (timeouts, batching, ordering, retries, split strategy, issue closure policy) are auto-resolved by runtime policy and should not be emitted.
 
         Pipeline handoff context:
@@ -229,9 +230,11 @@ public static class AgentPromptBuilder
         TOOLS_USED:
         - <tool name or command>
         List the concrete tools or commands you actually used. If none, write `(none)`.
-        QUESTIONS:
-        - [blocking] <question text>
-        - [non-blocking] <question text>
+                QUESTIONS:
+                - [blocking] <self-contained question text>
+                    context: <optional supporting facts from this run>
+                - [non-blocking] <self-contained question text>
+                    context: <optional supporting facts from this run>
         If you do not need user input, write `(none)` under QUESTIONS.
         """;
     }
@@ -274,6 +277,7 @@ public static class AgentPromptBuilder
         {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Use it to inspect current workspace state and to persist newly discovered issues, questions, and decisions. Use update_issue_status to set issue status. Call get_runtime_capabilities to see what the runtime manages automatically." : "No workspace MCP server is available in this session.")}
 
         Runtime-managed — do NOT ask the user about: budget/model selection, phase transitions, issue status (use update_issue_status MCP), run lifecycle, pipeline chaining, workspace state file conflicts, closing or superseding issues (decide and act), or retry/timeout decisions for other issues. QUESTIONS are only for information only the end user can supply.
+        Every question must be self-contained. Do not reference "above" or implied context without restating the concrete evidence in the same question entry.
 
         Open questions:
         {BuildQuestionBlock(state)}
@@ -298,9 +302,11 @@ public static class AgentPromptBuilder
         ISSUES:
         - role=<role>; area=<area-or-none>; priority=<1-100>; depends=<ids-or-none>; title=<title>; detail=<detail>
         If no issues should be created, write `(none)` under ISSUES.
-        QUESTIONS:
-        - [blocking] <question text>
-        - [non-blocking] <question text>
+                QUESTIONS:
+                - [blocking] <self-contained question text>
+                    context: <optional supporting facts from this run>
+                - [non-blocking] <self-contained question text>
+                    context: <optional supporting facts from this run>
         If you do not need user input, write `(none)` under QUESTIONS.
         """;
     }
@@ -360,9 +366,11 @@ public static class AgentPromptBuilder
         TOOLS_USED:
         - <tool name or command>
         If none, write `(none)`.
-        QUESTIONS:
-        - [blocking] <question text>
-        - [non-blocking] <question text>
+                QUESTIONS:
+                - [blocking] <self-contained question text>
+                    context: <optional supporting facts from this run>
+                - [non-blocking] <self-contained question text>
+                    context: <optional supporting facts from this run>
         If none, write `(none)`.
         """;
     }
@@ -656,9 +664,31 @@ public static class AgentPromptBuilder
             return NoneLiteral;
         }
 
-        return string.Join(
-            "\n",
-            openQuestions.Select(item => $"- #{item.Id} [{(item.IsBlocking ? "blocking" : "non-blocking")}] {item.Text}"));
+        return string.Join("\n", openQuestions.Select(FormatQuestionForPrompt));
+    }
+
+    private static string FormatQuestionForPrompt(QuestionItem question)
+    {
+        var prefix = $"- #{question.Id} [{(question.IsBlocking ? "blocking" : "non-blocking")}] ";
+        var lines = SplitQuestionLines(question.Text);
+        if (lines.Count == 0)
+        {
+            return prefix.TrimEnd();
+        }
+
+        if (lines.Count == 1)
+        {
+            return prefix + lines[0];
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine(prefix + lines[0]);
+        foreach (var line in lines.Skip(1))
+        {
+            builder.Append("  ").AppendLine(line);
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     private static string BuildBrownfieldGuidanceBlock(WorkspaceState state)
@@ -892,6 +922,8 @@ public static class AgentPromptBuilder
         }
 
         var result = new List<ProposedQuestion>();
+        ProposedQuestion? current = null;
+        var contextLines = new List<string>();
         foreach (var rawLine in lines.Skip(questionsIndex + 1))
         {
             var line = rawLine.Trim();
@@ -902,30 +934,73 @@ public static class AgentPromptBuilder
 
             if (!line.StartsWith("-", StringComparison.Ordinal))
             {
+                if (current is not null && !string.IsNullOrWhiteSpace(line))
+                {
+                    contextLines.Add(line);
+                }
                 continue;
+            }
+
+            if (current is not null)
+            {
+                result.Add(AppendQuestionContext(current, contextLines));
+                current = null;
+                contextLines.Clear();
             }
 
             var body = line[1..].Trim();
             if (body.StartsWith("[blocking]", StringComparison.OrdinalIgnoreCase))
             {
-                result.Add(new ProposedQuestion
+                current = new ProposedQuestion
                 {
                     IsBlocking = true,
                     Text = body["[blocking]".Length..].Trim()
-                });
+                };
             }
             else if (body.StartsWith("[non-blocking]", StringComparison.OrdinalIgnoreCase))
             {
-                result.Add(new ProposedQuestion
+                current = new ProposedQuestion
                 {
                     IsBlocking = false,
                     Text = body["[non-blocking]".Length..].Trim()
-                });
+                };
             }
+        }
+
+        if (current is not null)
+        {
+            result.Add(AppendQuestionContext(current, contextLines));
         }
 
         return result;
     }
+
+    private static ProposedQuestion AppendQuestionContext(ProposedQuestion question, IReadOnlyList<string> contextLines)
+    {
+        if (contextLines.Count == 0)
+        {
+            return question;
+        }
+
+        var context = string.Join('\n', contextLines)
+            .Trim();
+        if (string.IsNullOrWhiteSpace(context))
+        {
+            return question;
+        }
+
+        return new ProposedQuestion
+        {
+            IsBlocking = question.IsBlocking,
+            Text = $"{question.Text.Trim()}\nContext: {context}"
+        };
+    }
+
+    private static IReadOnlyList<string> SplitQuestionLines(string text)
+        => text.Replace("\r", string.Empty)
+            .Split('\n', StringSplitOptions.TrimEntries)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
 
     private static IReadOnlyList<string> ParseSimpleList(string[] lines, int sectionIndex, params int[] otherSectionIndexes)
     {

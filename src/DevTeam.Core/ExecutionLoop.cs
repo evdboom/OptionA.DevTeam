@@ -1,3 +1,4 @@
+using System.Text;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -1041,7 +1042,7 @@ public class LoopExecutor(
             ? NoneText
             : string.Join(
                 Environment.NewLine,
-                openQuestions.Select(question => $"- #{question.Id} [{(question.IsBlocking ? "blocking" : "non-blocking")}] {question.Text}"));
+                openQuestions.Select(FormatQuestionForPlanArtifact));
 
         var content = $"""
         # {header}
@@ -1064,6 +1065,34 @@ public class LoopExecutor(
         `devteam /approve --workspace {Path.GetFileName(workspacePath)} "Start building."`
         """;
         _fileSystem.WriteAllText(path, content);
+    }
+
+    private static string FormatQuestionForPlanArtifact(QuestionItem question)
+    {
+        var prefix = $"- #{question.Id} [{(question.IsBlocking ? "blocking" : "non-blocking")}] ";
+        var normalized = question.Text.Replace("\r", string.Empty);
+        var lines = normalized
+            .Split('\n', StringSplitOptions.TrimEntries)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
+        if (lines.Count == 0)
+        {
+            return prefix.TrimEnd();
+        }
+
+        if (lines.Count == 1)
+        {
+            return prefix + lines[0];
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine(prefix + lines[0]);
+        foreach (var line in lines.Skip(1))
+        {
+            builder.Append("  ").AppendLine(line);
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     private static void LogPlanSummary(Action<string>? log, LoopVerbosity verbosity, string summary)

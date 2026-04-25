@@ -24,7 +24,9 @@ internal static class ReconServiceTests
         new("BuildPrompt_IncludesWorkspaceProtectionSkill_ForGitRiskIssue", BuildPrompt_IncludesWorkspaceProtectionSkill_ForGitRiskIssue),
         new("BuildPrompt_InjectsTimeBudget_WithCorrectMinutes", BuildPrompt_InjectsTimeBudget_WithCorrectMinutes),
         new("BuildPrompt_IncludesBrownfieldDeltaInstructions", BuildPrompt_IncludesBrownfieldDeltaInstructions),
+        new("BuildPrompt_EnforcesSelfContainedQuestions", BuildPrompt_EnforcesSelfContainedQuestions),
         new("ParseResponse_ReadsBrownfieldApproachAndRationale", ParseResponse_ReadsBrownfieldApproachAndRationale),
+        new("ParseResponse_ParsesQuestionContextContinuationLines", ParseResponse_ParsesQuestionContextContinuationLines),
         new("WorkspaceStore_WritesCodebaseContextFile_WhenPresent", WorkspaceStore_WritesCodebaseContextFile_WhenPresent),
         new("WorkspaceStore_DoesNotWriteContextFile_WhenEmpty", WorkspaceStore_DoesNotWriteContextFile_WhenEmpty),
         new("WorkspaceStore_WritesRepoMemoryFiles_WhenPresent", WorkspaceStore_WritesRepoMemoryFiles_WhenPresent),
@@ -352,6 +354,59 @@ internal static class ReconServiceTests
 
         Assert.That(parsed.Approach == "extend", $"Expected approach 'extend' but got '{parsed.Approach}'");
         Assert.Contains("existing controller pattern", parsed.Rationale);
+        return Task.CompletedTask;
+    }
+
+    private static Task BuildPrompt_EnforcesSelfContainedQuestions()
+    {
+        var state = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }],
+            Runtime = RuntimeConfiguration.CreateDefault(),
+            Roles =
+            [
+                new RoleDefinition { Slug = "developer", Name = "Developer" }
+            ]
+        };
+        var issue = new IssueItem { Id = 1, Title = "Implement command", RoleSlug = "developer", Status = ItemStatus.Open };
+        state.Issues.Add(issue);
+
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+
+        Assert.Contains("Every question must be self-contained", prompt);
+        Assert.Contains("context: <optional supporting facts from this run>", prompt);
+        return Task.CompletedTask;
+    }
+
+    private static Task ParseResponse_ParsesQuestionContextContinuationLines()
+    {
+        var parsed = AgentPromptBuilder.ParseResponse(new AgentInvocationResult
+        {
+            ExitCode = 0,
+            StdOut = """
+                OUTCOME: blocked
+                SUMMARY:
+                Need clarification.
+                ISSUES:
+                (none)
+                SKILLS_USED:
+                (none)
+                TOOLS_USED:
+                (none)
+                QUESTIONS:
+                - [blocking] Which deployment environment should we target first?
+                  context: The run found conflicting staging/prod config defaults.
+                  context: Current release notes mention both.
+                """
+        });
+
+        Assert.That(parsed.Questions.Count == 1, $"Expected one parsed question but got {parsed.Questions.Count}.");
+        var question = parsed.Questions[0];
+        Assert.That(question.IsBlocking, "Expected parsed question to be blocking.");
+        Assert.Contains("Which deployment environment", question.Text);
+        Assert.Contains("Context:", question.Text);
+        Assert.Contains("staging/prod", question.Text);
         return Task.CompletedTask;
     }
 
