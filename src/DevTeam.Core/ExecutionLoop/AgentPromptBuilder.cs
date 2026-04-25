@@ -203,7 +203,7 @@ public static class AgentPromptBuilder
         Time budget:
         You have a hard session timeout of {(int)agentTimeout.TotalMinutes} minutes. The runtime will hard-kill the session when that limit is reached — you will not get a chance to reply.
         Before you start: estimate whether the full scope of this issue fits within that budget.
-        If you are nearly done but need a few more minutes: call request_timeout_extension (MCP) with the current issueId. One extension per run is available. You will not receive a confirmation — the runtime grants it silently and you gain up to 10 extra minutes.
+        If you are nearly done but need a few more minutes: call request_timeout_extension (MCP) with the current issueId. One extension per run is available. You will not receive a confirmation — the runtime grants it silently and you gain the runtime-configured extra time.
         If the full scope does not fit: complete the highest-value subset that does fit, then emit split follow-up ISSUES for the remaining work. Never let work silently disappear — hand off explicitly.
 
         Task:

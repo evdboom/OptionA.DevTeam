@@ -8,7 +8,9 @@ namespace DevTeam.Core;
 [SuppressMessage("Major Code Smell", "S1192", Justification = "JSON-RPC and schema property names are protocol literals.")]
 public sealed class WorkspaceMcpServer(
     string workspacePath,
-    Func<int, string?, CancellationToken, Task<string>>? subAgentRunner = null)
+    Func<int, string?, CancellationToken, Task<string>>? subAgentRunner = null,
+    IFileSystem? fileSystem = null,
+    ISystemClock? clock = null)
 {
     private static readonly IEqualityComparer<string> PathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
@@ -21,6 +23,8 @@ public sealed class WorkspaceMcpServer(
 
     private readonly string _workspacePath = Path.GetFullPath(workspacePath);
     private readonly Func<int, string?, CancellationToken, Task<string>>? _subAgentRunner = subAgentRunner;
+    private readonly IFileSystem _fileSystem = fileSystem ?? new PhysicalFileSystem();
+    private readonly ISystemClock _clock = clock ?? new SystemClock();
 
     public async Task RunAsync(Stream input, Stream output, CancellationToken cancellationToken = default)
     {
@@ -439,16 +443,8 @@ public sealed class WorkspaceMcpServer(
         var runtime = new DevTeamRuntime();
         var state = store.Load();
         var activeRun = runtime.GetActiveRunForIssue(state, issueId);
-        if (activeRun is null)
-        {
-            return new
-            {
-                Status = "no-active-run",
-                Message = "No active running run was found for this issue. Timeout extensions are only available to the currently running agent session."
-            };
-        }
 
-        if (activeRun.TimeoutExtensionGranted)
+        if (activeRun is not null && activeRun.TimeoutExtensionGranted)
         {
             return new
             {
@@ -457,8 +453,10 @@ public sealed class WorkspaceMcpServer(
             };
         }
 
-        var reqFile = Path.Combine(_workspacePath, $"timeout_ext_{issueId}.req");
-        File.WriteAllText(reqFile, DateTimeOffset.UtcNow.ToString("O"));
+        var reqFile = activeRun is null
+            ? Path.Combine(_workspacePath, $"timeout_ext_{issueId}.req")
+            : Path.Combine(_workspacePath, $"timeout_ext_{issueId}_{activeRun.Id}.req");
+        _fileSystem.WriteAllText(reqFile, _clock.UtcNow.ToString("O"));
         return new
         {
             Status = "requested",

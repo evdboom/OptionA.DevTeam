@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace DevTeam.Core;
 
-public sealed class RepoMemoryStore(string repoRoot, IFileSystem fileSystem)
+public sealed class RepoMemoryStore(string repoRoot, IFileSystem fileSystem, ISystemClock? clock = null)
 {
     private const int CurrentFormatVersion = 1;
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -14,6 +14,7 @@ public sealed class RepoMemoryStore(string repoRoot, IFileSystem fileSystem)
 
     private readonly string _repoRoot = Path.GetFullPath(repoRoot);
     private readonly IFileSystem _fileSystem = fileSystem;
+    private readonly ISystemClock _clock = clock ?? new SystemClock();
 
     public string DirectoryPath => Path.Combine(_repoRoot, CoreConstants.Paths.DevTeamRepo);
     public string ManifestPath => Path.Combine(DirectoryPath, "manifest.json");
@@ -46,7 +47,7 @@ public sealed class RepoMemoryStore(string repoRoot, IFileSystem fileSystem)
             GoalText = state.ActiveGoal?.GoalText ?? string.Empty,
             Phase = state.Phase,
             ActiveModeSlug = state.Runtime.ActiveModeSlug,
-            GeneratedAtUtc = DateTimeOffset.UtcNow,
+            GeneratedAtUtc = _clock.UtcNow,
             OpenIssueCount = state.Issues.Count(item => item.Status != ItemStatus.Done),
             OpenQuestionCount = state.Questions.Count(item => item.Status == QuestionStatus.Open),
             DurableDecisions = durableDecisions
@@ -85,7 +86,7 @@ public sealed class RepoMemoryStore(string repoRoot, IFileSystem fileSystem)
         }
 
         var manifest = JsonSerializer.Deserialize<RepoMemoryManifest>(_fileSystem.ReadAllText(ManifestPath), JsonOptions);
-        if (manifest is null || manifest.FormatVersion < CurrentFormatVersion)
+        if (manifest is null || manifest.FormatVersion != CurrentFormatVersion)
         {
             return false;
         }
@@ -95,7 +96,7 @@ public sealed class RepoMemoryStore(string repoRoot, IFileSystem fileSystem)
             state.ActiveGoal = new GoalState
             {
                 GoalText = manifest.GoalText.Trim(),
-                UpdatedAtUtc = manifest.GeneratedAtUtc == default ? DateTimeOffset.UtcNow : manifest.GeneratedAtUtc
+                UpdatedAtUtc = manifest.GeneratedAtUtc == default ? _clock.UtcNow : manifest.GeneratedAtUtc
             };
         }
 
@@ -121,7 +122,7 @@ public sealed class RepoMemoryStore(string repoRoot, IFileSystem fileSystem)
                     Title = decision.Title,
                     Detail = decision.Detail,
                     Source = decision.Source,
-                    CreatedAtUtc = decision.CreatedAtUtc == default ? DateTimeOffset.UtcNow : decision.CreatedAtUtc
+                    CreatedAtUtc = decision.CreatedAtUtc == default ? _clock.UtcNow : decision.CreatedAtUtc
                 });
             }
         }

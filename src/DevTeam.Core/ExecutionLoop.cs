@@ -498,9 +498,12 @@ public class LoopExecutor(
         CancellationToken externalCancellation)
     {
         var deadline = _clock.UtcNow + initialTimeout;
+        var runStartedAtUtc = _clock.UtcNow;
         var extensionGranted = false;
-        var reqFile = ExtensionReqFilePath(_store.WorkspacePath, queuedRun.IssueId);
-        var grantedFile = ExtensionGrantedFilePath(_store.WorkspacePath, queuedRun.IssueId);
+        var extensionFileKey = $"{queuedRun.IssueId}_{queuedRun.RunId}";
+        var reqFile = ExtensionReqFilePath(_store.WorkspacePath, extensionFileKey);
+        var legacyReqFile = ExtensionReqFilePath(_store.WorkspacePath, queuedRun.IssueId.ToString());
+        var grantedFile = ExtensionGrantedFilePath(_store.WorkspacePath, extensionFileKey);
 
         try
         {
@@ -526,11 +529,32 @@ public class LoopExecutor(
                 var waitFor = remaining < options.HeartbeatInterval ? remaining : options.HeartbeatInterval;
                 await Task.WhenAny(invocationTask, Task.Delay(waitFor, externalCancellation));
 
-                if (!extensionGranted && _fileSystem.FileExists(reqFile))
+                if (!extensionGranted)
                 {
+                    var hasRunScopedRequest = _fileSystem.FileExists(reqFile);
+                    var hasLegacyRequest = _fileSystem.FileExists(legacyReqFile);
+                    if (!hasRunScopedRequest && !hasLegacyRequest)
+                    {
+                        continue;
+                    }
+
                     try
                     {
-                        _fileSystem.DeleteFile(reqFile);
+                        var requestFilePath = hasRunScopedRequest ? reqFile : legacyReqFile;
+                        var requestIsEligible = true;
+                        if (!hasRunScopedRequest)
+                        {
+                            requestIsEligible = IsLegacyExtensionRequestEligible(legacyReqFile, runStartedAtUtc);
+                        }
+
+                        _fileSystem.DeleteFile(requestFilePath);
+                        if (!requestIsEligible)
+                        {
+                            Log(log, options.Verbosity,
+                                $"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}] Timeout extension request ignored because it predates this run.");
+                            continue;
+                        }
+
                         var latestState = _store.Load();
                         if (_runtime.TryGrantTimeoutExtension(latestState, queuedRun.IssueId))
                         {
@@ -547,21 +571,46 @@ public class LoopExecutor(
                                 $"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}] Timeout extension denied (already granted or no active run).");
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Race condition or I/O error — skip the extension this cycle; it may be retried.
+                        LogDetailed(log, options.Verbosity,
+                            $"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}] Timeout extension request processing failed; will retry on later poll: {ex.Message}");
                     }
                 }
             }
         }
         finally
         {
-            TryDeleteExtensionFile(reqFile);
-            TryDeleteExtensionFile(grantedFile);
+            TryDeleteExtensionFile(reqFile, log, options.Verbosity);
+            TryDeleteExtensionFile(legacyReqFile, log, options.Verbosity);
+            TryDeleteExtensionFile(grantedFile, log, options.Verbosity);
         }
     }
 
-    private void TryDeleteExtensionFile(string path)
+    private bool IsLegacyExtensionRequestEligible(string legacyRequestFilePath, DateTimeOffset runStartedAtUtc)
+    {
+        try
+        {
+            if (!_fileSystem.FileExists(legacyRequestFilePath))
+            {
+                return false;
+            }
+
+            var content = _fileSystem.ReadAllText(legacyRequestFilePath).Trim();
+            if (!DateTimeOffset.TryParse(content, out var requestedAtUtc))
+            {
+                return true;
+            }
+
+            return requestedAtUtc >= runStartedAtUtc;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void TryDeleteExtensionFile(string path, Action<string>? log, LoopVerbosity verbosity)
     {
         try
         {
@@ -570,17 +619,17 @@ public class LoopExecutor(
                 _fileSystem.DeleteFile(path);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort cleanup only.
+            LogDetailed(log, verbosity, $"    Failed to clean up timeout extension marker '{path}': {ex.Message}");
         }
     }
 
-    private static string ExtensionReqFilePath(string workspacePath, int issueId) =>
-        Path.Combine(workspacePath, $"timeout_ext_{issueId}.req");
+    private static string ExtensionReqFilePath(string workspacePath, string fileKey) =>
+        Path.Combine(workspacePath, $"timeout_ext_{fileKey}.req");
 
-    private static string ExtensionGrantedFilePath(string workspacePath, int issueId) =>
-        Path.Combine(workspacePath, $"timeout_ext_{issueId}.granted");
+    private static string ExtensionGrantedFilePath(string workspacePath, string fileKey) =>
+        Path.Combine(workspacePath, $"timeout_ext_{fileKey}.granted");
 
     /// <summary>
     /// Returns the appropriate timeout for a run. Planning/design roles (architect, orchestrator,
@@ -1461,15 +1510,47 @@ public class LoopExecutor(
             return checkpointPath;
         }
 
+        _fileSystem.CreateDirectory(checkpointPath);
+
         // Deep copy workspace.json to checkpoint
         if (_fileSystem.FileExists(_store.StatePath))
         {
-            _fileSystem.CreateDirectory(checkpointPath);
             var checkpointFile = Path.Combine(checkpointPath, "workspace.json");
             _fileSystem.WriteAllText(checkpointFile, _fileSystem.ReadAllText(_store.StatePath));
         }
 
+        var stateDirectory = Path.Combine(workspacePath, "state");
+        var checkpointStateDirectory = Path.Combine(checkpointPath, "state");
+        if (_fileSystem.DirectoryExists(stateDirectory))
+        {
+            CopyDirectoryRecursive(stateDirectory, checkpointStateDirectory);
+        }
+
         return checkpointPath;
+    }
+
+    /// <summary>
+    /// Returns true when workspace state file exists and the state collection directory has files,
+    /// and the store can load successfully.
+    /// </summary>
+    private bool IsWorkspaceStateValid()
+    {
+        var stateFileExists = _fileSystem.FileExists(_store.StatePath);
+        var stateDirectory = Path.Combine(_store.WorkspacePath, "state");
+        if (!stateFileExists || !DirectoryContainsFiles(stateDirectory))
+        {
+            return false;
+        }
+
+        try
+        {
+            _store.Load();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -1479,25 +1560,70 @@ public class LoopExecutor(
     /// </summary>
     private (bool IsValid, bool RestoredFromCheckpoint) ValidateAndRestoreWorkspaceCheckpoint(string workspacePath, int runId, Action<string>? log = null)
     {
-        var stateExists = _fileSystem.FileExists(_store.StatePath);
-        if (stateExists)
+        if (IsWorkspaceStateValid())
         {
             return (true, false);
         }
 
-        // State is missing — attempt to restore from checkpoint
+        // State is missing or invalid — attempt to restore from checkpoint
         var checkpointPath = Path.Combine(workspacePath, "checkpoints", $"run-{runId}");
         var checkpointFile = Path.Combine(checkpointPath, "workspace.json");
-        if (_fileSystem.FileExists(checkpointFile))
+        var stateDirectory = Path.Combine(workspacePath, "state");
+        var checkpointStateDirectory = Path.Combine(checkpointPath, "state");
+        if (_fileSystem.FileExists(checkpointFile) || _fileSystem.DirectoryExists(checkpointStateDirectory))
         {
-            LogDetailed(log, LoopVerbosity.Normal, $"    [GUARDRAIL] Workspace state was deleted during run #{runId}. Restoring from checkpoint...");
+            Log(log, LoopVerbosity.Normal, $"    [GUARDRAIL] Workspace state was missing or invalid during run #{runId}. Restoring from checkpoint...");
             _fileSystem.CreateDirectory(workspacePath);
-            _fileSystem.WriteAllText(_store.StatePath, _fileSystem.ReadAllText(checkpointFile));
-            LogDetailed(log, LoopVerbosity.Normal, $"    [GUARDRAIL] Restored workspace.json from checkpoint.");
-            return (true, true);
+
+            if (_fileSystem.FileExists(checkpointFile))
+            {
+                _fileSystem.WriteAllText(_store.StatePath, _fileSystem.ReadAllText(checkpointFile));
+            }
+
+            if (_fileSystem.DirectoryExists(checkpointStateDirectory))
+            {
+                CopyDirectoryRecursive(checkpointStateDirectory, stateDirectory);
+            }
+
+            if (IsWorkspaceStateValid())
+            {
+                Log(log, LoopVerbosity.Normal, $"    [GUARDRAIL] Restored workspace state from checkpoint.");
+                return (true, true);
+            }
+
+            Log(log, LoopVerbosity.Normal, $"    [GUARDRAIL] Checkpoint restore completed, but workspace state is still invalid.");
         }
 
         return (false, false);
+    }
+
+    private bool DirectoryContainsFiles(string directoryPath)
+    {
+        return _fileSystem.DirectoryExists(directoryPath)
+            && _fileSystem.EnumerateFiles(directoryPath, "*", SearchOption.AllDirectories).Any();
+    }
+
+    private void CopyDirectoryRecursive(string sourceDirectory, string destinationDirectory)
+    {
+        if (!_fileSystem.DirectoryExists(sourceDirectory))
+        {
+            return;
+        }
+
+        _fileSystem.CreateDirectory(destinationDirectory);
+
+        foreach (var sourceFile in _fileSystem.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(sourceDirectory, sourceFile);
+            var destinationFile = Path.Combine(destinationDirectory, relativePath);
+            var destinationFileDirectory = Path.GetDirectoryName(destinationFile);
+            if (!string.IsNullOrWhiteSpace(destinationFileDirectory))
+            {
+                _fileSystem.CreateDirectory(destinationFileDirectory);
+            }
+
+            _fileSystem.WriteAllText(destinationFile, _fileSystem.ReadAllText(sourceFile));
+        }
     }
 
     // ── Worktree helpers ─────────────────────────────────────────────────────────

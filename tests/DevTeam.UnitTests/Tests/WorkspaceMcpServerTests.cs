@@ -20,7 +20,7 @@ internal static class WorkspaceMcpServerTests
         new("CreateIssueTool_ReturnsError_WhenTitleTooLong", CreateIssueTool_ReturnsError_WhenTitleTooLong),
         new("RequestTimeoutExtensionTool_WritesReqFile", RequestTimeoutExtensionTool_WritesReqFile),
         new("RequestTimeoutExtensionTool_ReturnsAlreadyGranted_WhenRunStateShowsGranted", RequestTimeoutExtensionTool_ReturnsAlreadyGranted_WhenRunStateShowsGranted),
-        new("RequestTimeoutExtensionTool_ReturnsNoActiveRun_WhenIssueHasNoRunningSession", RequestTimeoutExtensionTool_ReturnsNoActiveRun_WhenIssueHasNoRunningSession),
+        new("RequestTimeoutExtensionTool_StillRequests_WhenIssueHasNoRunningSession", RequestTimeoutExtensionTool_StillRequests_WhenIssueHasNoRunningSession),
         new("ToolsList_IncludesRequestTimeoutExtension", ToolsList_IncludesRequestTimeoutExtension),
     ];
 
@@ -425,7 +425,7 @@ internal static class WorkspaceMcpServerTests
             Assert.That(json.GetProperty("status").GetString() == "requested",
                 $"Expected status='requested' but got '{json.GetProperty("status").GetString()}'");
 
-            var reqFile = Path.Combine(workspacePath, $"timeout_ext_{issue.Id}.req");
+            var reqFile = Path.Combine(workspacePath, $"timeout_ext_{issue.Id}_{queued.RunId}.req");
             Assert.That(File.Exists(reqFile), $"Expected req file at {reqFile} to exist");
         }
         finally
@@ -484,7 +484,7 @@ internal static class WorkspaceMcpServerTests
         }
     }
 
-    private static async Task RequestTimeoutExtensionTool_ReturnsNoActiveRun_WhenIssueHasNoRunningSession()
+    private static async Task RequestTimeoutExtensionTool_StillRequests_WhenIssueHasNoRunningSession()
     {
         var workspacePath = Path.Combine(Path.GetTempPath(), $"devteam-test-{Guid.NewGuid():N}");
         try
@@ -514,8 +514,11 @@ internal static class WorkspaceMcpServerTests
             var content = result.GetProperty("content")[0].GetProperty("text").GetString()!;
             var json = JsonDocument.Parse(content).RootElement;
 
-            Assert.That(json.GetProperty("status").GetString() == "no-active-run",
-                $"Expected status='no-active-run' but got '{json.GetProperty("status").GetString()}'");
+            Assert.That(json.GetProperty("status").GetString() == "requested",
+                $"Expected status='requested' but got '{json.GetProperty("status").GetString()}'");
+
+            var reqFile = Path.Combine(workspacePath, $"timeout_ext_{issue.Id}.req");
+            Assert.That(File.Exists(reqFile), $"Expected req file at {reqFile} to exist");
         }
         finally
         {

@@ -30,7 +30,7 @@ If `.devteam` is deleted or corrupted, the **entire autonomous loop will crash**
 
 ```bash
 git restore .devteam/          # Will delete uncommitted state!
-git clean -fd                  # Deletes untracked files including .devteam/
+git clean -fdx                 # Deletes untracked + ignored files, including .devteam/
 git reset --hard               # Wipes uncommitted changes including .devteam/
 rm -rf .devteam/               # Direct deletion
 ```
@@ -38,7 +38,7 @@ rm -rf .devteam/               # Direct deletion
 ### ❌ DO NOT use git operations that touch `.devteam`:
 
 - `git restore` without explicit file paths (use `git restore <file>` not `git restore .`)
-- `git clean` (it will delete .devteam even though it's in .gitignore if it's untracked)
+- `git clean -fdx` / `git clean -ffdx` (these remove ignored files and will delete .devteam)
 - `git reset --hard` or `git reset --mixed` (restores tracked files; untracked .devteam is left alone, but commands that follow might delete it)
 
 ## Safe Git Patterns
