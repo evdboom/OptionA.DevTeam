@@ -1150,6 +1150,7 @@ internal sealed partial class ShellService(
         var maxSubagents = GetIntOption(options, MaxSubagentsOption, state.Runtime.DefaultMaxSubagents);
         var maxIterations = GetIntOption(options, MaxIterationsOption, state.Runtime.DefaultMaxIterations);
         var timeoutSeconds = GetIntOption(options, "timeout-seconds", 600);
+        var planningTimeoutSeconds = GetIntOption(options, "planning-timeout-seconds", 1200);
         var verbosity = ParseVerbosity(GetOption(options, "verbosity"));
         if (!string.IsNullOrWhiteSpace(providerName))
         {
@@ -1165,6 +1166,7 @@ internal sealed partial class ShellService(
             MaxSubagents = maxSubagents,
             MaxIterations = maxIterations,
             AgentTimeout = TimeSpan.FromSeconds(timeoutSeconds),
+            PlanningAgentTimeout = TimeSpan.FromSeconds(planningTimeoutSeconds),
             HeartbeatInterval = TimeSpan.FromSeconds(5),
             Verbosity = verbosity,
             ProgressReporter = ReportLoopProgress,

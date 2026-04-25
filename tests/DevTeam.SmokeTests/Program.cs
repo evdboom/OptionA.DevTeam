@@ -87,6 +87,7 @@ var tests = new List<(string Name, Action Run)>
     ("Workspace export and import round trips state", TestWorkspaceExportImportRoundTrip),
     ("Planner cannot create duplicate architect issues", TestPlannerCannotCreateDuplicateArchitectIssues),
     ("Init rejects misspelled goal option", TestInitRejectsMisspelledGoalOption),
+    ("Init ensures DevTeam .gitignore rules", TestInitEnsuresDevTeamGitignoreRules),
     ("Architect run updates plan artifact with execution details", TestArchitectRunUpdatesPlanArtifact),
     ("Conflict prevention holds at max-subagents 4", TestConflictPreventionHoldsAtHighSubagentCount)
 };

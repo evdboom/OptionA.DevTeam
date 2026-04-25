@@ -30,6 +30,7 @@ Skill folder names use lowercase and hyphens.
 | `spawn-subagent` | Choose inline agent vs full spawned session routing and delegation strategy. |
 | `tdd` | Apply red-green-refactor test-driven development. |
 | `verify` | Validate claims with fresh command output and evidence. |
+| `workspace-protection` | Protect `.devteam` runtime state from accidental deletion or git command mistakes. |
 
 ## Typical Flow
 

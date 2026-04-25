@@ -24,5 +24,7 @@ public sealed class AgentRun
     public List<string> ChangedPaths { get; set; } = [];
     public List<int> CreatedIssueIds { get; set; } = [];
     public List<int> CreatedQuestionIds { get; set; } = [];
+    public bool TimeoutExtensionGranted { get; set; }
+    public DateTimeOffset? TimeoutExtensionGrantedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }

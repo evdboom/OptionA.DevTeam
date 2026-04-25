@@ -40,6 +40,7 @@
 - Auto-approve: when `RuntimeConfiguration.AutoApproveEnabled` is true, the loop automatically approves both the plan and the architect plan. The `autopilot` mode enables auto-approve and is the intended "agents decide everything" workflow.
 - During planning approval, freeform user feedback should revise the plan instead of being ignored.
 - Questions are the explicit user-input inbox. Blocking questions can halt the loop; non-blocking questions should not stop other ready work.
+- The workspace MCP server also exposes `request_timeout_extension(issueId)` for the currently running issue. The runtime grants at most one extension per `AgentRun` and persists that fact in workspace state; deleting temp signal files must not unlock another extension.
 - Use `run-loop` for actual execution. `run-once` only queues work; `run-loop` executes queued runs and is the command to use when you want the system to keep moving.
 - Planning and architecture roles can propose concrete follow-on issues through the structured `ISSUES:` section.
 - Do not rely on `NEXT_ROLE` handoffs. The issue board is the workload queue, and each issue already names the role that should execute it.
@@ -91,3 +92,13 @@ Every codebase DevTeam builds or modifies must be **Auditable, Testable, and Mai
 - Files ≤ ~400 lines, one concern per file.
 - Constructor injection throughout. No `new` for non-trivial collaborators in business logic.
 - Follow the style patterns already established in the target codebase. Don't introduce new patterns without justification.
+
+## Commit sequence
+
+When making changes to this repo, follow this commit sequence:
+1. **Code and tests** — make your code changes and any necessary test changes together in one commit. Tests should be green before moving to the next step.
+2. **Documentation** — update this `.github\copilot-instructions.md` file and any relevant `README.md` files in the same commit as your code changes. This keeps documentation in sync with behavior.
+3. **Seperation** - If you have worked on multiple features or made changes that touch different concerns, consider splitting them into multiple commits (e.g., one commit for code changes, one for documentation updates). However, if the changes are closely related and small in scope, it's acceptable to keep them in a single commit.
+4. **Descriptive commit message** — write a clear and descriptive commit message that summarizes the changes made and their purpose. This helps others understand the context of the changes when reviewing the commit history.
+5. **GitKraken MCP** - Use the GitKraken MCP extension to manage your commits and branches effectively.
+6. **Branch policy** - Never commit directly to `main` (it is protected). Create a feature branch for your work, and open a pull request when ready for review and merging. It is allowed to have multiple commits/features in a feature branch, but ensure that the final state of the branch is coherent and that commit messages are clear.

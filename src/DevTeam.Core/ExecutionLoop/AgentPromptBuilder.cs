@@ -29,6 +29,7 @@ public static class AgentPromptBuilder
     private const string SkillHygiene = "hygiene";
     private const string SkillBacklogManager = "backlog-manager";
     private const string SkillRefine = "refine";
+    private const string SkillWorkspaceProtection = "workspace-protection";
     private const string HeaderOutcome = "OUTCOME:";
     private const string HeaderSummary = "SUMMARY:";
     private const string HeaderApproach = "APPROACH:";
@@ -42,17 +43,17 @@ public static class AgentPromptBuilder
 
     private static readonly Dictionary<string, string[]> RoleSkillMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        [RoleOrchestrator] = [SkillBrainstorm, SkillPlan, SkillBacklogManager],
+        [RoleOrchestrator] = [SkillBrainstorm, SkillPlan, SkillBacklogManager, SkillWorkspaceProtection],
         [RolePlanner] = [SkillBrainstorm, SkillPlan],
         [RoleArchitect] = [SkillBrainstorm, SkillPlan, SkillRefine],
         [RoleNavigator] = [SkillScout, SkillRefine],
-        [RoleDeveloper] = [SkillPlan, SkillTdd, SkillVerify],
-        ["backend-developer"] = [SkillPlan, SkillTdd, SkillVerify],
-        ["frontend-developer"] = [SkillPlan, SkillTdd, SkillVerify],
-        ["fullstack-developer"] = [SkillPlan, SkillTdd, SkillVerify],
-        ["tester"] = [SkillTdd, SkillDebug, SkillVerify],
-        [RoleReviewer] = [SkillReview, SkillVerify, SkillRefine],
-        [RoleAuditor] = [SkillScout, SkillReview, SkillVerify, SkillHygiene, SkillRefine],
+        [RoleDeveloper] = [SkillPlan, SkillTdd, SkillVerify, SkillWorkspaceProtection],
+        ["backend-developer"] = [SkillPlan, SkillTdd, SkillVerify, SkillWorkspaceProtection],
+        ["frontend-developer"] = [SkillPlan, SkillTdd, SkillVerify, SkillWorkspaceProtection],
+        ["fullstack-developer"] = [SkillPlan, SkillTdd, SkillVerify, SkillWorkspaceProtection],
+        ["tester"] = [SkillTdd, SkillDebug, SkillVerify, SkillWorkspaceProtection],
+        [RoleReviewer] = [SkillReview, SkillVerify, SkillRefine, SkillWorkspaceProtection],
+        [RoleAuditor] = [SkillScout, SkillReview, SkillVerify, SkillHygiene, SkillRefine, SkillWorkspaceProtection],
         ["ux"] = [SkillVerify],
         ["user"] = [SkillVerify],
         ["game-designer"] = [SkillBrainstorm, "review", SkillVerify],
@@ -91,6 +92,9 @@ public static class AgentPromptBuilder
     }
 
     public static string BuildPrompt(WorkspaceState state, IssueItem issue, string? contextHint = null)
+        => BuildPrompt(state, issue, TimeSpan.FromMinutes(10), contextHint);
+
+    public static string BuildPrompt(WorkspaceState state, IssueItem issue, TimeSpan agentTimeout, string? contextHint = null)
     {
         var role = state.Roles.FirstOrDefault(item => item.Slug == issue.RoleSlug);
         var activeMode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase))
@@ -185,6 +189,22 @@ public static class AgentPromptBuilder
         {BuildAuditorBoundaryBlock(issue.RoleSlug)}
         {BuildDesignRoleTestabilityBlock(issue.RoleSlug)}
         {BuildFileBoundaryBlock(issue.RoleSlug)}
+
+        Critical Workspace Protection:
+        The `.devteam/` directory contains runtime state (workspace.json, decisions, runs, checkpoints).
+        ⚠️ DO NOT delete or corrupt .devteam/ with commands like: git restore . | git clean -fd | git reset --hard
+        Use git restore <specific-path> instead of git restore . (with no args).
+        Use git clean only after cd'ing to a safe subdirectory.
+        Load the workspace-protection skill if you need to run git commands in the repo root.
+        If you accidentally delete .devteam, the runtime will recover from checkpoint but log a GUARDRAIL VIOLATION.
+        Multiple violations = systematic problem that must be fixed.
+
+        Time budget:
+        You have a hard session timeout of {(int)agentTimeout.TotalMinutes} minutes. The runtime will hard-kill the session when that limit is reached — you will not get a chance to reply.
+        Before you start: estimate whether the full scope of this issue fits within that budget.
+        If you are nearly done but need a few more minutes: call request_timeout_extension (MCP) with the current issueId. One extension per run is available. You will not receive a confirmation — the runtime grants it silently and you gain up to 10 extra minutes.
+        If the full scope does not fit: complete the highest-value subset that does fit, then emit split follow-up ISSUES for the remaining work. Never let work silently disappear — hand off explicitly.
+
         Task:
         Work on the current issue using the available tools, active mode guardrails, and role guidance. Keep the scope narrow.
         First perform a fit check: if this issue is unlikely to fit one focused run, complete the safest meaningful subset and emit split follow-up ISSUES rather than timing out.
@@ -470,6 +490,11 @@ public static class AgentPromptBuilder
         if (ContainsAny(text, "refine", "refinement", "scope", "filesinscope", "linkeddecision", "triage", "what why how"))
         {
             slugs.Add(SkillRefine);
+        }
+
+        if (ContainsAny(text, "git", "restore", "clean", "reset", "checkout", ".devteam", "workspace state", "workspace.json", "checkpoint"))
+        {
+            slugs.Add(SkillWorkspaceProtection);
         }
 
         return slugs.ToList();

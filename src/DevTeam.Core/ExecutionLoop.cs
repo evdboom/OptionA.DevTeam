@@ -13,6 +13,13 @@ public class LoopExecutor(
     IFileSystem? fileSystem = null)
 {
     private const string NoneText = "(none)";
+    private static readonly Regex GitCleanPattern = new(@"\bgit\s+clean\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex GitResetHardPattern = new(@"\bgit\s+reset\b[^\r\n;|&]*\s--hard\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex GitRestoreForcePattern = new(@"\bgit\s+restore\b[^\r\n;|&]*\s--force\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex GitRestoreHeadPattern = new(@"\bgit\s+restore\b[^\r\n;|&]*\b(head|--source=head|--source\s+head)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex GitRestoreDotPattern = new(@"\bgit\s+restore\b[^\r\n;|&]*\s\.($|\s)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex GitCheckoutDotPattern = new(@"\bgit\s+checkout\b[^\r\n;|&]*--\s*\.($|\s)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex RemoveDevTeamPattern = new(@"\brm\s+-rf\s+\.devteam\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private readonly DevTeamRuntime _runtime = runtime;
     private readonly WorkspaceStore _store = store;
@@ -112,6 +119,11 @@ public class LoopExecutor(
             foreach (var queuedRun in runsToExecute)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                
+                // GUARDRAIL: Checkpoint workspace state before this run
+                var checkpointPath = CreateWorkspaceCheckpoint(_store.WorkspacePath, queuedRun.RunId);
+                LogDetailed(log, options.Verbosity, $"    Checkpoint created: {checkpointPath}");
+                
                 var session = _runtime.GetOrCreateAgentSession(state, queuedRun.RunId);
                 var sessionId = session.SessionId;
                 _runtime.StartRun(state, queuedRun.RunId, sessionId);
@@ -156,6 +168,20 @@ public class LoopExecutor(
                 var completed = await AwaitNextCompletionAsync(pendingRuns, options, log, cancellationToken);
                 var pendingRun = pendingRuns.First(item => item.Run.RunId == completed.Run.RunId);
                 pendingRuns.RemoveAll(item => item.Run.RunId == completed.Run.RunId);
+                
+                // GUARDRAIL: Validate and restore workspace state if agent deleted .devteam
+                var (isValid, restored) = ValidateAndRestoreWorkspaceCheckpoint(_store.WorkspacePath, completed.Run.RunId, log);
+                if (!isValid)
+                {
+                    throw new InvalidOperationException(
+                        $"Workspace state (.devteam\\workspace.json) was lost during run #{completed.Run.RunId} and could not be restored from checkpoint. " +
+                        $"This indicates an agent may have run a dangerous git command. Execution cannot continue safely.");
+                }
+                if (restored)
+                {
+                    Log(log, options.Verbosity, $"    [GUARDRAIL VIOLATION] Agent on run #{completed.Run.RunId} deleted workspace state. Restored from checkpoint.");
+                }
+                
                 DevTeamRuntime.MergeWorkspaceAdditions(state, _store.Load());
                 var createdQuestionIds = new List<int>();
                 if (completed.Questions.Count > 0)
@@ -455,27 +481,157 @@ public class LoopExecutor(
         }
     }
 
-    private static SessionHooksConfig? BuildDetailedHooks(QueuedRunInfo queuedRun, Action<string>? log, LoopVerbosity verbosity)
+    /// <summary>
+    /// Awaits the invocation task while polling for a timeout extension request written by the
+    /// workspace MCP server tool <c>request_timeout_extension</c>. When the flag file is found the
+    /// deadline is extended once by <see cref="LoopExecutionOptions.TimeoutExtensionAmount"/> and the
+    /// file is deleted. When the deadline expires the external <paramref name="timeoutCts"/> is
+    /// cancelled, which triggers <see cref="OperationCanceledException"/> on the invocation.
+    /// </summary>
+    private async Task<AgentInvocationResult> RunWithExtensionMonitoringAsync(
+        Task<AgentInvocationResult> invocationTask,
+        QueuedRunInfo queuedRun,
+        CancellationTokenSource timeoutCts,
+        TimeSpan initialTimeout,
+        LoopExecutionOptions options,
+        Action<string>? log,
+        CancellationToken externalCancellation)
     {
-        if (verbosity != LoopVerbosity.Detailed)
-        {
-            return null;
-        }
+        var deadline = _clock.UtcNow + initialTimeout;
+        var extensionGranted = false;
+        var reqFile = ExtensionReqFilePath(_store.WorkspacePath, queuedRun.IssueId);
+        var grantedFile = ExtensionGrantedFilePath(_store.WorkspacePath, queuedRun.IssueId);
 
+        try
+        {
+            while (true)
+            {
+                if (invocationTask.IsCompleted)
+                {
+                    return await invocationTask;
+                }
+
+                if (externalCancellation.IsCancellationRequested)
+                {
+                    return await invocationTask; // Will throw OCE; caller re-throws it.
+                }
+
+                var remaining = deadline - _clock.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    timeoutCts.Cancel();
+                    return await invocationTask; // Will throw OCE; caller handles it as timeout.
+                }
+
+                var waitFor = remaining < options.HeartbeatInterval ? remaining : options.HeartbeatInterval;
+                await Task.WhenAny(invocationTask, Task.Delay(waitFor, externalCancellation));
+
+                if (!extensionGranted && _fileSystem.FileExists(reqFile))
+                {
+                    try
+                    {
+                        _fileSystem.DeleteFile(reqFile);
+                        var latestState = _store.Load();
+                        if (_runtime.TryGrantTimeoutExtension(latestState, queuedRun.IssueId))
+                        {
+                            _store.Save(latestState);
+                            _fileSystem.WriteAllText(grantedFile, "1");
+                            deadline += options.TimeoutExtensionAmount;
+                            extensionGranted = true;
+                            Log(log, options.Verbosity,
+                                $"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}] Timeout extension granted (+{(int)options.TimeoutExtensionAmount.TotalMinutes}m). Remaining window extended.");
+                        }
+                        else
+                        {
+                            Log(log, options.Verbosity,
+                                $"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}] Timeout extension denied (already granted or no active run).");
+                        }
+                    }
+                    catch
+                    {
+                        // Race condition or I/O error — skip the extension this cycle; it may be retried.
+                    }
+                }
+            }
+        }
+        finally
+        {
+            TryDeleteExtensionFile(reqFile);
+            TryDeleteExtensionFile(grantedFile);
+        }
+    }
+
+    private void TryDeleteExtensionFile(string path)
+    {
+        try
+        {
+            if (_fileSystem.FileExists(path))
+            {
+                _fileSystem.DeleteFile(path);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup only.
+        }
+    }
+
+    private static string ExtensionReqFilePath(string workspacePath, int issueId) =>
+        Path.Combine(workspacePath, $"timeout_ext_{issueId}.req");
+
+    private static string ExtensionGrantedFilePath(string workspacePath, int issueId) =>
+        Path.Combine(workspacePath, $"timeout_ext_{issueId}.granted");
+
+    /// <summary>
+    /// Returns the appropriate timeout for a run. Planning/design roles (architect, orchestrator,
+    /// backlog-manager) get <see cref="LoopExecutionOptions.PlanningAgentTimeout"/> because they
+    /// explore the codebase and produce multi-issue plans. All others get the standard
+    /// <see cref="LoopExecutionOptions.AgentTimeout"/>.
+    /// </summary>
+    private static TimeSpan ResolveTimeoutForRole(string roleSlug, bool isPlanningIssue, LoopExecutionOptions options)
+    {
+        if (isPlanningIssue) return options.PlanningAgentTimeout;
+        return roleSlug switch
+        {
+            CoreConstants.Roles.Architect => options.PlanningAgentTimeout,
+            "orchestrator" => options.PlanningAgentTimeout,
+            "backlog-manager" => options.PlanningAgentTimeout,
+            _ => options.AgentTimeout
+        };
+    }
+
+    private static SessionHooksConfig BuildRunHooks(QueuedRunInfo queuedRun, Action<string>? log, LoopVerbosity verbosity)
+    {
         return new SessionHooksConfig
         {
-            OnPreToolUse = (toolName, _) =>
+            OnPreToolUse = (toolName, args) =>
             {
-                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][tool↓] {toolName}");
+                var decision = EvaluatePreToolDecision(toolName, args, log, verbosity, $"{queuedRun.RoleSlug}#{queuedRun.IssueId}");
+                if (verbosity == LoopVerbosity.Detailed)
+                {
+                    log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][tool↓] {toolName}");
+                }
+
+                if (decision != PreToolDecision.Allow)
+                {
+                    return decision;
+                }
+
                 return PreToolDecision.Allow;
             },
             OnPostToolUse = (toolName, _, _) =>
             {
-                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][tool↑] {toolName}");
+                if (verbosity == LoopVerbosity.Detailed)
+                {
+                    log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][tool↑] {toolName}");
+                }
             },
             OnSessionStart = source =>
             {
-                log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][session] started ({source})");
+                if (verbosity == LoopVerbosity.Detailed)
+                {
+                    log?.Invoke($"    [{queuedRun.RoleSlug}#{queuedRun.IssueId}][session] started ({source})");
+                }
             },
             OnErrorOccurred = (context, error) =>
             {
@@ -483,6 +639,157 @@ public class LoopExecutor(
                 return ErrorHandlingDecision.Abort;
             }
         };
+    }
+
+    private static PreToolDecision EvaluatePreToolDecision(
+        string toolName,
+        string args,
+        Action<string>? log,
+        LoopVerbosity verbosity,
+        string actorTag)
+    {
+        if (TryExtractCommandCandidate(toolName, args, out var commandCandidate)
+            && TryDetectDangerousGitCommand(commandCandidate, out var reason))
+        {
+            Log(log, verbosity, $"    [{actorTag}][guardrail] denied tool '{toolName}' because {reason}.");
+            return PreToolDecision.Deny;
+        }
+
+        return PreToolDecision.Allow;
+    }
+
+    private static bool TryExtractCommandCandidate(string toolName, string args, out string commandCandidate)
+    {
+        commandCandidate = "";
+        if (string.IsNullOrWhiteSpace(args))
+        {
+            return false;
+        }
+
+        if (!TryParseToolArgs(args, out var root))
+        {
+            commandCandidate = args;
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(toolName)
+            && string.Equals(toolName, "run_in_terminal", StringComparison.OrdinalIgnoreCase)
+            && root.TryGetProperty("command", out var runCommand)
+            && runCommand.ValueKind == JsonValueKind.String)
+        {
+            commandCandidate = runCommand.GetString() ?? "";
+            return !string.IsNullOrWhiteSpace(commandCandidate);
+        }
+
+        if (!string.IsNullOrWhiteSpace(toolName)
+            && string.Equals(toolName, "send_to_terminal", StringComparison.OrdinalIgnoreCase)
+            && root.TryGetProperty("command", out var sendCommand)
+            && sendCommand.ValueKind == JsonValueKind.String)
+        {
+            commandCandidate = sendCommand.GetString() ?? "";
+            return !string.IsNullOrWhiteSpace(commandCandidate);
+        }
+
+        if (!string.IsNullOrWhiteSpace(toolName)
+            && string.Equals(toolName, "execution_subagent", StringComparison.OrdinalIgnoreCase)
+            && root.TryGetProperty("query", out var subagentQuery)
+            && subagentQuery.ValueKind == JsonValueKind.String)
+        {
+            commandCandidate = subagentQuery.GetString() ?? "";
+            return !string.IsNullOrWhiteSpace(commandCandidate);
+        }
+
+        if (root.TryGetProperty("command", out var commandProperty)
+            && commandProperty.ValueKind == JsonValueKind.String)
+        {
+            commandCandidate = commandProperty.GetString() ?? "";
+            return !string.IsNullOrWhiteSpace(commandCandidate);
+        }
+
+        if (root.TryGetProperty("query", out var queryProperty)
+            && queryProperty.ValueKind == JsonValueKind.String)
+        {
+            commandCandidate = queryProperty.GetString() ?? "";
+            return !string.IsNullOrWhiteSpace(commandCandidate);
+        }
+
+        commandCandidate = args;
+        return true;
+    }
+
+    private static bool TryParseToolArgs(string args, out JsonElement root)
+    {
+        root = default;
+        try
+        {
+            using var doc = JsonDocument.Parse(args);
+            root = doc.RootElement.Clone();
+            return root.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryDetectDangerousGitCommand(string commandText, out string reason)
+    {
+        reason = "";
+        if (string.IsNullOrWhiteSpace(commandText))
+        {
+            return false;
+        }
+
+        var normalized = commandText.Trim();
+        if (!normalized.Contains("git", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Contains("rm", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (GitCleanPattern.IsMatch(normalized))
+        {
+            reason = "git clean can delete .devteam runtime state";
+            return true;
+        }
+
+        if (GitResetHardPattern.IsMatch(normalized))
+        {
+            reason = "git reset --hard can wipe in-progress workspace changes";
+            return true;
+        }
+
+        if (GitRestoreForcePattern.IsMatch(normalized))
+        {
+            reason = "git restore --force is unsafe for runtime-managed state";
+            return true;
+        }
+
+        if (GitRestoreHeadPattern.IsMatch(normalized))
+        {
+            reason = "git restore from HEAD can reset runtime-managed files";
+            return true;
+        }
+
+        if (GitRestoreDotPattern.IsMatch(normalized))
+        {
+            reason = "git restore . can reset broad workspace state including .devteam references";
+            return true;
+        }
+
+        if (GitCheckoutDotPattern.IsMatch(normalized))
+        {
+            reason = "git checkout -- . can reset broad workspace state";
+            return true;
+        }
+
+        if (RemoveDevTeamPattern.IsMatch(normalized))
+        {
+            reason = "rm -rf .devteam deletes runtime state";
+            return true;
+        }
+
+        return false;
     }
 
     private static void LogBudget(WorkspaceState state, Action<string>? log, LoopVerbosity verbosity)
@@ -745,12 +1052,18 @@ public class LoopExecutor(
     {
         var client = _agentClientFactory.Create(options.Backend);
         var issue = state.Issues.First(item => item.Id == queuedRun.IssueId);
-        var prompt = AgentPromptBuilder.BuildPrompt(state, issue, contextHint);
+        var agentTimeout = ResolveTimeoutForRole(queuedRun.RoleSlug, issue.IsPlanningIssue, options);
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue, agentTimeout, contextHint);
         var workingDirectory = overrideWorkingDirectory ?? state.RepoRoot;
+        // Use an externally-managed CTS so the timeout is extendable via the MCP request_timeout_extension tool.
+        // The failsafe timeout on the request itself is set well beyond agentTimeout + extension so the SDK
+        // never kills the session before our own deadline does.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         try
         {
             var provider = ProviderSelectionService.ResolveProvider(state, queuedRun.ModelName, options.ProviderName);
-            var response = await client.InvokeAsync(new AgentInvocationRequest
+            var failsafe = agentTimeout + options.TimeoutExtensionAmount + TimeSpan.FromMinutes(5);
+            var invocationTask = client.InvokeAsync(new AgentInvocationRequest
             {
                 Prompt = prompt,
                 Model = queuedRun.ModelName,
@@ -758,14 +1071,16 @@ public class LoopExecutor(
                 WorkingDirectory = workingDirectory,
                 WorkspacePath = _store.WorkspacePath,
                 Provider = provider,
-                Timeout = options.AgentTimeout,
+                Timeout = failsafe,
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
                 ExternalMcpServers = state.McpServers,
                 OnToken = options.TokenReporter is null ? null : token => options.TokenReporter($"{queuedRun.RoleSlug}#{queuedRun.IssueId}", token),
-                Hooks = BuildDetailedHooks(queuedRun, log, options.Verbosity),
+                Hooks = BuildRunHooks(queuedRun, log, options.Verbosity),
                 CustomAgents = ScoutAgentDefinitions.GetAgentsForRole(queuedRun.RoleSlug)
-            }, cancellationToken);
+            }, timeoutCts.Token);
+            var response = await RunWithExtensionMonitoringAsync(
+                invocationTask, queuedRun, timeoutCts, agentTimeout, options, log, cancellationToken);
             var parsed = AgentPromptBuilder.ParseResponse(response);
             return new AgentExecutionResult(queuedRun, response, parsed.Outcome, parsed.Summary, parsed.Approach, parsed.Rationale, parsed.Issues, parsed.SkillsUsed, parsed.ToolsUsed, parsed.Questions);
         }
@@ -781,7 +1096,7 @@ public class LoopExecutor(
                 BackendName = "timeout",
                 SessionId = sessionId,
                 ExitCode = 1,
-                StdErr = $"Agent timed out after {options.AgentTimeout.TotalSeconds:0} seconds."
+                StdErr = $"Agent timed out after {agentTimeout.TotalSeconds:0} seconds."
             };
             return new AgentExecutionResult(
                 queuedRun,
@@ -851,7 +1166,7 @@ public class LoopExecutor(
                 WorkingDirectory = state.RepoRoot,
                 WorkspacePath = _store.WorkspacePath,
                 Provider = provider,
-                Timeout = options.AgentTimeout,
+                Timeout = options.PlanningAgentTimeout,
                 EnableWorkspaceMcp = state.Runtime.WorkspaceMcpEnabled,
                 WorkspaceMcpServerName = state.Runtime.WorkspaceMcpServerName,
                 ExternalMcpServers = state.McpServers,
@@ -1039,35 +1354,36 @@ public class LoopExecutor(
         }
     }
 
-    private static SessionHooksConfig? BuildOrchestratorVisibilityHooks(Action<string>? log, LoopVerbosity verbosity)
+    private static SessionHooksConfig BuildOrchestratorVisibilityHooks(Action<string>? log, LoopVerbosity verbosity)
     {
-        if (verbosity == LoopVerbosity.Quiet || log is null)
-        {
-            return null;
-        }
-
         return new SessionHooksConfig
         {
             OnPreToolUse = (toolName, args) =>
             {
+                var decision = EvaluatePreToolDecision(toolName, args, log, verbosity, "orchestrator");
+                if (decision != PreToolDecision.Allow)
+                {
+                    return decision;
+                }
+
                 if (string.Equals(toolName, "spawn_agent", StringComparison.OrdinalIgnoreCase))
                 {
                     if (TryExtractIssueId(args, out var issueId))
                     {
-                        log($"    [orchestrator][spawn] starting issue #{issueId}");
+                        log?.Invoke($"    [orchestrator][spawn] starting issue #{issueId}");
                     }
                     else
                     {
-                        log("    [orchestrator][spawn] starting child issue");
+                        log?.Invoke("    [orchestrator][spawn] starting child issue");
                     }
                 }
                 else if (string.Equals(toolName, "task", StringComparison.OrdinalIgnoreCase))
                 {
-                    log("    [orchestrator][inline] running inline subagent task");
+                    log?.Invoke("    [orchestrator][inline] running inline subagent task");
                 }
                 else if (verbosity == LoopVerbosity.Detailed)
                 {
-                    log($"    [orchestrator][tool↓] {toolName}");
+                    log?.Invoke($"    [orchestrator][tool↓] {toolName}");
                 }
 
                 return PreToolDecision.Allow;
@@ -1078,25 +1394,25 @@ public class LoopExecutor(
                 {
                     if (TryExtractIssueId(args, out var issueId))
                     {
-                        log($"    [orchestrator][spawn] completed issue #{issueId}");
+                        log?.Invoke($"    [orchestrator][spawn] completed issue #{issueId}");
                     }
                     else
                     {
-                        log("    [orchestrator][spawn] child issue finished");
+                        log?.Invoke("    [orchestrator][spawn] child issue finished");
                     }
                 }
                 else if (string.Equals(toolName, "task", StringComparison.OrdinalIgnoreCase))
                 {
-                    log("    [orchestrator][inline] inline subagent task finished");
+                    log?.Invoke("    [orchestrator][inline] inline subagent task finished");
                 }
                 else if (verbosity == LoopVerbosity.Detailed)
                 {
-                    log($"    [orchestrator][tool↑] {toolName}");
+                    log?.Invoke($"    [orchestrator][tool↑] {toolName}");
                 }
             },
             OnErrorOccurred = (context, error) =>
             {
-                log($"    [orchestrator][error] {context}: {error}");
+                log?.Invoke($"    [orchestrator][error] {context}: {error}");
                 return ErrorHandlingDecision.Abort;
             }
         };
@@ -1126,6 +1442,62 @@ public class LoopExecutor(
         }
 
         return false;
+    }
+
+    // ── Workspace guardrail helpers ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Creates a checkpoint of the .devteam workspace state before an agent run.
+    /// This protects against accidental deletion by agents running git restore, git clean, or similar.
+    /// Returns the checkpoint directory path.
+    /// </summary>
+    private string CreateWorkspaceCheckpoint(string workspacePath, int runId)
+    {
+        var checkpointDir = Path.Combine(workspacePath, "checkpoints");
+        _fileSystem.CreateDirectory(checkpointDir);
+        var checkpointPath = Path.Combine(checkpointDir, $"run-{runId}");
+        if (_fileSystem.DirectoryExists(checkpointPath))
+        {
+            return checkpointPath;
+        }
+
+        // Deep copy workspace.json to checkpoint
+        if (_fileSystem.FileExists(_store.StatePath))
+        {
+            _fileSystem.CreateDirectory(checkpointPath);
+            var checkpointFile = Path.Combine(checkpointPath, "workspace.json");
+            _fileSystem.WriteAllText(checkpointFile, _fileSystem.ReadAllText(_store.StatePath));
+        }
+
+        return checkpointPath;
+    }
+
+    /// <summary>
+    /// Validates that workspace state still exists after an agent run.
+    /// If .devteam or workspace.json has been deleted, restores from checkpoint.
+    /// Returns (isValid, restoredFromCheckpoint).
+    /// </summary>
+    private (bool IsValid, bool RestoredFromCheckpoint) ValidateAndRestoreWorkspaceCheckpoint(string workspacePath, int runId, Action<string>? log = null)
+    {
+        var stateExists = _fileSystem.FileExists(_store.StatePath);
+        if (stateExists)
+        {
+            return (true, false);
+        }
+
+        // State is missing — attempt to restore from checkpoint
+        var checkpointPath = Path.Combine(workspacePath, "checkpoints", $"run-{runId}");
+        var checkpointFile = Path.Combine(checkpointPath, "workspace.json");
+        if (_fileSystem.FileExists(checkpointFile))
+        {
+            LogDetailed(log, LoopVerbosity.Normal, $"    [GUARDRAIL] Workspace state was deleted during run #{runId}. Restoring from checkpoint...");
+            _fileSystem.CreateDirectory(workspacePath);
+            _fileSystem.WriteAllText(_store.StatePath, _fileSystem.ReadAllText(checkpointFile));
+            LogDetailed(log, LoopVerbosity.Normal, $"    [GUARDRAIL] Restored workspace.json from checkpoint.");
+            return (true, true);
+        }
+
+        return (false, false);
     }
 
     // ── Worktree helpers ─────────────────────────────────────────────────────────

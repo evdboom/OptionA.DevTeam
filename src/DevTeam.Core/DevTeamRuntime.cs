@@ -774,6 +774,29 @@ public class DevTeamRuntime
         }
     }
 
+    public AgentRun? GetActiveRunForIssue(WorkspaceState state, int issueId)
+    {
+        return state.AgentRuns
+            .Where(item => item.IssueId == issueId && item.Status == AgentRunStatus.Running)
+            .OrderByDescending(item => item.UpdatedAtUtc)
+            .ThenByDescending(item => item.Id)
+            .FirstOrDefault();
+    }
+
+    public bool TryGrantTimeoutExtension(WorkspaceState state, int issueId)
+    {
+        var run = GetActiveRunForIssue(state, issueId);
+        if (run is null || run.TimeoutExtensionGranted)
+        {
+            return false;
+        }
+
+        run.TimeoutExtensionGranted = true;
+        run.TimeoutExtensionGrantedAtUtc = _clock.UtcNow;
+        run.UpdatedAtUtc = _clock.UtcNow;
+        return true;
+    }
+
     public void StartRun(WorkspaceState state, int runId, string sessionId)
     {
         var run = state.AgentRuns.FirstOrDefault(item => item.Id == runId)

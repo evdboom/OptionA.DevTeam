@@ -21,6 +21,8 @@ internal static class ReconServiceTests
         new("BuildPrompt_OmitsCodebaseContext_WhenEmpty", BuildPrompt_OmitsCodebaseContext_WhenEmpty),
         new("BuildPrompt_OmitsCodebaseContext_ForTesterRole", BuildPrompt_OmitsCodebaseContext_ForTesterRole),
         new("BuildPrompt_IncludesScoutSkill_ForNavigatorRole", BuildPrompt_IncludesScoutSkill_ForNavigatorRole),
+        new("BuildPrompt_IncludesWorkspaceProtectionSkill_ForGitRiskIssue", BuildPrompt_IncludesWorkspaceProtectionSkill_ForGitRiskIssue),
+        new("BuildPrompt_InjectsTimeBudget_WithCorrectMinutes", BuildPrompt_InjectsTimeBudget_WithCorrectMinutes),
         new("BuildPrompt_IncludesBrownfieldDeltaInstructions", BuildPrompt_IncludesBrownfieldDeltaInstructions),
         new("ParseResponse_ReadsBrownfieldApproachAndRationale", ParseResponse_ReadsBrownfieldApproachAndRationale),
         new("WorkspaceStore_WritesCodebaseContextFile_WhenPresent", WorkspaceStore_WritesCodebaseContextFile_WhenPresent),
@@ -176,6 +178,60 @@ internal static class ReconServiceTests
         Assert.Contains("scout", prompt);
         Assert.Contains("Skill manifest (load on demand)", prompt);
         Assert.Contains("source=.devteam-source/skills/scout/SKILL.md", prompt);
+        return Task.CompletedTask;
+    }
+
+    private static Task BuildPrompt_IncludesWorkspaceProtectionSkill_ForGitRiskIssue()
+    {
+        var state = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }],
+            Skills =
+            [
+                new SkillDefinition
+                {
+                    Slug = "workspace-protection",
+                    Name = "Workspace Protection",
+                    Body = "# Skill: Workspace Protection\nProtect .devteam runtime state.",
+                    SourcePath = ".devteam-source/skills/workspace-protection/SKILL.md"
+                }
+            ]
+        };
+        var issue = new IssueItem
+        {
+            Id = 1,
+            Title = "Prevent accidental git restore --force",
+            Detail = "Harden around git clean and workspace.json safety.",
+            RoleSlug = "developer",
+            Status = ItemStatus.Open
+        };
+        state.Issues.Add(issue);
+
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+
+        Assert.Contains("Relevant skill slugs:", prompt);
+        Assert.Contains("workspace-protection", prompt);
+        Assert.Contains("source=.devteam-source/skills/workspace-protection/SKILL.md", prompt);
+        return Task.CompletedTask;
+    }
+
+    private static Task BuildPrompt_InjectsTimeBudget_WithCorrectMinutes()
+    {
+        var state = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
+        };
+        var issue = new IssueItem { Id = 1, Title = "Design the technical approach", RoleSlug = "architect", Status = ItemStatus.Open };
+        state.Issues.Add(issue);
+
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue, TimeSpan.FromMinutes(25));
+
+        Assert.Contains("Time budget:", prompt);
+        Assert.Contains("25 minutes", prompt);
+        Assert.Contains("hard session timeout", prompt);
+        Assert.Contains("emit split follow-up ISSUES", prompt);
         return Task.CompletedTask;
     }
 

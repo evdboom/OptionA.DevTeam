@@ -2005,6 +2005,35 @@ internal static class SmokeTestFunctions
         }
     }
 
+    internal static void TestInitEnsuresDevTeamGitignoreRules()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-cli-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var workspacePath = Path.Combine(tempRoot, ".devteam");
+            var gitignorePath = Path.Combine(tempRoot, ".gitignore");
+            File.WriteAllText(gitignorePath, "node_modules/\n");
+
+            var result = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--recon", "false");
+
+            AssertEqual(0, result.ExitCode, "Init exit code");
+            AssertTrue(File.Exists(gitignorePath), "Init should ensure .gitignore exists.");
+            var gitignore = File.ReadAllText(gitignorePath);
+            AssertTrue(gitignore.Contains("node_modules/", StringComparison.Ordinal), "Init should preserve existing .gitignore rules.");
+            AssertTrue(gitignore.Contains("# DevTeam runtime workspace", StringComparison.Ordinal), "Init should add DevTeam runtime workspace header.");
+            AssertTrue(gitignore.Contains(".devteam/", StringComparison.Ordinal), "Init should ignore .devteam runtime state.");
+            AssertTrue(gitignore.Contains(".devteam-*/", StringComparison.Ordinal), "Init should ignore temporary devteam workspaces.");
+            AssertTrue(gitignore.Contains("!.devteam-source/", StringComparison.Ordinal), "Init should preserve .devteam-source as tracked.");
+            AssertTrue(gitignore.Contains("!.devteam-source/**", StringComparison.Ordinal), "Init should preserve nested .devteam-source files as tracked.");
+        }
+        finally
+        {
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
     internal static void TestEditIssueCommandUpdatesQueuedIssue()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-cli-tests", Guid.NewGuid().ToString("N"));
