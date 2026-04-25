@@ -58,6 +58,18 @@ public sealed class QuestionService : IQuestionService
         var created = new List<QuestionItem>();
         foreach (var candidate in questions.Where(item => !string.IsNullOrWhiteSpace(item.Text)))
         {
+            if (ShouldRouteWorkspaceInternalQuestion(candidate.Text))
+            {
+                var text = candidate.Text.Trim();
+                RecordDecision(
+                    state,
+                    "Rerouted workspace-internal question",
+                    $"Question: {text}\n\nResolution: This is internal workspace state orchestration, not end-user input. Routed to orchestrator follow-up issue.",
+                    "runtime-policy");
+                EnsureRuntimeQuestionFollowUpIssue(state, text);
+                continue;
+            }
+
             if (ShouldAutoResolveRuntimeManagedQuestion(candidate))
             {
                 RecordDecision(
@@ -107,6 +119,54 @@ public sealed class QuestionService : IQuestionService
             "pipeline",
             "queue",
             "scheduler");
+    }
+
+    private static bool ShouldRouteWorkspaceInternalQuestion(string text)
+    {
+        var normalized = text.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        return ContainsAny(normalized,
+            "candidate list",
+            "current candidate list",
+            "are issue",
+            "are issues",
+            "issue #",
+            "completed?",
+            "confirming",
+            "unblock",
+            "open question #",
+            "question #",
+            "queued/running",
+            "workspace status");
+    }
+
+    private static void EnsureRuntimeQuestionFollowUpIssue(WorkspaceState state, string questionText)
+    {
+        const string title = "Resolve workspace-internal question and unblock queued work";
+
+        var existing = state.Issues.FirstOrDefault(issue =>
+            issue.Status != ItemStatus.Done
+            && string.Equals(issue.Title, title, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(issue.RoleSlug, "orchestrator", StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            return;
+        }
+
+        state.Issues.Add(new IssueItem
+        {
+            Id = state.NextIssueId++,
+            Title = title,
+            Detail = $"An agent produced a workspace-internal question that should not be routed to the end user.\n\nQuestion:\n{questionText}\n\nAction:\n1. Inspect workspace state (issues, candidate list, run statuses, dependencies).\n2. Resolve/close stale blockers or superseded questions via runtime-managed actions.\n3. If technical follow-up is required, create focused agent issues and close this orchestration issue.",
+            RoleSlug = "orchestrator",
+            Priority = 80,
+            Status = ItemStatus.Open,
+            RefinementState = IssueRefinementState.ReadyToPickup
+        });
     }
 
     private static bool ContainsAny(string source, params string[] needles) =>

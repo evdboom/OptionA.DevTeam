@@ -166,6 +166,7 @@ public static class AgentPromptBuilder
         - Workspace state file conflicts: trust the runtime's authoritative state; use update_issue_status to record your final status.
         - Closing, superseding, or deduplicating issues: make the call yourself and use update_issue_status to close superseded issues directly.
         - Retry or timeout decisions for other issues: the runtime schedules retries; just complete your own issue.
+        - Whether issue #X or #Y are completed, missing from candidate lists, or blocking another issue: inspect workspace state and resolve internally; never ask the user.
         - Whether another question can or should be closed: never ask the user to confirm closure of open questions.
         - Any "should I do X or Y?" where both options are within your role's authority: decide and act.
 

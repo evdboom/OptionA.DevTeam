@@ -12,6 +12,7 @@ internal static class QuestionServiceTests
         new("AddQuestion_NonBlocking_FlagRespected", AddQuestion_NonBlocking_FlagRespected),
         new("AddQuestions_AutoResolvesRuntimeManagedNonBlockingQuestion", AddQuestions_AutoResolvesRuntimeManagedNonBlockingQuestion),
         new("AddQuestions_KeepsBlockingQuestionOpen", AddQuestions_KeepsBlockingQuestionOpen),
+        new("AddQuestions_ReroutesWorkspaceInternalQuestion_ToOrchestratorIssue", AddQuestions_ReroutesWorkspaceInternalQuestion_ToOrchestratorIssue),
     ];
 
     private static Task AddQuestion_AssignsIncrementingId()
@@ -129,6 +130,32 @@ internal static class QuestionServiceTests
         Assert.That(created.Count == 1, $"Expected one created question but got {created.Count}.");
         Assert.That(state.Questions.Count == 1, $"Expected one persisted question but got {state.Questions.Count}.");
         Assert.That(state.Questions[0].IsBlocking, "Expected the persisted question to remain blocking.");
+        return Task.CompletedTask;
+    }
+
+    private static Task AddQuestions_ReroutesWorkspaceInternalQuestion_ToOrchestratorIssue()
+    {
+        var svc = new QuestionService(new FakeSystemClock());
+        var state = new WorkspaceState();
+
+        var created = svc.AddQuestions(state,
+        [
+            new ProposedQuestion
+            {
+                IsBlocking = false,
+                Text = "Issues #3 and #8 do not appear in the current candidate list - are they completed? Confirming would unblock #16."
+            }
+        ]);
+
+        Assert.That(created.Count == 0, $"Expected no persisted user questions but got {created.Count}.");
+        Assert.That(state.Questions.Count == 0, $"Expected user question inbox to remain empty but got {state.Questions.Count}.");
+        var followUp = state.Issues.FirstOrDefault(item =>
+            string.Equals(item.RoleSlug, "orchestrator", StringComparison.OrdinalIgnoreCase)
+            && item.Status == ItemStatus.Open);
+        Assert.That(followUp is not null, "Expected an orchestrator follow-up issue to be created for workspace-internal question.");
+        Assert.That(state.Decisions.Any(item => string.Equals(item.Source, "runtime-policy", StringComparison.OrdinalIgnoreCase)
+            && item.Title.Contains("Rerouted", StringComparison.OrdinalIgnoreCase)),
+            "Expected a runtime-policy decision recording the reroute.");
         return Task.CompletedTask;
     }
 }
