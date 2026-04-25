@@ -2034,6 +2034,31 @@ internal static class SmokeTestFunctions
         }
     }
 
+    internal static void TestInitCreatesTrackedRepoMemoryFolder()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-cli-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var workspacePath = Path.Combine(tempRoot, ".devteam");
+
+            var result = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--goal", "Bootstrap on a new machine", "--recon", "false");
+
+            AssertEqual(0, result.ExitCode, "Init exit code");
+            var repoMemoryPath = Path.Combine(tempRoot, CoreConstants.Paths.DevTeamRepo);
+            AssertTrue(Directory.Exists(repoMemoryPath), "Init should create tracked .devteam-repo folder.");
+            AssertTrue(File.Exists(Path.Combine(repoMemoryPath, "manifest.json")), "Init should write repo-memory manifest.json.");
+            AssertTrue(File.Exists(Path.Combine(repoMemoryPath, "GOAL.md")), "Init should write repo-memory GOAL.md.");
+            AssertTrue(File.ReadAllText(Path.Combine(repoMemoryPath, "GOAL.md")).Contains("Bootstrap on a new machine", StringComparison.Ordinal),
+                "Repo memory goal file should reflect the current active goal.");
+        }
+        finally
+        {
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
     internal static void TestEditIssueCommandUpdatesQueuedIssue()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-cli-tests", Guid.NewGuid().ToString("N"));

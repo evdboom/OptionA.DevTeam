@@ -4,6 +4,7 @@ public static class CoreConstants
 {
     public static class Paths
     {
+        public const string DevTeamRepo = ".devteam-repo";
         public const string DevTeamSource = ".devteam-source";
         public const string Roles = "roles";
         public const string Modes = "modes";
