@@ -172,6 +172,20 @@ internal static class AdventureShellHost
 
     private static bool HandleSharedScrollKeys(ConsoleKeyInfo key, ShellService shell, ref int scrollOffset)
     {
+        if (key.Key == ConsoleKey.UpArrow && key.Modifiers.HasFlag(ConsoleModifiers.Control))
+        {
+            scrollOffset = Math.Min(
+                scrollOffset + 1,
+                ShellPanelBuilder.MaxScrollOffset(shell.Messages, Math.Max(20, Console.WindowHeight), ProgressWidth()));
+            return true;
+        }
+
+        if (key.Key == ConsoleKey.DownArrow && key.Modifiers.HasFlag(ConsoleModifiers.Control))
+        {
+            scrollOffset = Math.Max(0, scrollOffset - 1);
+            return true;
+        }
+
         if (key.Key == ConsoleKey.PageUp)
         {
             scrollOffset = Math.Min(

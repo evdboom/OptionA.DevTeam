@@ -1167,7 +1167,7 @@ internal sealed partial class ShellService(
             MaxIterations = maxIterations,
             AgentTimeout = TimeSpan.FromSeconds(timeoutSeconds),
             PlanningAgentTimeout = TimeSpan.FromSeconds(planningTimeoutSeconds),
-            HeartbeatInterval = TimeSpan.FromSeconds(5),
+            HeartbeatInterval = TimeSpan.FromSeconds(1),
             Verbosity = verbosity,
             ProgressReporter = ReportLoopProgress,
             TokenReporter = MakeTokenReporter()
