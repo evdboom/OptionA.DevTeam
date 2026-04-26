@@ -11,6 +11,17 @@ public sealed class GitStatusSnapshot
 
 public static class GitWorkspace
 {
+    private const string DevTeamGitignoreHeader = "# DevTeam runtime workspace";
+    private static readonly string[] DevTeamGitignoreEntries =
+    [
+        ".devteam/",
+        ".devteam-*/",
+        "!.devteam-source/",
+        "!.devteam-source/**",
+        "!.devteam-repo/",
+        "!.devteam-repo/**"
+    ];
+
     private static readonly string GitExecutablePath = ResolveGitExecutablePath();
 
     public static bool IsGitRepository(string workingDirectory)
@@ -34,6 +45,60 @@ public static class GitWorkspace
         }
 
         RunGit(workingDirectory, "init");
+        return true;
+    }
+
+    public static bool EnsureDevTeamGitignore(string workingDirectory)
+    {
+        if (!IsGitRepository(workingDirectory))
+        {
+            return false;
+        }
+
+        var repoRoot = RunGit(workingDirectory, "rev-parse", "--show-toplevel").StdOut.Trim();
+        var gitignorePath = Path.Combine(repoRoot, ".gitignore");
+        var existing = File.Exists(gitignorePath) ? File.ReadAllText(gitignorePath) : "";
+        var existingLines = existing
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var addedAny = false;
+        var builder = new StringBuilder(existing);
+
+        if (!existingLines.Contains(DevTeamGitignoreHeader))
+        {
+            if (builder.Length > 0)
+            {
+                if (!existing.EndsWith("\n", StringComparison.Ordinal) && !existing.EndsWith("\r\n", StringComparison.Ordinal))
+                {
+                    builder.AppendLine();
+                }
+
+                builder.AppendLine();
+            }
+
+            builder.AppendLine(DevTeamGitignoreHeader);
+            addedAny = true;
+        }
+
+        foreach (var entry in DevTeamGitignoreEntries)
+        {
+            if (existingLines.Contains(entry))
+            {
+                continue;
+            }
+
+            builder.AppendLine(entry);
+            addedAny = true;
+        }
+
+        if (!addedAny)
+        {
+            return false;
+        }
+
+        File.WriteAllText(gitignorePath, builder.ToString());
         return true;
     }
 

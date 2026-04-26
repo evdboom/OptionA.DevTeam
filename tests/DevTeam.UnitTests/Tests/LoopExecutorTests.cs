@@ -14,7 +14,8 @@ internal static class LoopExecutorTests
         new("TokenReporter_IsInvokedWithRoleAndTokens_DuringRunAsync", TokenReporter_IsInvokedWithRoleAndTokens_DuringRunAsync),
         new("TokenReporter_ReceivesAllTokens_AcrossMultipleWords", TokenReporter_ReceivesAllTokens_AcrossMultipleWords),
         new("DetailedVerbosity_PassesHooksToRequest", DetailedVerbosity_PassesHooksToRequest),
-        new("NormalVerbosity_DoesNotPassHooksToRequest", NormalVerbosity_DoesNotPassHooksToRequest),
+        new("NormalVerbosity_PassesGuardrailPreToolHook", NormalVerbosity_PassesGuardrailPreToolHook),
+        new("GuardrailPreToolHook_DeniesDangerousGitCommands", GuardrailPreToolHook_DeniesDangerousGitCommands),
         new("DetailedVerbosity_HooksLogPreAndPostToolUse", DetailedVerbosity_HooksLogPreAndPostToolUse),
         new("DetailedVerbosity_HooksAbortOnError", DetailedVerbosity_HooksAbortOnError),
         new("NormalVerbosity_OrchestratorRequest_PassesVisibilityHooks", NormalVerbosity_OrchestratorRequest_PassesVisibilityHooks),
@@ -315,7 +316,7 @@ internal static class LoopExecutorTests
         Assert.That(request.Hooks.OnPostToolUse is not null, "Expected OnPostToolUse hook to be populated at Detailed verbosity");
     }
 
-    private static async Task NormalVerbosity_DoesNotPassHooksToRequest()
+    private static async Task NormalVerbosity_PassesGuardrailPreToolHook()
     {
         var fs = new InMemoryFileSystem();
         var store = new WorkspaceStore("test-ws", fs);
@@ -342,7 +343,49 @@ internal static class LoopExecutorTests
         await executor.RunAsync(state, options);
 
         var request = agent.Requests.Last();
-        Assert.That(request.Hooks is null, "Expected Hooks to be null on request when verbosity is Normal");
+        Assert.That(request.Hooks is not null, "Expected Hooks to be present on request when verbosity is Normal so guardrails can run.");
+        Assert.That(request.Hooks!.OnPreToolUse is not null, "Expected OnPreToolUse to be populated for runtime guardrails at Normal verbosity.");
+        Assert.That(request.Hooks.OnPostToolUse is not null, "Expected OnPostToolUse to remain available even at Normal verbosity.");
+    }
+
+    private static async Task GuardrailPreToolHook_DeniesDangerousGitCommands()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore("test-ws", fs);
+        var state = BuildStateWithIssue(store, "Guardrail enforcement", "developer");
+        var issueId = state.Issues[^1].Id;
+        state.Phase = WorkflowPhase.Execution;
+        state.ExecutionSelection = new ExecutionSelectionState
+        {
+            SelectedIssueIds = [issueId],
+            Rationale = "test"
+        };
+
+        var agent = new RecordingAgentClient("OUTCOME: completed\nSUMMARY:\nDone.");
+        var factory = new FuncAgentClientFactory(_ => agent);
+        var executor = new LoopExecutor(new DevTeamRuntime(), store, factory, fileSystem: fs);
+
+        var options = new LoopExecutionOptions
+        {
+            MaxIterations = 1,
+            AgentTimeout = TimeSpan.FromSeconds(30),
+            Verbosity = LoopVerbosity.Normal
+        };
+
+        await executor.RunAsync(state, options);
+
+        var hooks = agent.Requests.Last().Hooks!;
+        var safeDecision = hooks.OnPreToolUse!("run_in_terminal", "{\"command\":\"git restore src/DevTeam.Core/ExecutionLoop.cs\"}");
+        Assert.That(safeDecision == PreToolDecision.Allow,
+            $"Expected scoped git restore to be allowed, got: {safeDecision}");
+
+        var dangerousRestoreDecision = hooks.OnPreToolUse!("run_in_terminal", "{\"command\":\"git restore HEAD --force\"}");
+        Assert.That(dangerousRestoreDecision == PreToolDecision.Deny,
+            $"Expected dangerous git restore to be denied, got: {dangerousRestoreDecision}");
+
+        var dangerousCleanDecision = hooks.OnPreToolUse!("run_in_terminal", "{\"command\":\"git clean -fd\"}");
+        Assert.That(dangerousCleanDecision == PreToolDecision.Deny,
+            $"Expected git clean to be denied, got: {dangerousCleanDecision}");
     }
 
     private static async Task DetailedVerbosity_HooksLogPreAndPostToolUse()

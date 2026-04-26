@@ -2005,6 +2005,60 @@ internal static class SmokeTestFunctions
         }
     }
 
+    internal static void TestInitEnsuresDevTeamGitignoreRules()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-cli-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var workspacePath = Path.Combine(tempRoot, ".devteam");
+            var gitignorePath = Path.Combine(tempRoot, ".gitignore");
+            File.WriteAllText(gitignorePath, "node_modules/\n");
+
+            var result = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--recon", "false");
+
+            AssertEqual(0, result.ExitCode, "Init exit code");
+            AssertTrue(File.Exists(gitignorePath), "Init should ensure .gitignore exists.");
+            var gitignore = File.ReadAllText(gitignorePath);
+            AssertTrue(gitignore.Contains("node_modules/", StringComparison.Ordinal), "Init should preserve existing .gitignore rules.");
+            AssertTrue(gitignore.Contains("# DevTeam runtime workspace", StringComparison.Ordinal), "Init should add DevTeam runtime workspace header.");
+            AssertTrue(gitignore.Contains(".devteam/", StringComparison.Ordinal), "Init should ignore .devteam runtime state.");
+            AssertTrue(gitignore.Contains(".devteam-*/", StringComparison.Ordinal), "Init should ignore temporary devteam workspaces.");
+            AssertTrue(gitignore.Contains("!.devteam-source/", StringComparison.Ordinal), "Init should preserve .devteam-source as tracked.");
+            AssertTrue(gitignore.Contains("!.devteam-source/**", StringComparison.Ordinal), "Init should preserve nested .devteam-source files as tracked.");
+        }
+        finally
+        {
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
+    internal static void TestInitCreatesTrackedRepoMemoryFolder()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-cli-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var workspacePath = Path.Combine(tempRoot, ".devteam");
+
+            var result = RunDevTeamCli(tempRoot, "init", "--workspace", workspacePath, "--goal", "Bootstrap on a new machine", "--recon", "false");
+
+            AssertEqual(0, result.ExitCode, "Init exit code");
+            var repoMemoryPath = Path.Combine(tempRoot, CoreConstants.Paths.DevTeamRepo);
+            AssertTrue(Directory.Exists(repoMemoryPath), "Init should create tracked .devteam-repo folder.");
+            AssertTrue(File.Exists(Path.Combine(repoMemoryPath, "manifest.json")), "Init should write repo-memory manifest.json.");
+            AssertTrue(File.Exists(Path.Combine(repoMemoryPath, "GOAL.md")), "Init should write repo-memory GOAL.md.");
+            AssertTrue(File.ReadAllText(Path.Combine(repoMemoryPath, "GOAL.md")).Contains("Bootstrap on a new machine", StringComparison.Ordinal),
+                "Repo memory goal file should reflect the current active goal.");
+        }
+        finally
+        {
+            TryCleanupTempRepo(tempRoot);
+        }
+    }
+
     internal static void TestEditIssueCommandUpdatesQueuedIssue()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), "devteam-cli-tests", Guid.NewGuid().ToString("N"));

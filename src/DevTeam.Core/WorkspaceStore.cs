@@ -49,6 +49,7 @@ public class WorkspaceStore
             _fs.CreateDirectory(Path.Combine(WorkspacePath, "decisions"));
             _fs.CreateDirectory(Path.Combine(WorkspacePath, "artifacts"));
             var state = SeedData.BuildInitialState(repoRoot, totalCreditCap, premiumCreditCap, _configLoader);
+            new RepoMemoryStore(repoRoot, _fs).TryHydrate(state);
             Save(state);
             return state;
         });
@@ -115,6 +116,7 @@ public class WorkspaceStore
             WriteIssueBoard(state);
             WriteQuestionsFile(state);
             WriteCodebaseContextFile(state);
+            new RepoMemoryStore(state.RepoRoot, _fs).Save(state, WorkspacePath);
             return 0;
         });
     }

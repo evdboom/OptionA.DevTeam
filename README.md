@@ -704,6 +704,8 @@ The runtime automatically exposes a local `devteam-workspace` MCP server that le
 devteam /init --workspace .devteam --goal "..." --workspace-mcp true
 ```
 
+Agents can also call `request_timeout_extension(issueId)` when they are nearly done and need a little more time. The runtime allows one extension per running agent session and records that grant in workspace state, so deleting temp signal files does not unlock another increase.
+
 ### External MCP servers
 
 Declare additional MCP servers in `.devteam-source/MCP_SERVERS.json`. Every enabled server is registered with every Copilot SDK session, so all spawned agents can call their tools.

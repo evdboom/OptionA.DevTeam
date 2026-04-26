@@ -33,6 +33,7 @@ internal sealed class InitWorkspaceCommandHandler(
             GetOption(options, "goal-file"),
             Environment.CurrentDirectory);
         var gitInitialized = GitWorkspace.EnsureRepository(Environment.CurrentDirectory);
+        var gitignoreUpdated = GitWorkspace.EnsureDevTeamGitignore(Environment.CurrentDirectory);
         var state = _store.Initialize(Environment.CurrentDirectory, totalCap, premiumCap);
         var mode = GetOption(options, "mode");
         state.Runtime.KeepAwakeEnabled = GetBoolOption(options, "keep-awake", state.Runtime.KeepAwakeEnabled);
@@ -59,6 +60,10 @@ internal sealed class InitWorkspaceCommandHandler(
         if (gitInitialized)
         {
             _output.WriteLine($"Initialized git repository at {Path.GetFullPath(Environment.CurrentDirectory)}");
+        }
+        if (gitignoreUpdated)
+        {
+            _output.WriteLine("Updated .gitignore with DevTeam runtime workspace rules.");
         }
         if (!string.IsNullOrWhiteSpace(goal))
         {

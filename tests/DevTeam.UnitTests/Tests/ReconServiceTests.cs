@@ -21,10 +21,16 @@ internal static class ReconServiceTests
         new("BuildPrompt_OmitsCodebaseContext_WhenEmpty", BuildPrompt_OmitsCodebaseContext_WhenEmpty),
         new("BuildPrompt_OmitsCodebaseContext_ForTesterRole", BuildPrompt_OmitsCodebaseContext_ForTesterRole),
         new("BuildPrompt_IncludesScoutSkill_ForNavigatorRole", BuildPrompt_IncludesScoutSkill_ForNavigatorRole),
+        new("BuildPrompt_IncludesWorkspaceProtectionSkill_ForGitRiskIssue", BuildPrompt_IncludesWorkspaceProtectionSkill_ForGitRiskIssue),
+        new("BuildPrompt_InjectsTimeBudget_WithCorrectMinutes", BuildPrompt_InjectsTimeBudget_WithCorrectMinutes),
         new("BuildPrompt_IncludesBrownfieldDeltaInstructions", BuildPrompt_IncludesBrownfieldDeltaInstructions),
+        new("BuildPrompt_EnforcesSelfContainedQuestions", BuildPrompt_EnforcesSelfContainedQuestions),
         new("ParseResponse_ReadsBrownfieldApproachAndRationale", ParseResponse_ReadsBrownfieldApproachAndRationale),
+        new("ParseResponse_ParsesQuestionContextContinuationLines", ParseResponse_ParsesQuestionContextContinuationLines),
         new("WorkspaceStore_WritesCodebaseContextFile_WhenPresent", WorkspaceStore_WritesCodebaseContextFile_WhenPresent),
         new("WorkspaceStore_DoesNotWriteContextFile_WhenEmpty", WorkspaceStore_DoesNotWriteContextFile_WhenEmpty),
+        new("WorkspaceStore_WritesRepoMemoryFiles_WhenPresent", WorkspaceStore_WritesRepoMemoryFiles_WhenPresent),
+        new("WorkspaceStore_Initialize_HydratesRepoMemory_WhenPresent", WorkspaceStore_Initialize_HydratesRepoMemory_WhenPresent),
             new("BuildPrompt_IncludesArchitectPlanningFeedback_WhenPresent", BuildPrompt_IncludesArchitectPlanningFeedback_WhenPresent),
             new("BuildPrompt_KeepsArchitectPlanningFeedback_WhenRecentDecisionWindowIsCrowded", BuildPrompt_KeepsArchitectPlanningFeedback_WhenRecentDecisionWindowIsCrowded),
     ];
@@ -179,6 +185,60 @@ internal static class ReconServiceTests
         return Task.CompletedTask;
     }
 
+    private static Task BuildPrompt_IncludesWorkspaceProtectionSkill_ForGitRiskIssue()
+    {
+        var state = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }],
+            Skills =
+            [
+                new SkillDefinition
+                {
+                    Slug = "workspace-protection",
+                    Name = "Workspace Protection",
+                    Body = "# Skill: Workspace Protection\nProtect .devteam runtime state.",
+                    SourcePath = ".devteam-source/skills/workspace-protection/SKILL.md"
+                }
+            ]
+        };
+        var issue = new IssueItem
+        {
+            Id = 1,
+            Title = "Prevent accidental git restore --force",
+            Detail = "Harden around git clean and workspace.json safety.",
+            RoleSlug = "developer",
+            Status = ItemStatus.Open
+        };
+        state.Issues.Add(issue);
+
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+
+        Assert.Contains("Relevant skill slugs:", prompt);
+        Assert.Contains("workspace-protection", prompt);
+        Assert.Contains("source=.devteam-source/skills/workspace-protection/SKILL.md", prompt);
+        return Task.CompletedTask;
+    }
+
+    private static Task BuildPrompt_InjectsTimeBudget_WithCorrectMinutes()
+    {
+        var state = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
+        };
+        var issue = new IssueItem { Id = 1, Title = "Design the technical approach", RoleSlug = "architect", Status = ItemStatus.Open };
+        state.Issues.Add(issue);
+
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue, TimeSpan.FromMinutes(25));
+
+        Assert.Contains("Time budget:", prompt);
+        Assert.Contains("25 minutes", prompt);
+        Assert.Contains("hard session timeout", prompt);
+        Assert.Contains("emit split follow-up ISSUES", prompt);
+        return Task.CompletedTask;
+    }
+
     private static Task BuildPrompt_IncludesBrownfieldDeltaInstructions()
     {
         var state = new WorkspaceState
@@ -297,6 +357,59 @@ internal static class ReconServiceTests
         return Task.CompletedTask;
     }
 
+    private static Task BuildPrompt_EnforcesSelfContainedQuestions()
+    {
+        var state = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }],
+            Runtime = RuntimeConfiguration.CreateDefault(),
+            Roles =
+            [
+                new RoleDefinition { Slug = "developer", Name = "Developer" }
+            ]
+        };
+        var issue = new IssueItem { Id = 1, Title = "Implement command", RoleSlug = "developer", Status = ItemStatus.Open };
+        state.Issues.Add(issue);
+
+        var prompt = AgentPromptBuilder.BuildPrompt(state, issue);
+
+        Assert.Contains("Every question must be self-contained", prompt);
+        Assert.Contains("context: <optional supporting facts from this run>", prompt);
+        return Task.CompletedTask;
+    }
+
+    private static Task ParseResponse_ParsesQuestionContextContinuationLines()
+    {
+        var parsed = AgentPromptBuilder.ParseResponse(new AgentInvocationResult
+        {
+            ExitCode = 0,
+            StdOut = """
+                OUTCOME: blocked
+                SUMMARY:
+                Need clarification.
+                ISSUES:
+                (none)
+                SKILLS_USED:
+                (none)
+                TOOLS_USED:
+                (none)
+                QUESTIONS:
+                - [blocking] Which deployment environment should we target first?
+                  context: The run found conflicting staging/prod config defaults.
+                  context: Current release notes mention both.
+                """
+        });
+
+        Assert.That(parsed.Questions.Count == 1, $"Expected one parsed question but got {parsed.Questions.Count}.");
+        var question = parsed.Questions[0];
+        Assert.That(question.IsBlocking, "Expected parsed question to be blocking.");
+        Assert.Contains("Which deployment environment", question.Text);
+        Assert.Contains("Context:", question.Text);
+        Assert.Contains("staging/prod", question.Text);
+        return Task.CompletedTask;
+    }
+
     private static Task WorkspaceStore_WritesCodebaseContextFile_WhenPresent()
     {
         var fs = new InMemoryFileSystem();
@@ -332,6 +445,77 @@ internal static class ReconServiceTests
 
         var path = Path.Combine(store.WorkspacePath, "codebase-context.md");
         Assert.That(!fs.FileExists(path), "Expected codebase-context.md NOT to be written when context is empty");
+        return Task.CompletedTask;
+    }
+
+    private static Task WorkspaceStore_WritesRepoMemoryFiles_WhenPresent()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore(WorkspacePath, fs);
+        var state = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Phase = WorkflowPhase.Execution,
+            ActiveGoal = new GoalState { GoalText = "Ship repo memory bootstrap" },
+            CodebaseContext = "## Existing patterns\nLayered services",
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
+        };
+        state.Decisions.Add(new DecisionRecord
+        {
+            Id = 1,
+            Title = "Use tracked repo memory",
+            Detail = "Keep runtime state untracked but export durable repo context.",
+            Source = "architect",
+            CreatedAtUtc = DateTimeOffset.Parse("2026-04-25T12:00:00Z")
+        });
+
+        store.Save(state);
+
+        var repoMemoryDir = new RepoMemoryStore(RepoRoot, fs).DirectoryPath;
+        Assert.That(fs.DirectoryExists(repoMemoryDir), $"Expected repo memory directory at {repoMemoryDir}");
+        Assert.That(fs.FileExists(Path.Combine(repoMemoryDir, "manifest.json")), "Expected manifest.json to be written.");
+        Assert.That(fs.FileExists(Path.Combine(repoMemoryDir, "GOAL.md")), "Expected GOAL.md to be written.");
+        Assert.That(fs.FileExists(Path.Combine(repoMemoryDir, "STATUS.md")), "Expected STATUS.md to be written.");
+        Assert.That(fs.FileExists(Path.Combine(repoMemoryDir, "DECISIONS.md")), "Expected DECISIONS.md to be written.");
+        Assert.That(fs.FileExists(Path.Combine(repoMemoryDir, "CONTEXT.md")), "Expected CONTEXT.md to be written.");
+        Assert.Contains("Ship repo memory bootstrap", fs.ReadAllText(Path.Combine(repoMemoryDir, "GOAL.md")));
+        Assert.Contains("Phase: Execution", fs.ReadAllText(Path.Combine(repoMemoryDir, "STATUS.md")));
+        Assert.Contains("Use tracked repo memory", fs.ReadAllText(Path.Combine(repoMemoryDir, "DECISIONS.md")));
+        return Task.CompletedTask;
+    }
+
+    private static Task WorkspaceStore_Initialize_HydratesRepoMemory_WhenPresent()
+    {
+        var fs = new InMemoryFileSystem();
+        var sourceStore = new WorkspaceStore(".devteam-source-workspace", fs);
+        var sourceState = new WorkspaceState
+        {
+            RepoRoot = RepoRoot,
+            Phase = WorkflowPhase.ArchitectPlanning,
+            ActiveGoal = new GoalState { GoalText = "Resume durable context" },
+            CodebaseContext = "## Existing patterns\nEvent sourcing",
+            Models = [new ModelDefinition { Name = DefaultModelName, Cost = 0, IsDefault = true }]
+        };
+        sourceState.Decisions.Add(new DecisionRecord
+        {
+            Id = 1,
+            Title = "Keep repo memory tracked",
+            Detail = "Tracked files should bootstrap a fresh workspace on a new machine.",
+            Source = "planner",
+            CreatedAtUtc = DateTimeOffset.Parse("2026-04-25T13:00:00Z")
+        });
+        sourceStore.Save(sourceState);
+
+        var hydratedStore = new WorkspaceStore(".devteam-hydrated", fs);
+        var hydratedState = hydratedStore.Initialize(RepoRoot, 25, 6);
+
+        Assert.That(hydratedState.ActiveGoal?.GoalText == "Resume durable context",
+            $"Expected goal to be hydrated from repo memory but got '{hydratedState.ActiveGoal?.GoalText}'");
+        Assert.That(hydratedState.Phase == WorkflowPhase.ArchitectPlanning,
+            $"Expected phase ArchitectPlanning but got {hydratedState.Phase}");
+        Assert.Contains("Event sourcing", hydratedState.CodebaseContext);
+        Assert.That(hydratedState.Decisions.Count >= 1, "Expected durable decisions to be hydrated from repo memory.");
+        Assert.Contains("Keep repo memory tracked", hydratedState.Decisions[0].Title);
         return Task.CompletedTask;
     }
 }

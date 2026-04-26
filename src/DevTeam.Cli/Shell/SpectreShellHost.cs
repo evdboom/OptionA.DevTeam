@@ -36,6 +36,7 @@ internal static class SpectreShellHost
         var lastCursor = -1;
         var lastScrollOffset = -1;
         var lastAdventureMode = false;
+        var lastLiveTickSecond = -1L;
 
         await shell.InitializeAsync();
 
@@ -87,10 +88,12 @@ internal static class SpectreShellHost
 
                         var uiVersion = shell.UiVersion;
                         var adventureMode = shell.IsAdventureModeEnabled;
+                        var liveTickSecond = shell.IsLoopRunning ? DateTimeOffset.UtcNow.ToUnixTimeSeconds() : -1L;
                         var shouldRender = uiVersion != lastUiVersion
                             || inputChanged
                             || scrollOffset != lastScrollOffset
-                            || adventureMode != lastAdventureMode;
+                            || adventureMode != lastAdventureMode
+                            || liveTickSecond != lastLiveTickSecond;
 
                         if (shouldRender)
                         {
@@ -111,6 +114,7 @@ internal static class SpectreShellHost
                             lastCursor = cursorPosition;
                             lastScrollOffset = scrollOffset;
                             lastAdventureMode = adventureMode;
+                            lastLiveTickSecond = liveTickSecond;
                         }
 
                         try { await Task.Delay(RefreshMs, cancellationToken); }
@@ -195,6 +199,21 @@ internal static class SpectreShellHost
             }
 
             var text = inputBuffer.ToString();
+
+            // Ctrl+Up / Ctrl+Down provide a fallback when mouse wheel events are not available.
+            if (key.Key == ConsoleKey.UpArrow && key.Modifiers.HasFlag(ConsoleModifiers.Control))
+            {
+                scrollOffset = Math.Min(
+                    scrollOffset + 1,
+                    ShellPanelBuilder.MaxScrollOffset(shell.Messages, Math.Max(20, Console.WindowHeight), ProgressWidth()));
+                continue;
+            }
+
+            if (key.Key == ConsoleKey.DownArrow && key.Modifiers.HasFlag(ConsoleModifiers.Control))
+            {
+                scrollOffset = Math.Max(0, scrollOffset - 1);
+                continue;
+            }
 
             // PageUp → scroll progress pane up (older lines)
             if (key.Key == ConsoleKey.PageUp)

@@ -7,7 +7,9 @@ internal static class DevTeamRuntimeGuardrailTests
         new("AddGeneratedIssues_InfersFrontendDeveloper_ForBlazorWork", AddGeneratedIssues_InfersFrontendDeveloper_ForBlazorWork),
         new("AddGeneratedIssues_DoesNotSpecializeAliasRole", AddGeneratedIssues_DoesNotSpecializeAliasRole),
         new("CompleteRun_CreatesReviewerIssue_ForMeaningfulImplementation", CompleteRun_CreatesReviewerIssue_ForMeaningfulImplementation),
+        new("CompleteRun_CreatesReviewerIssue_OnCadenceWithoutDiff", CompleteRun_CreatesReviewerIssue_OnCadenceWithoutDiff),
         new("CompleteRun_CreatesAuditorIssue_ForLargeChangeFootprint", CompleteRun_CreatesAuditorIssue_ForLargeChangeFootprint),
+        new("CompleteRun_CreatesAuditorIssue_OnCadenceWithoutLargeDiff", CompleteRun_CreatesAuditorIssue_OnCadenceWithoutLargeDiff),
         new("CompleteRun_CreatesAuditorIssue_WhenOtherOpenRolesExist", CompleteRun_CreatesAuditorIssue_WhenOtherOpenRolesExist)
     ];
 
@@ -160,6 +162,101 @@ internal static class DevTeamRuntimeGuardrailTests
 
         var auditorIssue = state.Issues.SingleOrDefault(item => item.RoleSlug == "auditor" && item.Status == ItemStatus.Open);
         Assert.That(auditorIssue is not null, "Expected runtime to create auditor guardrail issue for large change footprint.");
+        return Task.CompletedTask;
+    }
+
+    private static Task CompleteRun_CreatesReviewerIssue_OnCadenceWithoutDiff()
+    {
+        var runtime = new DevTeamRuntime(new FakeSystemClock());
+        var state = BuildStateWithRoles();
+
+        var issue1 = new IssueItem
+        {
+            Id = state.NextIssueId++,
+            Title = "Implement endpoint one",
+            RoleSlug = "developer",
+            Status = ItemStatus.InProgress,
+            Priority = 70,
+            Area = "api"
+        };
+        var issue2 = new IssueItem
+        {
+            Id = state.NextIssueId++,
+            Title = "Implement endpoint two",
+            RoleSlug = "developer",
+            Status = ItemStatus.InProgress,
+            Priority = 69,
+            Area = "api"
+        };
+        state.Issues.Add(issue1);
+        state.Issues.Add(issue2);
+
+        state.AgentRuns.Add(new AgentRun
+        {
+            Id = state.NextRunId++,
+            IssueId = issue1.Id,
+            RoleSlug = issue1.RoleSlug,
+            Status = AgentRunStatus.Running,
+            UpdatedAtUtc = new DateTimeOffset(2026, 4, 23, 10, 0, 0, TimeSpan.Zero)
+        });
+        runtime.CompleteRun(state, new CompleteRunRequest
+        {
+            RunId = 1,
+            Outcome = "completed",
+            Summary = "Endpoint one complete.",
+            ChangedPaths = []
+        });
+
+        state.AgentRuns.Add(new AgentRun
+        {
+            Id = state.NextRunId++,
+            IssueId = issue2.Id,
+            RoleSlug = issue2.RoleSlug,
+            Status = AgentRunStatus.Running,
+            UpdatedAtUtc = new DateTimeOffset(2026, 4, 23, 10, 2, 0, TimeSpan.Zero)
+        });
+        runtime.CompleteRun(state, new CompleteRunRequest
+        {
+            RunId = 2,
+            Outcome = "completed",
+            Summary = "Endpoint two complete.",
+            ChangedPaths = []
+        });
+
+        var reviewerIssue = state.Issues.SingleOrDefault(item =>
+            item.RoleSlug == "reviewer"
+            && item.Status == ItemStatus.Open
+            && item.Title.Contains("Review", StringComparison.OrdinalIgnoreCase));
+        Assert.That(reviewerIssue is not null, "Expected cadence-based reviewer issue when multiple implementation runs completed without diffs.");
+        return Task.CompletedTask;
+    }
+
+    private static Task CompleteRun_CreatesAuditorIssue_OnCadenceWithoutLargeDiff()
+    {
+        var runtime = new DevTeamRuntime(new FakeSystemClock());
+        var state = BuildStateWithRoles();
+
+        var issue1 = new IssueItem { Id = state.NextIssueId++, Title = "Implement feature A", RoleSlug = "developer", Status = ItemStatus.InProgress, Priority = 60 };
+        var issue2 = new IssueItem { Id = state.NextIssueId++, Title = "Implement feature B", RoleSlug = "developer", Status = ItemStatus.InProgress, Priority = 59 };
+        var issue3 = new IssueItem { Id = state.NextIssueId++, Title = "Implement feature C", RoleSlug = "developer", Status = ItemStatus.InProgress, Priority = 58 };
+        state.Issues.Add(issue1);
+        state.Issues.Add(issue2);
+        state.Issues.Add(issue3);
+
+        state.AgentRuns.Add(new AgentRun { Id = state.NextRunId++, IssueId = issue1.Id, RoleSlug = issue1.RoleSlug, Status = AgentRunStatus.Running, UpdatedAtUtc = new DateTimeOffset(2026, 4, 23, 10, 0, 0, TimeSpan.Zero) });
+        runtime.CompleteRun(state, new CompleteRunRequest { RunId = 1, Outcome = "completed", Summary = "A done", ChangedPaths = [] });
+
+        state.AgentRuns.Add(new AgentRun { Id = state.NextRunId++, IssueId = issue2.Id, RoleSlug = issue2.RoleSlug, Status = AgentRunStatus.Running, UpdatedAtUtc = new DateTimeOffset(2026, 4, 23, 10, 3, 0, TimeSpan.Zero) });
+        runtime.CompleteRun(state, new CompleteRunRequest { RunId = 2, Outcome = "completed", Summary = "B done", ChangedPaths = [] });
+
+        state.AgentRuns.Add(new AgentRun { Id = state.NextRunId++, IssueId = issue3.Id, RoleSlug = issue3.RoleSlug, Status = AgentRunStatus.Running, UpdatedAtUtc = new DateTimeOffset(2026, 4, 23, 10, 6, 0, TimeSpan.Zero) });
+        runtime.CompleteRun(state, new CompleteRunRequest { RunId = 3, Outcome = "completed", Summary = "C done", ChangedPaths = [] });
+
+        var auditorIssue = state.Issues.SingleOrDefault(item =>
+            item.RoleSlug == "auditor"
+            && item.Status == ItemStatus.Open
+            && item.Title.Contains("Audit recent execution drift", StringComparison.OrdinalIgnoreCase));
+        Assert.That(auditorIssue is not null, "Expected cadence-based auditor issue after three implementation completions.");
         return Task.CompletedTask;
     }
 

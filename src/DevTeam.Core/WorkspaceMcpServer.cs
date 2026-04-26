@@ -8,7 +8,9 @@ namespace DevTeam.Core;
 [SuppressMessage("Major Code Smell", "S1192", Justification = "JSON-RPC and schema property names are protocol literals.")]
 public sealed class WorkspaceMcpServer(
     string workspacePath,
-    Func<int, string?, CancellationToken, Task<string>>? subAgentRunner = null)
+    Func<int, string?, CancellationToken, Task<string>>? subAgentRunner = null,
+    IFileSystem? fileSystem = null,
+    ISystemClock? clock = null)
 {
     private static readonly IEqualityComparer<string> PathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
@@ -21,6 +23,8 @@ public sealed class WorkspaceMcpServer(
 
     private readonly string _workspacePath = Path.GetFullPath(workspacePath);
     private readonly Func<int, string?, CancellationToken, Task<string>>? _subAgentRunner = subAgentRunner;
+    private readonly IFileSystem _fileSystem = fileSystem ?? new PhysicalFileSystem();
+    private readonly ISystemClock _clock = clock ?? new SystemClock();
 
     public async Task RunAsync(Stream input, Stream output, CancellationToken cancellationToken = default)
     {
@@ -215,6 +219,7 @@ public sealed class WorkspaceMcpServer(
                     }).ToList()
                 };
             })),
+            "request_timeout_extension" => BuildToolResult(HandleTimeoutExtensionRequest(arguments)),
             _ => throw new InvalidOperationException($"Tool '{toolName}' is not supported.")
         };
     }
@@ -409,7 +414,54 @@ public sealed class WorkspaceMcpServer(
                 }));
         }
 
+        tools.Add(BuildToolDefinition(
+            "request_timeout_extension",
+            "Request a one-time timeout extension for the current run. Call this when you are nearly finished but need a few more minutes to complete cleanly rather than leaving work incomplete. Only one extension is granted per run. If you need significantly more time, emit split follow-up ISSUES instead.",
+            new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JsonObject
+                {
+                    ["issueId"] = IntegerSchema()
+                },
+                ["required"] = new JsonArray("issueId"),
+                ["additionalProperties"] = false
+            }));
+
         return new JsonArray([.. tools]);
+    }
+
+    private object HandleTimeoutExtensionRequest(JsonElement arguments)
+    {
+        var issueId = GetInt(arguments, "issueId", 0);
+        if (issueId <= 0)
+        {
+            throw new InvalidOperationException("issueId is required and must be a positive integer.");
+        }
+
+        var store = CreateWorkspaceStore();
+        var runtime = CreateRuntime();
+        var state = store.Load();
+        var activeRun = runtime.GetActiveRunForIssue(state, issueId);
+
+        if (activeRun is not null && activeRun.TimeoutExtensionGranted)
+        {
+            return new
+            {
+                Status = "already-granted",
+                Message = "A timeout extension was already granted for this run. No further extensions are available. If you need significantly more time, emit split follow-up ISSUES instead."
+            };
+        }
+
+        var reqFile = activeRun is null
+            ? Path.Combine(_workspacePath, $"timeout_ext_{issueId}.req")
+            : Path.Combine(_workspacePath, $"timeout_ext_{issueId}_{activeRun.Id}.req");
+        _fileSystem.WriteAllText(reqFile, _clock.UtcNow.ToString("O"));
+        return new
+        {
+            Status = "requested",
+            Message = "Extension requested. The runtime will grant up to 10 additional minutes. Continue working — you will not receive a separate confirmation. If the scope is genuinely too large, emit split follow-up ISSUES."
+        };
     }
 
     private static JsonObject BuildToolDefinition(string name, string description, JsonObject schema) =>
@@ -419,6 +471,7 @@ public sealed class WorkspaceMcpServer(
             ["description"] = description,
             ["inputSchema"] = schema
         };
+
     private static object BuildRuntimeCapabilities() => new
     {
         ManagedConcerns = new[]
@@ -457,6 +510,11 @@ public sealed class WorkspaceMcpServer(
             {
                 Area = "Approval gates",
                 Description = "Plan and architect-plan approvals are managed by the user through the interactive shell. Agents must not prompt for or block on approval."
+            },
+            new
+            {
+                Area = "Timeout extensions",
+                Description = "Call request_timeout_extension (MCP) when you are almost done but need a few more minutes. One extension per run is allowed. The runtime grants it silently — you will not be notified. If you need significantly more time, emit split follow-up ISSUES instead of requesting an extension."
             }
         },
         Guidance = "Do NOT create a question for any concern listed above. If you encounter a situation covered by one of these areas (e.g. budget pressure, a stale issue status, a phase-change event), handle it using the appropriate MCP tool or simply record a decision noting what you observed."
@@ -465,10 +523,14 @@ public sealed class WorkspaceMcpServer(
 
     private static JsonObject IntegerSchema() => new() { ["type"] = "integer" };
 
+    private WorkspaceStore CreateWorkspaceStore() => new(_workspacePath, _fileSystem);
+
+    private DevTeamRuntime CreateRuntime() => new(_clock);
+
     private T WithWorkspace<T>(Func<DevTeamRuntime, WorkspaceState, T> action, bool save = false)
     {
-        var store = new WorkspaceStore(_workspacePath);
-        var runtime = new DevTeamRuntime();
+        var store = CreateWorkspaceStore();
+        var runtime = CreateRuntime();
         var state = store.Load();
         var result = action(runtime, state);
         if (save)

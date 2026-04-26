@@ -18,6 +18,10 @@ internal static class WorkspaceMcpServerTests
         new("GetDecisionsTool_ReturnsOnlyRequestedDecisions", GetDecisionsTool_ReturnsOnlyRequestedDecisions),
         new("GetDecisionsTool_ReturnsEmpty_WhenNoIdsGiven", GetDecisionsTool_ReturnsEmpty_WhenNoIdsGiven),
         new("CreateIssueTool_ReturnsError_WhenTitleTooLong", CreateIssueTool_ReturnsError_WhenTitleTooLong),
+        new("RequestTimeoutExtensionTool_WritesReqFile", RequestTimeoutExtensionTool_WritesReqFile),
+        new("RequestTimeoutExtensionTool_ReturnsAlreadyGranted_WhenRunStateShowsGranted", RequestTimeoutExtensionTool_ReturnsAlreadyGranted_WhenRunStateShowsGranted),
+        new("RequestTimeoutExtensionTool_StillRequests_WhenIssueHasNoRunningSession", RequestTimeoutExtensionTool_StillRequests_WhenIssueHasNoRunningSession),
+        new("ToolsList_IncludesRequestTimeoutExtension", ToolsList_IncludesRequestTimeoutExtension),
     ];
 
     private const string TestWorkspace = "test-ws";
@@ -384,5 +388,162 @@ internal static class WorkspaceMcpServerTests
                 Directory.Delete(workspacePath, recursive: true);
             }
         }
+    }
+
+    private static async Task RequestTimeoutExtensionTool_WritesReqFile()
+    {
+        var workspacePath = Path.Combine(Path.GetTempPath(), $"devteam-test-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new WorkspaceStore(workspacePath);
+            var state = store.Initialize(TestRepoRoot, 100, 20);
+            var runtime = new DevTeamRuntime();
+            var issue = runtime.AddIssue(state, new IssueRequest
+            {
+                Title = "Architect task",
+                Detail = "Agent is nearly done and needs a little more time.",
+                RoleSlug = Architect,
+                Priority = 60
+            });
+            var queued = runtime.QueueSingleIssue(state, issue.Id);
+            runtime.StartRun(state, queued.RunId, "session-1");
+            store.Save(state);
+
+            var server = new WorkspaceMcpServer(workspacePath);
+
+            await SendMcpRequest(server, McpInitialize);
+            using var response = await SendMcpRequest(server, McpToolsCall, new
+            {
+                name = "request_timeout_extension",
+                arguments = new { issueId = issue.Id }
+            });
+
+            var result = response.RootElement.GetProperty(McpResult);
+            var content = result.GetProperty("content")[0].GetProperty("text").GetString()!;
+            var json = JsonDocument.Parse(content).RootElement;
+
+            Assert.That(json.GetProperty("status").GetString() == "requested",
+                $"Expected status='requested' but got '{json.GetProperty("status").GetString()}'");
+
+            var reqFile = Path.Combine(workspacePath, $"timeout_ext_{issue.Id}_{queued.RunId}.req");
+            Assert.That(File.Exists(reqFile), $"Expected req file at {reqFile} to exist");
+        }
+        finally
+        {
+            if (Directory.Exists(workspacePath))
+            {
+                Directory.Delete(workspacePath, recursive: true);
+            }
+        }
+    }
+
+    private static async Task RequestTimeoutExtensionTool_ReturnsAlreadyGranted_WhenRunStateShowsGranted()
+    {
+        var workspacePath = Path.Combine(Path.GetTempPath(), $"devteam-test-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new WorkspaceStore(workspacePath);
+            var state = store.Initialize(TestRepoRoot, 100, 20);
+            var runtime = new DevTeamRuntime();
+            var issue = runtime.AddIssue(state, new IssueRequest
+            {
+                Title = "Architect task",
+                Detail = "Need a little more time to finish the design output.",
+                RoleSlug = Architect,
+                Priority = 60
+            });
+            var queued = runtime.QueueSingleIssue(state, issue.Id);
+            runtime.StartRun(state, queued.RunId, "session-1");
+            var run = runtime.GetActiveRunForIssue(state, issue.Id)!;
+            run.TimeoutExtensionGranted = true;
+            run.TimeoutExtensionGrantedAtUtc = DateTimeOffset.UtcNow;
+            store.Save(state);
+
+            var server = new WorkspaceMcpServer(workspacePath);
+
+            await SendMcpRequest(server, McpInitialize);
+            using var response = await SendMcpRequest(server, McpToolsCall, new
+            {
+                name = "request_timeout_extension",
+                arguments = new { issueId = issue.Id }
+            });
+
+            var result = response.RootElement.GetProperty(McpResult);
+            var content = result.GetProperty("content")[0].GetProperty("text").GetString()!;
+            var json = JsonDocument.Parse(content).RootElement;
+
+            Assert.That(json.GetProperty("status").GetString() == "already-granted",
+                $"Expected status='already-granted' but got '{json.GetProperty("status").GetString()}'");
+        }
+        finally
+        {
+            if (Directory.Exists(workspacePath))
+            {
+                Directory.Delete(workspacePath, recursive: true);
+            }
+        }
+    }
+
+    private static async Task RequestTimeoutExtensionTool_StillRequests_WhenIssueHasNoRunningSession()
+    {
+        var workspacePath = Path.Combine(Path.GetTempPath(), $"devteam-test-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new WorkspaceStore(workspacePath);
+            var state = store.Initialize(TestRepoRoot, 100, 20);
+            var runtime = new DevTeamRuntime();
+            var issue = runtime.AddIssue(state, new IssueRequest
+            {
+                Title = "Developer task",
+                Detail = "No run has started yet.",
+                RoleSlug = "developer",
+                Priority = 50
+            });
+            store.Save(state);
+
+            var server = new WorkspaceMcpServer(workspacePath);
+
+            await SendMcpRequest(server, McpInitialize);
+            using var response = await SendMcpRequest(server, McpToolsCall, new
+            {
+                name = "request_timeout_extension",
+                arguments = new { issueId = issue.Id }
+            });
+
+            var result = response.RootElement.GetProperty(McpResult);
+            var content = result.GetProperty("content")[0].GetProperty("text").GetString()!;
+            var json = JsonDocument.Parse(content).RootElement;
+
+            Assert.That(json.GetProperty("status").GetString() == "requested",
+                $"Expected status='requested' but got '{json.GetProperty("status").GetString()}'");
+
+            var reqFile = Path.Combine(workspacePath, $"timeout_ext_{issue.Id}.req");
+            Assert.That(File.Exists(reqFile), $"Expected req file at {reqFile} to exist");
+        }
+        finally
+        {
+            if (Directory.Exists(workspacePath))
+            {
+                Directory.Delete(workspacePath, recursive: true);
+            }
+        }
+    }
+
+    private static async Task ToolsList_IncludesRequestTimeoutExtension()
+    {
+        var fs = new InMemoryFileSystem();
+        var store = new WorkspaceStore(TestWorkspace, fs);
+        store.Initialize(TestRepoRoot, 100, 20);
+
+        var server = new WorkspaceMcpServer(TestWorkspace);
+
+        await SendMcpRequest(server, McpInitialize);
+        using var response = await SendMcpRequest(server, "tools/list");
+
+        var tools = response.RootElement.GetProperty(McpResult).GetProperty("tools");
+        var names = tools.EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToList();
+
+        Assert.That(names.Contains("request_timeout_extension"),
+            $"Expected request_timeout_extension in tools but got: {string.Join(", ", names)}");
     }
 }

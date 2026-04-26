@@ -162,6 +162,7 @@ internal static class CliLoopHandler
         var maxSubagents = CliOptionParser.GetIntOption(options, "max-subagents", state.Runtime.DefaultMaxSubagents);
         var maxIterations = CliOptionParser.GetIntOption(options, "max-iterations", state.Runtime.DefaultMaxIterations);
         var timeoutSeconds = CliOptionParser.GetIntOption(options, "timeout-seconds", 600);
+        var planningTimeoutSeconds = CliOptionParser.GetIntOption(options, "planning-timeout-seconds", 1200);
         var verbosity = CliOptionParser.ParseVerbosity(CliOptionParser.GetOption(options, "verbosity"));
         if (!string.IsNullOrWhiteSpace(providerName))
         {
@@ -198,6 +199,7 @@ internal static class CliLoopHandler
             MaxSubagents = maxSubagents,
             MaxIterations = maxIterations,
             AgentTimeout = TimeSpan.FromSeconds(timeoutSeconds),
+            PlanningAgentTimeout = TimeSpan.FromSeconds(planningTimeoutSeconds),
             HeartbeatInterval = interactiveShell ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(10),
             Verbosity = verbosity,
             ProgressReporter = progressReporter

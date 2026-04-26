@@ -399,13 +399,22 @@ internal static class ShellPanelBuilder
             : char.ToUpperInvariant(roleSlug[0]) + roleSlug[1..];
 
         var scope = slot.IssueId is int issueId ? $" issue #{issueId}" : string.Empty;
-        var elapsed = $" {slot.Elapsed.TotalSeconds:0}s";
+        var elapsed = slot.Elapsed;
+        if (slot.IsRunning && slot.UpdatedAtUtc != default)
+        {
+            var drift = DateTimeOffset.UtcNow - slot.UpdatedAtUtc;
+            if (drift > TimeSpan.Zero)
+            {
+                elapsed += drift;
+            }
+        }
+        var elapsedText = $" {elapsed.TotalSeconds:0}s";
 
         if (slot.IsRunning)
         {
-            return $"[yellow]⏳[/] [cyan]{Markup.Escape(role)}[/]{Markup.Escape(scope + elapsed)}";
+            return $"[yellow]⏳[/] [cyan]{Markup.Escape(role)}[/]{Markup.Escape(scope + elapsedText)}";
         }
 
-        return $"[green]✓[/] [cyan]{Markup.Escape(role)}[/]{Markup.Escape(scope + elapsed)} [dim]done[/]";
+        return $"[green]✓[/] [cyan]{Markup.Escape(role)}[/]{Markup.Escape(scope + elapsedText)} [dim]done[/]";
     }
 }
