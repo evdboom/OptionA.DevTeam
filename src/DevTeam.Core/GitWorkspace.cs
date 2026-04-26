@@ -17,7 +17,9 @@ public static class GitWorkspace
         ".devteam/",
         ".devteam-*/",
         "!.devteam-source/",
-        "!.devteam-source/**"
+        "!.devteam-source/**",
+        "!.devteam-repo/",
+        "!.devteam-repo/**"
     ];
 
     private static readonly string GitExecutablePath = ResolveGitExecutablePath();

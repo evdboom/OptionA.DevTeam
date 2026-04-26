@@ -152,7 +152,10 @@ public class LoopExecutor(
                 {
                     LogDetailed(log, options.Verbosity, $"    Worktree: {worktreePath}");
                 }
-                LogDetailed(log, options.Verbosity, $"    Session {sessionId}, scope {session.ScopeKind}, area {(string.IsNullOrWhiteSpace(queuedRun.Area) ? "none" : queuedRun.Area)}, timeout {options.AgentTimeout.TotalSeconds:0}s");
+                var resolvedTimeout = runIssue is not null
+                    ? ResolveTimeoutForRole(queuedRun.RoleSlug, runIssue.IsPlanningIssue, options)
+                    : options.AgentTimeout;
+                LogDetailed(log, options.Verbosity, $"    Session {sessionId}, scope {session.ScopeKind}, area {(string.IsNullOrWhiteSpace(queuedRun.Area) ? "none" : queuedRun.Area)}, timeout {resolvedTimeout.TotalSeconds:0}s");
                 pendingRuns.Add(new PendingAgentRun(
                     queuedRun,
                     sessionId,
@@ -171,7 +174,7 @@ public class LoopExecutor(
                 pendingRuns.RemoveAll(item => item.Run.RunId == completed.Run.RunId);
                 
                 // GUARDRAIL: Validate and restore workspace state if agent deleted .devteam
-                var (isValid, restored) = ValidateAndRestoreWorkspaceCheckpoint(_store.WorkspacePath, completed.Run.RunId, log);
+                var (isValid, restored) = ValidateAndRestoreWorkspaceCheckpoint(_store.WorkspacePath, completed.Run.RunId, options.Verbosity, log);
                 if (!isValid)
                 {
                     throw new InvalidOperationException(
@@ -1587,7 +1590,7 @@ public class LoopExecutor(
     /// If .devteam or workspace.json has been deleted, restores from checkpoint.
     /// Returns (isValid, restoredFromCheckpoint).
     /// </summary>
-    private (bool IsValid, bool RestoredFromCheckpoint) ValidateAndRestoreWorkspaceCheckpoint(string workspacePath, int runId, Action<string>? log = null)
+    private (bool IsValid, bool RestoredFromCheckpoint) ValidateAndRestoreWorkspaceCheckpoint(string workspacePath, int runId, LoopVerbosity verbosity, Action<string>? log = null)
     {
         if (IsWorkspaceStateValid())
         {
@@ -1601,7 +1604,7 @@ public class LoopExecutor(
         var checkpointStateDirectory = Path.Combine(checkpointPath, "state");
         if (_fileSystem.FileExists(checkpointFile) || _fileSystem.DirectoryExists(checkpointStateDirectory))
         {
-            Log(log, LoopVerbosity.Normal, $"    [GUARDRAIL] Workspace state was missing or invalid during run #{runId}. Restoring from checkpoint...");
+            Log(log, verbosity, $"    [GUARDRAIL] Workspace state was missing or invalid during run #{runId}. Restoring from checkpoint...");
             _fileSystem.CreateDirectory(workspacePath);
 
             if (_fileSystem.FileExists(checkpointFile))
@@ -1616,11 +1619,11 @@ public class LoopExecutor(
 
             if (IsWorkspaceStateValid())
             {
-                Log(log, LoopVerbosity.Normal, $"    [GUARDRAIL] Restored workspace state from checkpoint.");
+                Log(log, verbosity, $"    [GUARDRAIL] Restored workspace state from checkpoint.");
                 return (true, true);
             }
 
-            Log(log, LoopVerbosity.Normal, $"    [GUARDRAIL] Checkpoint restore completed, but workspace state is still invalid.");
+            Log(log, verbosity, $"    [GUARDRAIL] Checkpoint restore completed, but workspace state is still invalid.");
         }
 
         return (false, false);

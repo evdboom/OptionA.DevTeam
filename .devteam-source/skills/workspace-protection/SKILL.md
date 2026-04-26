@@ -143,6 +143,8 @@ git restore src/OtherFile.cs
 .devteam-*/
 !.devteam-source/
 !.devteam-source/**
+!.devteam-repo/
+!.devteam-repo/**
 ```
 
 This means:

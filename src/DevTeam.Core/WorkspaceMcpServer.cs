@@ -439,8 +439,8 @@ public sealed class WorkspaceMcpServer(
             throw new InvalidOperationException("issueId is required and must be a positive integer.");
         }
 
-        var store = new WorkspaceStore(_workspacePath);
-        var runtime = new DevTeamRuntime();
+        var store = CreateWorkspaceStore();
+        var runtime = CreateRuntime();
         var state = store.Load();
         var activeRun = runtime.GetActiveRunForIssue(state, issueId);
 
@@ -523,10 +523,14 @@ public sealed class WorkspaceMcpServer(
 
     private static JsonObject IntegerSchema() => new() { ["type"] = "integer" };
 
+    private WorkspaceStore CreateWorkspaceStore() => new(_workspacePath, _fileSystem);
+
+    private DevTeamRuntime CreateRuntime() => new(_clock);
+
     private T WithWorkspace<T>(Func<DevTeamRuntime, WorkspaceState, T> action, bool save = false)
     {
-        var store = new WorkspaceStore(_workspacePath);
-        var runtime = new DevTeamRuntime();
+        var store = CreateWorkspaceStore();
+        var runtime = CreateRuntime();
         var state = store.Load();
         var result = action(runtime, state);
         if (save)
