@@ -1,7 +1,6 @@
 ---
 name: backlog-manager
 description: Review, consolidate, and manage the execution backlog. Use when the loop has created many issues/questions and you need to prevent duplicates, merge related work, abandon stale items, and enforce goal alignment. Orchestrator skill for checking goal-drift and backlog health.
-allowed-tools: [get_workspace_summary, list_ready_issues, create_issue, get_issue, get_decisions]
 ---
 # Skill: Backlog Manager (Product Owner)
 

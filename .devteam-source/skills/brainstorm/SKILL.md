@@ -1,7 +1,6 @@
 ---
 name: brainstorm
 description: Explore approaches and trade-offs before implementation.
-allowed-tools: [get_workspace_summary, read_file, file_search, grep_search]
 ---
 # Skill: Brainstorm
 

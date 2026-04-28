@@ -1,7 +1,6 @@
 ---
 name: plan
 description: Break work into small, verifiable implementation tasks.
-allowed-tools: [get_workspace_summary, read_file, file_search, grep_search]
 ---
 # Skill: Plan
 

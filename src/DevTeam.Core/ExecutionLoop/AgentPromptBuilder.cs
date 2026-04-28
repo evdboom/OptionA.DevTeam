@@ -100,13 +100,8 @@ public static class AgentPromptBuilder
         var activeMode = state.Modes.FirstOrDefault(item => string.Equals(item.Slug, state.Runtime.ActiveModeSlug, StringComparison.OrdinalIgnoreCase))
             ?? state.Modes.FirstOrDefault();
         var roleCard = BuildRoleCard(role, issue.RoleSlug);
-        var roleTools = role?.RequiredTools ?? [];
         var skills = ResolveSkills(state, issue.RoleSlug, issue);
         var questionBlock = BuildQuestionBlock(state);
-        var tools = roleTools
-            .Concat(skills.SelectMany(item => item.RequiredTools))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
 
         var skillManifest = BuildSkillManifest(skills);
         var availableRoles = string.Join(", ", state.Roles.Select(item => item.Slug).OrderBy(item => item, StringComparer.OrdinalIgnoreCase));
@@ -150,9 +145,6 @@ public static class AgentPromptBuilder
 
         Relevant skill slugs:
         {availableSkills}
-
-        Declared tool expectations:
-        {(tools.Count == 0 ? "(none declared)" : string.Join(", ", tools))}
 
         Workspace MCP:
         {(state.Runtime.WorkspaceMcpEnabled ? "A local DevTeam workspace MCP server is available in this session. Prefer using it to inspect current workspace state and to persist newly discovered issues, questions, and decisions. Use update_issue_status to set issue status instead of editing workspace files directly. Call get_runtime_capabilities for a full list of concerns the runtime manages automatically." : "No workspace MCP server is available in this session.")}
@@ -602,13 +594,11 @@ public static class AgentPromptBuilder
         }
 
         var excerpt = ExtractRoleExcerpt(role.Body, RoleExcerptMaxLines);
-        var tools = role.RequiredTools.Count == 0 ? "(none declared)" : string.Join(", ", role.RequiredTools);
-                var indentedExcerpt = excerpt.Replace("\n", "\n    ", StringComparison.Ordinal);
+        var indentedExcerpt = excerpt.Replace("\n", "\n    ", StringComparison.Ordinal);
 
                 return $"""
         - slug: {role.Slug}
         - source: {role.SourcePath}
-        - tools: {tools}
         - excerpt:
                         {indentedExcerpt}
         """;
@@ -641,15 +631,12 @@ public static class AgentPromptBuilder
         var builder = new StringBuilder();
         foreach (var skill in skills.OrderBy(item => item.Slug, StringComparer.OrdinalIgnoreCase))
         {
-            var tools = skill.RequiredTools.Count == 0 ? "(none)" : string.Join(", ", skill.RequiredTools);
             builder.Append("- slug=")
                 .Append(skill.Slug)
                 .Append("; name=")
                 .Append(string.IsNullOrWhiteSpace(skill.Name) ? skill.Slug : skill.Name)
                 .Append("; source=")
                 .Append(string.IsNullOrWhiteSpace(skill.SourcePath) ? "(unknown)" : skill.SourcePath)
-                .Append("; tools=")
-                .Append(tools)
                 .AppendLine();
         }
 

@@ -1,7 +1,6 @@
 ---
 name: hygiene
 description: Enforce file-size, separation-of-concerns, and maintainability hygiene.
-allowed-tools: [read_file, file_search, grep_search, apply_patch]
 ---
 # Skill: Hygiene
 

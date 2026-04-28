@@ -1,7 +1,6 @@
 ---
 name: review
 description: Self-review completed work before handoff.
-allowed-tools: [read_file, grep_search, get_errors]
 ---
 # Skill: Self-Review
 

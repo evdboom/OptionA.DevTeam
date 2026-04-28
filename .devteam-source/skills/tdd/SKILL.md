@@ -1,7 +1,6 @@
 ---
 name: tdd
 description: Apply red-green-refactor test-driven development.
-allowed-tools: [read_file, apply_patch, execution_subagent]
 ---
 # Skill: Test-Driven Development (TDD)
 

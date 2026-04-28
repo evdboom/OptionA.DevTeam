@@ -107,7 +107,6 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
                 SuggestedModel = suggestedMatch.Success ? suggestedMatch.Groups[1].Value : "",
                 SourcePath = Path.GetRelativePath(repoRoot, path),
                 Body = asset.Body,
-                RequiredTools = asset.RequiredTools
             });
         }
 
@@ -220,7 +219,6 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
                 Name = firstLine.TrimStart('#', ' ').Trim(),
                 SourcePath = Path.GetRelativePath(repoRoot, path),
                 Body = asset.Body,
-                RequiredTools = asset.RequiredTools
             });
         }
 
@@ -247,7 +245,6 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
                 Name = firstLine.TrimStart('#', ' ').Trim(),
                 SourcePath = Path.GetRelativePath(repoRoot, skillPath),
                 Body = asset.Body,
-                RequiredTools = asset.RequiredTools
             });
         }
 
@@ -358,78 +355,25 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
     private MarkdownAsset ParseMarkdownAsset(string path)
     {
         var raw = _fs.ReadAllText(path);
-        var requiredTools = new List<string>();
         if (!raw.StartsWith("---", StringComparison.Ordinal))
         {
-            return new MarkdownAsset(raw, requiredTools);
+            return new MarkdownAsset(raw);
         }
 
         var lines = raw.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         if (lines.Length < 3 || lines[0] != "---")
         {
-            return new MarkdownAsset(raw, requiredTools);
+            return new MarkdownAsset(raw);
         }
 
         var endIndex = Array.FindIndex(lines, 1, line => line == "---");
         if (endIndex < 0)
         {
-            return new MarkdownAsset(raw, requiredTools);
-        }
-
-        for (var index = 1; index < endIndex; index++)
-        {
-            var line = lines[index].Trim();
-            if (TryGetToolsLineValue(line, out var inline))
-            {
-                if (!string.IsNullOrWhiteSpace(inline))
-                {
-                    requiredTools.AddRange(ParseToolList(inline));
-                }
-                continue;
-            }
-
-            if (line.StartsWith("-", StringComparison.Ordinal))
-            {
-                requiredTools.Add(line.TrimStart('-', ' ').Trim());
-            }
+            return new MarkdownAsset(raw);
         }
 
         var body = string.Join('\n', lines.Skip(endIndex + 1)).TrimStart();
-        return new MarkdownAsset(body, requiredTools.Where(tool => !string.IsNullOrWhiteSpace(tool)).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
-    }
-
-    private static bool TryGetToolsLineValue(string line, out string value)
-    {
-        const string toolsPrefix = "tools:";
-        const string allowedToolsPrefix = "allowed-tools:";
-
-        if (line.StartsWith(toolsPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            value = line[toolsPrefix.Length..].Trim();
-            return true;
-        }
-
-        if (line.StartsWith(allowedToolsPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            value = line[allowedToolsPrefix.Length..].Trim();
-            return true;
-        }
-
-        value = "";
-        return false;
-    }
-
-    private static IEnumerable<string> ParseToolList(string inline)
-    {
-        var normalized = inline.Trim();
-        if (normalized.StartsWith("[", StringComparison.Ordinal) &&
-            normalized.EndsWith("]", StringComparison.Ordinal) &&
-            normalized.Length >= 2)
-        {
-            normalized = normalized[1..^1];
-        }
-
-        return normalized.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return new MarkdownAsset(body);
     }
 
     private static string GetString(JsonElement element, string propertyName) =>
@@ -520,7 +464,7 @@ public sealed partial class FileSystemConfigurationLoader : IConfigurationLoader
         }
     }
 
-    private sealed record MarkdownAsset(string Body, List<string> RequiredTools);
+    private sealed record MarkdownAsset(string Body);
 
     [GeneratedRegex(@"(?m)^## Suggested Model\s*\r?\n\s*`([a-zA-Z0-9][\w.\-]*)`")]
     private static partial Regex SuggestedModelRegex();

@@ -1,7 +1,6 @@
 ---
 name: refine
 description: Scope and refine ambiguous issues into executable work packets with explicit what/why/how, files-in-scope, acceptance criteria, and linked decisions.
-allowed-tools: [get_issue, get_decisions, create_issue, update_issue_status, read_file, file_search, grep_search]
 ---
 # Skill: Refine
 

@@ -1,7 +1,6 @@
 ---
 name: workspace-protection
 description: Protect the .devteam runtime state directory from accidental deletion or modification.
-allowed-tools: []
 ---
 # Skill: Workspace Protection
 

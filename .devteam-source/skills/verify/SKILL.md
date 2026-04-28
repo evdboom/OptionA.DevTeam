@@ -1,7 +1,6 @@
 ---
 name: verify
 description: Verify claims with fresh execution evidence before completion.
-allowed-tools: [execution_subagent, get_errors]
 ---
 # Skill: Verify Before Completion
 

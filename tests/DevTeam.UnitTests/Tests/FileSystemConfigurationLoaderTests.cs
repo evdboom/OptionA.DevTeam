@@ -301,10 +301,6 @@ internal static class FileSystemConfigurationLoaderTests
 
         Assert.That(skills.Count == 1, $"Expected 1 skill but got {skills.Count}");
         Assert.That(skills[0].Slug == "scout", $"Expected slug 'scout' but got '{skills[0].Slug}'");
-        Assert.That(skills[0].RequiredTools.Count == 3, $"Expected 3 tools but got {skills[0].RequiredTools.Count}");
-        Assert.That(skills[0].RequiredTools.Contains("read_file"), "Expected tool 'read_file'");
-        Assert.That(skills[0].RequiredTools.Contains("file_search"), "Expected tool 'file_search'");
-        Assert.That(skills[0].RequiredTools.Contains("grep_search"), "Expected tool 'grep_search'");
         Assert.That(!skills[0].Body.Contains("---"), "Expected frontmatter stripped from body");
         return Task.CompletedTask;
     }
