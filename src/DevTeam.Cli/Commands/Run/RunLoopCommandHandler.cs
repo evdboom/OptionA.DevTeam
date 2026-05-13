@@ -40,6 +40,12 @@ internal sealed class RunLoopCommandHandler(WorkspaceStore store, DevTeamRuntime
             WorkspaceStatusPrinter.PrintArchitectSummary(state);
         }
 
+        if (report.FinalState == CoreConstants.LoopStates.ScopeComplete)
+        {
+            _output.WriteLine("Scope complete — all planned issues are done. Guardrail drift work may still be queued.");
+            _output.WriteLine("Use `run-loop` again to continue with drift/polish work, or `export` to archive.");
+        }
+
         return 0;
     }
 }

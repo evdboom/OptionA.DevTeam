@@ -759,7 +759,7 @@ internal static class SmokeTestFunctions
             },
             messages.Add).GetAwaiter().GetResult();
     
-        AssertEqual("idle", report.FinalState, "Final loop state");
+        AssertEqual("scope-complete", report.FinalState, "Final loop state");
         AssertTrue(messages.Any(message => message.Contains("Iteration 1", StringComparison.Ordinal)),
             "Normal verbosity should emit iteration logs.");
         AssertTrue(messages.Any(message => message.Contains("Execution", StringComparison.Ordinal)),
@@ -2289,4 +2289,3 @@ internal static class SmokeTestFunctions
     }
     
 }
-

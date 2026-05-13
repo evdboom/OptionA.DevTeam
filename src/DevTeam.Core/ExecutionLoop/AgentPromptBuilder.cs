@@ -426,7 +426,7 @@ public static class AgentPromptBuilder
         {
             normalized = Regex.Replace(
                 normalized,
-                $"(?<!^)(?<!\\n)({Regex.Escape(header)})",
+                $"(?<![A-Z_0-9])(?<!^)(?<!\\n)({Regex.Escape(header)})",
                 "\n$1",
                 RegexOptions.CultureInvariant);
         }
@@ -1054,6 +1054,11 @@ public static class AgentPromptBuilder
             }
 
             var body = line[1..].Trim();
+            if (body.StartsWith("#", StringComparison.Ordinal))
+            {
+                body = body[1..];
+            }
+
             if (int.TryParse(body, out var parsed))
             {
                 result.Add(parsed);

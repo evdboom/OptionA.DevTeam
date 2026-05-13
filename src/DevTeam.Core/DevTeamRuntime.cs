@@ -351,7 +351,40 @@ public class DevTeamRuntime
             return _issueService.HasBlockingQuestions(state) ? CoreConstants.LoopStates.WaitingForUser : CoreConstants.LoopStates.AwaitingArchitectApproval;
         }
 
-        return _issueService.HasBlockingQuestions(state) ? CoreConstants.LoopStates.WaitingForUser : CoreConstants.LoopStates.Idle;
+        if (_issueService.HasBlockingQuestions(state))
+        {
+            return CoreConstants.LoopStates.WaitingForUser;
+        }
+
+        if (IsScopeComplete(state))
+        {
+            return CoreConstants.LoopStates.ScopeComplete;
+        }
+
+        return CoreConstants.LoopStates.Idle;
+    }
+
+    /// <summary>
+    /// Returns true when all execution issues whose work was planned by the architect (i.e., issues
+    /// that have a pipeline assignment and are not planning issues or repo-audit issues) are Done.
+    /// An open or in-progress repo-audit guardrail issue does not prevent scope-complete.
+    /// </summary>
+    public static bool IsScopeComplete(WorkspaceState state)
+    {
+        if (state.Phase != WorkflowPhase.Execution)
+        {
+            return false;
+        }
+
+        var plannedIssues = state.Issues
+            .Where(issue =>
+                !issue.IsPlanningIssue
+                && issue.PipelineId is not null
+                && !string.Equals(issue.Area, "repo-audit", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(issue.FamilyKey, "repo-audit", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return plannedIssues.Count > 0 && plannedIssues.All(issue => issue.Status == ItemStatus.Done);
     }
 
     public IReadOnlyList<IssueItem> GetExecutionCandidatesPreview(WorkspaceState state)
