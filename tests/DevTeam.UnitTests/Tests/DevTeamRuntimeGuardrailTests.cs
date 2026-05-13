@@ -10,7 +10,10 @@ internal static class DevTeamRuntimeGuardrailTests
         new("CompleteRun_CreatesReviewerIssue_OnCadenceWithoutDiff", CompleteRun_CreatesReviewerIssue_OnCadenceWithoutDiff),
         new("CompleteRun_CreatesAuditorIssue_ForLargeChangeFootprint", CompleteRun_CreatesAuditorIssue_ForLargeChangeFootprint),
         new("CompleteRun_CreatesAuditorIssue_OnCadenceWithoutLargeDiff", CompleteRun_CreatesAuditorIssue_OnCadenceWithoutLargeDiff),
-        new("CompleteRun_CreatesAuditorIssue_WhenOtherOpenRolesExist", CompleteRun_CreatesAuditorIssue_WhenOtherOpenRolesExist)
+        new("CompleteRun_CreatesAuditorIssue_WhenOtherOpenRolesExist", CompleteRun_CreatesAuditorIssue_WhenOtherOpenRolesExist),
+        new("IsScopeComplete_ReturnsFalse_WhenPlannedIssuesStillOpen", IsScopeComplete_ReturnsFalse_WhenPlannedIssuesStillOpen),
+        new("IsScopeComplete_ReturnsTrue_WhenAllPipelineIssuesDone_DriftRemaining", IsScopeComplete_ReturnsTrue_WhenAllPipelineIssuesDone_DriftRemaining),
+        new("IsScopeComplete_ReturnsFalse_WhenNotInExecutionPhase", IsScopeComplete_ReturnsFalse_WhenNotInExecutionPhase),
     ];
 
     private static Task AddGeneratedIssues_InfersFrontendDeveloper_ForBlazorWork()
@@ -327,4 +330,43 @@ internal static class DevTeamRuntimeGuardrailTests
             new RoleDefinition { Slug = "auditor", Name = "Auditor" }
         ]
     };
+
+    private static Task IsScopeComplete_ReturnsFalse_WhenPlannedIssuesStillOpen()
+    {
+        var state = BuildStateWithRoles();
+        state.Issues.Add(new IssueItem { Id = 1, Title = "Implement A", RoleSlug = "developer", PipelineId = 1, Status = ItemStatus.Open });
+        state.Issues.Add(new IssueItem { Id = 2, Title = "Implement B", RoleSlug = "developer", PipelineId = 2, Status = ItemStatus.Done });
+
+        var result = DevTeamRuntime.IsScopeComplete(state);
+
+        Assert.That(!result, "Expected IsScopeComplete=false when at least one pipeline issue is still open.");
+        return Task.CompletedTask;
+    }
+
+    private static Task IsScopeComplete_ReturnsTrue_WhenAllPipelineIssuesDone_DriftRemaining()
+    {
+        var state = BuildStateWithRoles();
+        // Planned pipeline issues — all done
+        state.Issues.Add(new IssueItem { Id = 1, Title = "Implement A", RoleSlug = "developer", PipelineId = 1, Status = ItemStatus.Done });
+        state.Issues.Add(new IssueItem { Id = 2, Title = "Implement B", RoleSlug = "developer", PipelineId = 2, Status = ItemStatus.Done });
+        // Drift/audit issue — still open; should not block scope-complete
+        state.Issues.Add(new IssueItem { Id = 3, Title = "Audit recent drift", RoleSlug = "auditor", Area = "repo-audit", FamilyKey = "repo-audit", Status = ItemStatus.Open });
+
+        var result = DevTeamRuntime.IsScopeComplete(state);
+
+        Assert.That(result, "Expected IsScopeComplete=true when all pipeline issues are done and only audit drift remains.");
+        return Task.CompletedTask;
+    }
+
+    private static Task IsScopeComplete_ReturnsFalse_WhenNotInExecutionPhase()
+    {
+        var state = BuildStateWithRoles();
+        state.Phase = WorkflowPhase.Planning;
+        state.Issues.Add(new IssueItem { Id = 1, Title = "Plan work", RoleSlug = "planner", PipelineId = 1, Status = ItemStatus.Done });
+
+        var result = DevTeamRuntime.IsScopeComplete(state);
+
+        Assert.That(!result, "Expected IsScopeComplete=false outside of Execution phase.");
+        return Task.CompletedTask;
+    }
 }

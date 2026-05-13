@@ -31,8 +31,10 @@ internal static class ReconServiceTests
         new("WorkspaceStore_DoesNotWriteContextFile_WhenEmpty", WorkspaceStore_DoesNotWriteContextFile_WhenEmpty),
         new("WorkspaceStore_WritesRepoMemoryFiles_WhenPresent", WorkspaceStore_WritesRepoMemoryFiles_WhenPresent),
         new("WorkspaceStore_Initialize_HydratesRepoMemory_WhenPresent", WorkspaceStore_Initialize_HydratesRepoMemory_WhenPresent),
-            new("BuildPrompt_IncludesArchitectPlanningFeedback_WhenPresent", BuildPrompt_IncludesArchitectPlanningFeedback_WhenPresent),
-            new("BuildPrompt_KeepsArchitectPlanningFeedback_WhenRecentDecisionWindowIsCrowded", BuildPrompt_KeepsArchitectPlanningFeedback_WhenRecentDecisionWindowIsCrowded),
+        new("BuildPrompt_IncludesArchitectPlanningFeedback_WhenPresent", BuildPrompt_IncludesArchitectPlanningFeedback_WhenPresent),
+        new("BuildPrompt_KeepsArchitectPlanningFeedback_WhenRecentDecisionWindowIsCrowded", BuildPrompt_KeepsArchitectPlanningFeedback_WhenRecentDecisionWindowIsCrowded),
+        new("ParseResponse_ParsesSelectedIssueIds_WithHashPrefix", ParseResponse_ParsesSelectedIssueIds_WithHashPrefix),
+        new("ParseResponse_ParsesSelectedIssueIds_MixedHashAndPlain", ParseResponse_ParsesSelectedIssueIds_MixedHashAndPlain),
     ];
 
     private static Task BuildReconPrompt_IncludesGoal_WhenProvided()
@@ -407,6 +409,69 @@ internal static class ReconServiceTests
         Assert.Contains("Which deployment environment", question.Text);
         Assert.Contains("Context:", question.Text);
         Assert.Contains("staging/prod", question.Text);
+        return Task.CompletedTask;
+    }
+
+    private static Task ParseResponse_ParsesSelectedIssueIds_WithHashPrefix()
+    {
+        // LLMs frequently write "- #13" instead of "- 13" for issue references.
+        // Both forms must be accepted.
+        var parsed = AgentPromptBuilder.ParseResponse(new AgentInvocationResult
+        {
+            ExitCode = 0,
+            StdOut = """
+                OUTCOME: completed
+                SUMMARY:
+                Selected the next batch.
+                SELECTED_ISSUES:
+                - #5
+                - #12
+                - #23
+                ISSUES:
+                (none)
+                SKILLS_USED:
+                (none)
+                TOOLS_USED:
+                (none)
+                QUESTIONS:
+                (none)
+                """
+        });
+
+        Assert.That(parsed.SelectedIssueIds.Count == 3, $"Expected 3 selected issue ids but got {parsed.SelectedIssueIds.Count}.");
+        Assert.That(parsed.SelectedIssueIds.Contains(5), "Expected issue #5 to be parsed from '- #5'.");
+        Assert.That(parsed.SelectedIssueIds.Contains(12), "Expected issue #12 to be parsed from '- #12'.");
+        Assert.That(parsed.SelectedIssueIds.Contains(23), "Expected issue #23 to be parsed from '- #23'.");
+        return Task.CompletedTask;
+    }
+
+    private static Task ParseResponse_ParsesSelectedIssueIds_MixedHashAndPlain()
+    {
+        // Responses may mix "- 5" and "- #6" formats; both must be parsed correctly.
+        var parsed = AgentPromptBuilder.ParseResponse(new AgentInvocationResult
+        {
+            ExitCode = 0,
+            StdOut = """
+                OUTCOME: completed
+                SUMMARY:
+                Selected the next batch.
+                SELECTED_ISSUES:
+                - 5
+                - #6
+                ISSUES:
+                (none)
+                SKILLS_USED:
+                (none)
+                TOOLS_USED:
+                (none)
+                QUESTIONS:
+                (none)
+                """
+        });
+
+        Assert.That(parsed.SelectedIssueIds.Count == 2, $"Expected 2 selected issue ids but got {parsed.SelectedIssueIds.Count}.");
+        Assert.That(parsed.SelectedIssueIds.Contains(5), "Expected issue 5 from '- 5'.");
+        Assert.That(parsed.SelectedIssueIds.Contains(6), "Expected issue 6 from '- #6'.");
         return Task.CompletedTask;
     }
 
