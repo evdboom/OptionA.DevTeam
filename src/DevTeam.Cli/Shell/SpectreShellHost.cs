@@ -29,6 +29,9 @@ internal static class SpectreShellHost
         var historyCursor = -1; // -1 = not navigating history
         var savedDraft = string.Empty; // preserves unsent input while browsing history
         var scrollOffset = 0;  // 0 = auto-follow latest; N = scrolled N lines up
+        var tabCandidates = Array.Empty<string>();  // current completion matches
+        var tabIndex = -1;         // cycle index; -1 = not completing
+        var tabOriginal = string.Empty; // input before Tab was first pressed
         var adventureSession = new AdventureSessionState();
         var normalLayout = BuildLayoutTree();
         var adventureLayout = AdventureShellHost.BuildLayoutTree();
@@ -79,7 +82,7 @@ internal static class SpectreShellHost
                         }
                         else
                         {
-                            ReadInput(inputBuffer, shell, commandChannel.Writer, ref cursorPosition, ref historyCursor, ref savedDraft, ref scrollOffset);
+                            ReadInput(inputBuffer, shell, commandChannel.Writer, ref cursorPosition, ref historyCursor, ref savedDraft, ref scrollOffset, ref tabCandidates, ref tabIndex, ref tabOriginal);
                         }
 
                         var inputChanged = !string.Equals(inputText, inputBuffer.ToString(), StringComparison.Ordinal)
@@ -187,7 +190,7 @@ internal static class SpectreShellHost
     // ── Input handling ─────────────────────────────────────────────────────────
 
     [SuppressMessage("Major Code Smell", "S3776", Justification = "Interactive key-handling loop necessarily branches on many key combinations.")]
-    private static void ReadInput(StringBuilder inputBuffer, ShellService shell, ChannelWriter<string> commandWriter, ref int cursorPosition, ref int historyCursor, ref string savedDraft, ref int scrollOffset)
+    private static void ReadInput(StringBuilder inputBuffer, ShellService shell, ChannelWriter<string> commandWriter, ref int cursorPosition, ref int historyCursor, ref string savedDraft, ref int scrollOffset, ref string[] tabCandidates, ref int tabIndex, ref string tabOriginal)
     {
         if (Console.IsInputRedirected) return;
 
@@ -266,6 +269,7 @@ internal static class SpectreShellHost
                 inputBuffer.Insert(cursorPosition, '\n');
                 cursorPosition++;
                 historyCursor = -1;
+                tabIndex = -1;
                 continue;
             }
 
@@ -277,6 +281,7 @@ internal static class SpectreShellHost
                 cursorPosition = 0;
                 historyCursor = -1;
                 savedDraft = string.Empty;
+                tabIndex = -1;
                 if (!string.IsNullOrWhiteSpace(command))
                     commandWriter.TryWrite(command);
                 continue;
@@ -307,6 +312,7 @@ internal static class SpectreShellHost
                 inputBuffer.Clear();
                 inputBuffer.Append(history[historyCursor]);
                 cursorPosition = inputBuffer.Length;
+                tabIndex = -1;
                 continue;
             }
 
@@ -330,6 +336,7 @@ internal static class SpectreShellHost
                     inputBuffer.Clear();
                     inputBuffer.Append(history[historyCursor]);
                     cursorPosition = inputBuffer.Length;
+                    tabIndex = -1;
                 }
                 else
                 {
@@ -338,6 +345,7 @@ internal static class SpectreShellHost
                     inputBuffer.Append(savedDraft);
                     cursorPosition = inputBuffer.Length;
                     savedDraft = string.Empty;
+                    tabIndex = -1;
                 }
                 continue;
             }
@@ -366,7 +374,10 @@ internal static class SpectreShellHost
             if (key.Key == ConsoleKey.Delete)
             {
                 if (cursorPosition < inputBuffer.Length)
+                {
                     inputBuffer.Remove(cursorPosition, 1);
+                    tabIndex = -1;
+                }
                 continue;
             }
 
@@ -379,6 +390,34 @@ internal static class SpectreShellHost
                     cursorPosition--;
                 }
                 historyCursor = -1;
+                tabIndex = -1;
+                continue;
+            }
+
+            // Tab → cycle through completion candidates
+            if (key.Key == ConsoleKey.Tab)
+            {
+                if (tabIndex == -1)
+                {
+                    // First Tab press: compute candidates from current input
+                    tabOriginal = inputBuffer.ToString();
+                    var matches = shell.GetCompletions(tabOriginal);
+                    if (matches.Count == 0) continue;
+                    tabCandidates = matches.ToArray();
+                    tabIndex = 0;
+                }
+                else
+                {
+                    // Subsequent Tab: cycle forward (Shift+Tab cycles backward)
+                    if (key.Modifiers.HasFlag(ConsoleModifiers.Shift))
+                        tabIndex = (tabIndex - 1 + tabCandidates.Length) % tabCandidates.Length;
+                    else
+                        tabIndex = (tabIndex + 1) % tabCandidates.Length;
+                }
+
+                inputBuffer.Clear();
+                inputBuffer.Append(tabCandidates[tabIndex]);
+                cursorPosition = inputBuffer.Length;
                 continue;
             }
 
@@ -388,6 +427,7 @@ internal static class SpectreShellHost
                 cursorPosition = 0;
                 historyCursor = -1;
                 savedDraft = string.Empty;
+                tabIndex = -1;
                 continue;
             }
 
@@ -396,6 +436,7 @@ internal static class SpectreShellHost
                 inputBuffer.Insert(cursorPosition, key.KeyChar);
                 cursorPosition++;
                 historyCursor = -1;
+                tabIndex = -1;
             }
         }
     }

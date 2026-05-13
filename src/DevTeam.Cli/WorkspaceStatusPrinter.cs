@@ -453,6 +453,6 @@ internal static class WorkspaceStatusPrinter
         Console.WriteLine();
         Console.WriteLine(ConsoleTheme.Label("Direct role invocation:"));
         Console.WriteLine($"  {ConsoleTheme.Command("@role")} <message>    Talk directly to any role (e.g. {ConsoleTheme.Muted("@architect can you review our API design?")})");
-        Console.WriteLine($"  Roles: use {ConsoleTheme.Command("/status")} to see available roles. Tab-completes after {ConsoleTheme.Muted("@")}.");
+        Console.WriteLine($"  Roles: use {ConsoleTheme.Command("/roles")} to list available roles. Tab-completes after {ConsoleTheme.Muted("@")} and {ConsoleTheme.Muted("/")}.");
     }
 }

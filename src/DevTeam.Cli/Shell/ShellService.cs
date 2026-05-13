@@ -363,8 +363,8 @@ internal sealed partial class ShellService(
                         AddLine("A loop is running. Use [cyan]/stop[/] first before reinitializing the workspace.");
                         break;
                     }
-                    var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
-                    var premiumCap = GetDoubleOption(options, "premium-credit-cap", 6);
+                    var totalCap = GetDoubleOption(options, "total-credit-cap", 50);
+                    var premiumCap = GetDoubleOption(options, "premium-credit-cap", 25);
                     var goal = GoalInputResolver.Resolve(
                         GetOption(options, "goal") ?? GetPositionalValue(options),
                         GetOption(options, "goal-file"),
@@ -391,6 +391,33 @@ internal sealed partial class ShellService(
                 case "status":
                     PrintStatus(_store.Load());
                     break;
+
+                case "roles":
+                {
+                    TryLoadState(out var current);
+                    if (current is null)
+                    {
+                        AddWarning("No workspace loaded — run /init first.");
+                        break;
+                    }
+                    var roles = current.Roles.OrderBy(r => r.Slug, StringComparer.OrdinalIgnoreCase).ToList();
+                    if (roles.Count == 0)
+                    {
+                        AddHint("No roles loaded. Run [cyan]/customize[/] to copy the default prompt assets.");
+                        break;
+                    }
+                    var sb = new StringBuilder();
+                    sb.AppendLine("[bold]Available roles:[/]");
+                    foreach (var role in roles)
+                    {
+                        var name = string.IsNullOrWhiteSpace(role.Name) ? role.Slug : role.Name;
+                        sb.AppendLine($"  [cyan]@{Markup.Escape(role.Slug)}[/]  [dim]{Markup.Escape(name)}[/]");
+                    }
+                    sb.AppendLine();
+                    sb.Append("[dim]Usage: @role <message>  e.g. @architect can you review our API design?[/]");
+                    AddSystem(sb.ToString(), "roles");
+                    break;
+                }
 
                 case "history":
                 {
@@ -1656,6 +1683,7 @@ internal sealed partial class ShellService(
             $"[dim]({budget.TotalCreditCap - budget.CreditsCommitted:0.##} remaining)[/], " +
             $"premium {budget.PremiumCreditsCommitted:0.##}/{budget.PremiumCreditCap} " +
             $"[dim]({budget.PremiumCreditCap - budget.PremiumCreditsCommitted:0.##} remaining)[/]");
+        AddLine($"Use [cyan]/budget --total <amount> --premium <amount>[/] to adjust caps.");
     }
 
     private void PrintQuestions(WorkspaceState state)

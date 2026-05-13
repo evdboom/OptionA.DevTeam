@@ -41,6 +41,7 @@ public static class CoreConstants
         public const string ClaudeSonnet46 = "claude-sonnet-4.6";
         public const string ClaudeOpus46 = "claude-opus-4.6";
         public const string ClaudeOpus47 = "claude-opus-4.7";
+        public const string Gpt55 = "gpt-5.5";
         public const string Gpt54 = "gpt-5.4";
         public const string Gpt54Mini = "gpt-5.4-mini";
         public const string Gpt5Mini = "gpt-5-mini";

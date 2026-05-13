@@ -32,6 +32,7 @@ internal sealed partial class ShellService
         sb.AppendLine("  [cyan]/start-here[/] [[new|medior|expert]]  [dim]Show the guided onboarding flow for your persona[/]");
         sb.AppendLine("  [cyan]/bug[/] [[--save PATH]] [[--redact-paths true|false]]  [dim]Generate a sanitized bug report draft[/]");
         sb.AppendLine("  [cyan]/status[/]               [dim]Show workspace phase, open issues, and stall state[/]");
+        sb.AppendLine("  [cyan]/roles[/]                [dim]List available roles for @role direct invocation[/]");
         sb.AppendLine("  [cyan]/history[/]              [dim]Show session command history (last 50)[/]");
         sb.AppendLine("  [cyan]/mode[/] <slug>          [dim]Switch the active run mode[/]");
         sb.AppendLine("  [cyan]/pipeline[/]             [dim]Show the current default role chain[/]");
@@ -71,7 +72,8 @@ internal sealed partial class ShellService
         sb.AppendLine("  While a plan is awaiting approval, plain text is treated as planning feedback.");
         sb.AppendLine();
         sb.AppendLine("[bold]Direct role invocation:[/]");
-        sb.Append("  [cyan]@role[/] <message>    e.g. [dim]@architect can you review our API design?[/]");
+        sb.AppendLine("  [cyan]@role[/] <message>    e.g. [dim]@architect can you review our API design?[/]");
+        sb.Append("  [dim]Use /roles to list all available roles. Tab auto-completes after @ and /.[/]");
         if (showAll)
         {
             sb.AppendLine();
