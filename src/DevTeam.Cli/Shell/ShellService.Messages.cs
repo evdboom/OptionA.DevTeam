@@ -73,7 +73,7 @@ internal sealed partial class ShellService
         sb.AppendLine();
         sb.AppendLine("[bold]Direct role invocation:[/]");
         sb.AppendLine("  [cyan]@role[/] <message>    e.g. [dim]@architect can you review our API design?[/]");
-        sb.Append("  Use [cyan]/roles[/] to list all available roles. Tab auto-completes after [cyan]@[/].");
+        sb.Append("  [dim]Use /roles to list all available roles. Tab auto-completes after @ and /.[/]");
         if (showAll)
         {
             sb.AppendLine();
