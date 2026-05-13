@@ -6,9 +6,10 @@ namespace DevTeam.Cli.Shell;
 internal sealed partial class ShellService
 {
     /// <summary>
-    /// All user-facing slash commands recognised by the interactive shell.
+    /// User-facing slash commands recognised by the interactive shell.
     /// Primary form only — aliases (e.g. "quit", "run-loop") are omitted so
-    /// the autocomplete list stays concise.
+    /// the autocomplete list stays concise. Hidden extras (e.g. "adventure")
+    /// are intentionally excluded to preserve their discovery aspect.
     /// </summary>
     private static readonly string[] KnownCommands =
     [

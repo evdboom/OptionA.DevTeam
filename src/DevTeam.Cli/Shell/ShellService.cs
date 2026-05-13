@@ -363,8 +363,8 @@ internal sealed partial class ShellService(
                         AddLine("A loop is running. Use [cyan]/stop[/] first before reinitializing the workspace.");
                         break;
                     }
-                    var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
-                    var premiumCap = GetDoubleOption(options, "premium-credit-cap", 6);
+                    var totalCap = GetDoubleOption(options, "total-credit-cap", 50);
+                    var premiumCap = GetDoubleOption(options, "premium-credit-cap", 25);
                     var goal = GoalInputResolver.Resolve(
                         GetOption(options, "goal") ?? GetPositionalValue(options),
                         GetOption(options, "goal-file"),

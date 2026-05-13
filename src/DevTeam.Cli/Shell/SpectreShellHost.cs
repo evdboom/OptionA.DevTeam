@@ -269,6 +269,7 @@ internal static class SpectreShellHost
                 inputBuffer.Insert(cursorPosition, '\n');
                 cursorPosition++;
                 historyCursor = -1;
+                tabIndex = -1;
                 continue;
             }
 
@@ -311,6 +312,7 @@ internal static class SpectreShellHost
                 inputBuffer.Clear();
                 inputBuffer.Append(history[historyCursor]);
                 cursorPosition = inputBuffer.Length;
+                tabIndex = -1;
                 continue;
             }
 
@@ -334,6 +336,7 @@ internal static class SpectreShellHost
                     inputBuffer.Clear();
                     inputBuffer.Append(history[historyCursor]);
                     cursorPosition = inputBuffer.Length;
+                    tabIndex = -1;
                 }
                 else
                 {
@@ -342,6 +345,7 @@ internal static class SpectreShellHost
                     inputBuffer.Append(savedDraft);
                     cursorPosition = inputBuffer.Length;
                     savedDraft = string.Empty;
+                    tabIndex = -1;
                 }
                 continue;
             }
@@ -370,7 +374,10 @@ internal static class SpectreShellHost
             if (key.Key == ConsoleKey.Delete)
             {
                 if (cursorPosition < inputBuffer.Length)
+                {
                     inputBuffer.Remove(cursorPosition, 1);
+                    tabIndex = -1;
+                }
                 continue;
             }
 
