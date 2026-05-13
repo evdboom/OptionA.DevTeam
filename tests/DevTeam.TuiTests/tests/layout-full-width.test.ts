@@ -81,7 +81,7 @@ test("shell renders 3 full-width panels", async ({ terminal }) => {
 
   // Frame geometry checks: validate stable panel structure without dynamic snapshot values.
   const renderedRows = buffer.map(rowToString);
-  expect(renderedRows.some((line) => line.includes("- DevTeam -"))).toBeTruthy();
+  expect(renderedRows.some((line) => line.includes("- DevTeam"))).toBeTruthy();
   expect(renderedRows.some((line) => line.includes("- Progress -"))).toBeTruthy();
   expect(renderedRows.some((line) => line.includes("- devteam -"))).toBeTruthy();
 

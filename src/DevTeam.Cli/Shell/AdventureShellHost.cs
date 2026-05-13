@@ -72,7 +72,7 @@ internal static class AdventureShellHost
         var snapshot = shell.AdventureSnapshot;
         session.PlayerPosition = AdventureMapRenderer.EnsureValidPlayer(snapshot, session.PlayerPosition);
 
-        root["Header"].Update(ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning));
+        root["Header"].Update(ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning, folderName: shell.ProjectFolderName));
         root["Map"].Update(AdventureMapRenderer.BuildMapPanel(snapshot, session.PlayerPosition));
         root["Status"].Update(AdventureMapRenderer.BuildStatusPanel(snapshot, session.PlayerPosition, session.StatusMessage, session.ComposeRole));
         root["Input"].Update(AdventureMapRenderer.BuildInputPanel(activeInput, cursorPosition, session.ComposeRole));
