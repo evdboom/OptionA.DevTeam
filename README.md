@@ -531,56 +531,90 @@ Validate the checkout changes before release.
 
 ## BYOK / provider overrides
 
-DevTeam can optionally attach a named provider profile to **Copilot SDK-backed** runs. This lets you keep the same workflow while pointing a model at a specific OpenAI-compatible or Azure provider.
+DevTeam can optionally attach a named provider profile to **Copilot SDK-backed** runs. This lets you keep the same workflow while pointing a model at a specific OpenAI-compatible, Azure, or Anthropic provider — including locally-running models.
 
-Provider profiles live in `.devteam-source/PROVIDERS.json`:
+> **Prerequisite:** Provider overrides go through the GitHub Copilot CLI binary (bundled with the SDK). The CLI acts as the agent runtime and routes requests to your provider using your API key. A Copilot subscription is only required when using the default GitHub auth flow; BYOK sessions use your own key.
+
+Provider profiles live in `.devteam-source/PROVIDERS.json`. Run `/customize` to copy the default assets if the file doesn't exist yet.
+
+### Supported provider types
+
+| `Type` | Use for |
+|---|---|
+| `openai` | OpenAI, Mistral, Ollama, LM Studio, and any OpenAI-compatible endpoint |
+| `azure` | Azure OpenAI Service |
+| `anthropic` | Anthropic's API directly |
+
+### Example profiles
 
 ```json
 [
-  {
-    "Name": "ollama-local",
-    "Type": "openai",
-    "BaseUrl": "http://localhost:11434/v1",
-    "ApiKeyEnvVar": "OLLAMA_API_KEY"
-  },
-  {
-    "Name": "azure-foundry",
-    "Type": "azure",
-    "BaseUrl": "https://example.openai.azure.com/openai",
-    "ApiKeyEnvVar": "AZURE_OPENAI_KEY",
-    "AzureApiVersion": "2024-10-21"
-  }
+  { "Name": "ollama",        "Type": "openai",    "BaseUrl": "http://localhost:11434/v1",                "ApiKeyEnvVar": "OLLAMA_API_KEY" },
+  { "Name": "lm-studio",     "Type": "openai",    "BaseUrl": "http://localhost:1234/v1",                 "ApiKeyEnvVar": "LM_STUDIO_API_KEY" },
+  { "Name": "mistral",       "Type": "openai",    "BaseUrl": "https://api.mistral.ai/v1",                "ApiKeyEnvVar": "MISTRAL_API_KEY" },
+  { "Name": "openai",        "Type": "openai",    "BaseUrl": "https://api.openai.com/v1",                "ApiKeyEnvVar": "OPENAI_API_KEY" },
+  { "Name": "claude",        "Type": "anthropic", "BaseUrl": "https://api.anthropic.com",                "ApiKeyEnvVar": "ANTHROPIC_API_KEY" },
+  { "Name": "azure-foundry", "Type": "azure",     "BaseUrl": "https://example.openai.azure.com/openai", "ApiKeyEnvVar": "AZURE_OPENAI_KEY", "AzureApiVersion": "2024-10-21" }
 ]
 ```
 
-Available fields:
+### Available fields
 
 | Field | Required | Description |
 |---|---|---|
 | `Name` | yes | Provider slug used by `/set-provider` and `--provider` |
-| `Type` | yes | Provider type such as `openai` or `azure` |
+| `Type` | yes | `openai`, `azure`, or `anthropic` |
 | `BaseUrl` | yes | Base endpoint for the provider |
-| `ApiKeyEnvVar` | no | Environment variable containing an API key |
-| `BearerTokenEnvVar` | no | Environment variable containing a bearer token |
-| `WireApi` | no | Optional SDK wire API override such as `responses` |
-| `AzureApiVersion` | no | Azure OpenAI API version when `Type` is `azure` |
+| `ApiKeyEnvVar` | no* | Environment variable **name** containing an API key |
+| `BearerTokenEnvVar` | no* | Environment variable **name** containing a bearer token |
+| `WireApi` | no | Optional SDK wire API override (e.g. `responses`) |
+| `AzureApiVersion` | no | Required when `Type` is `azure` (e.g. `2024-10-21`) |
+
+\* At least one of `ApiKeyEnvVar` or `BearerTokenEnvVar` must be set. The value is read from the environment at runtime and never stored in workspace state. For Ollama and LM Studio the key is not validated — set a placeholder: `$env:OLLAMA_API_KEY = "ollama"`.
+
+### Pointing models at a provider
+
+Provider profiles are selected at runtime and don't automatically attach to a model. Add the model to `.devteam-source/MODELS.json` using the exact identifier the provider expects:
+
+```json
+{ "Name": "llama3.2", "Cost": 0, "Default": false }
+```
+
+The model name must match what the provider's API accepts (e.g. `mistral-small-latest` for Mistral, `claude-sonnet-4-5` for Anthropic, `llama3.2` for Ollama).
+
+### Activating a provider
+
+Set the environment variable first:
+
+```powershell
+$env:MISTRAL_API_KEY    = "your-key-here"
+$env:ANTHROPIC_API_KEY  = "sk-ant-..."
+$env:OLLAMA_API_KEY     = "ollama"      # placeholder; Ollama does not validate keys
+$env:LM_STUDIO_API_KEY  = "lm-studio"  # placeholder
+```
 
 Use a workspace default when you want the same provider on every SDK-backed run:
 
 ```powershell
-devteam /set-provider ollama-local --workspace .devteam
-devteam /provider --workspace .devteam
+devteam /set-provider ollama --workspace .devteam
+devteam /provider --workspace .devteam      # confirm active provider and list configured ones
 ```
 
-Or override it for a single command:
+Or override for a single command:
 
 ```powershell
-devteam /plan --workspace .devteam --provider azure-foundry
-devteam /run --workspace .devteam --provider azure-foundry --max-iterations 3
-devteam agent-invoke --provider azure-foundry --prompt "Reply with READY and nothing else."
+devteam /plan --workspace .devteam --provider mistral
+devteam /run --workspace .devteam --provider claude --max-iterations 3
+devteam agent-invoke --provider ollama --prompt "Reply with READY and nothing else."
 ```
 
-If no provider override is set, DevTeam keeps using the default GitHub Copilot authentication flow. Provider overrides are not supported on the legacy CLI backend; use the default `sdk` backend for BYOK sessions.
+Reset to default GitHub Copilot auth at any time:
+
+```powershell
+devteam /set-provider default --workspace .devteam
+```
+
+If no provider override is set, DevTeam uses the default GitHub Copilot authentication flow. Provider overrides are not supported on the legacy CLI backend; use the default `sdk` backend for BYOK sessions.
 
 Autopilot mode automatically approves both the plan and architect plan, so the loop runs end-to-end without pausing for human input. Enable it at init time or switch later:
 
@@ -691,6 +725,20 @@ Use reviewer when you want a gate on a concrete change. Use auditor when you wan
 When work is approved, the runtime automatically creates multi-role pipelines. For example, a feature issue assigned to `architect` will, on completion, generate a follow-up for `developer`, and then `tester`. Each stage must complete before the next starts.
 
 Independent pipelines (different `area` values) run concurrently. Pipelines in the same area are serialized to avoid merge conflicts.
+
+### Loop exit states
+
+The loop stops each time it hits the iteration cap or runs out of ready work. When it stops, it prints a final state that tells you why:
+
+| Final state | Meaning | What to do |
+|---|---|---|
+| `scope-complete` | All planned, pipeline-assigned issues are **Done**. Guardrail drift issues (auditor/reviewer) may still exist, but the original scope is finished. | Use `/export` to archive, or `/run` again to let drift work finish. |
+| `no-ready-work` | Issues exist but none are ready to pick up right now (dependencies pending, questions blocking, etc.). | Check `/questions` for blocking items, or use `/status` to see what is waiting. |
+| `waiting-for-input` | A blocking question is open that requires your answer before the loop can progress. | Use `/questions` to see and answer it. |
+| `iteration-limit` | The loop hit `--max-iterations` before running out of work. | Run `/run` again to continue. |
+| `budget-exhausted` | Credits ran out. All roles are now falling back to free models. | Use `/budget` to increase the cap, or run again knowing free models will be used. |
+
+`scope-complete` is the normal "done" signal for a goal. The loop printing it means agents finished everything in the approved plan; any remaining open issues are guardrail follow-ups (reviewer, auditor) that were added automatically during execution.
 
 ## Extending with MCP servers
 
