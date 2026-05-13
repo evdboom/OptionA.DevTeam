@@ -1276,7 +1276,8 @@ public class LoopExecutor(
         var selectedIssueIds = parsed.SelectedIssueIds.Count > 0
             ? parsed.SelectedIssueIds
             : ExtractSelectedIssueIds(response.StdOut);
-        if (state.ExecutionSelection.SelectedIssueIds.Count == 0 && selectedIssueIds.Count > 0)
+        var mcpSelectionPresent = state.ExecutionSelection.SelectedIssueIds.Count > 0;
+        if (!mcpSelectionPresent && selectedIssueIds.Count > 0)
         {
             _runtime.SetExecutionSelection(state, selectedIssueIds, parsed.Summary, orchestratorSession.SessionId, options.MaxSubagents);
         }
@@ -1284,6 +1285,10 @@ public class LoopExecutor(
         if (selectedIssueIds.Count > 0)
         {
             Log(log, options.Verbosity, $"  Orchestrator selected: {string.Join(", ", selectedIssueIds.Select(id => $"#{id}"))}");
+        }
+        else if (!mcpSelectionPresent)
+        {
+            LogDetailed(log, options.Verbosity, "  Orchestrator did not include SELECTED_ISSUES in response and did not call select_execution_batch.");
         }
 
         if (parsed.Outcome is "failed" or "blocked")
@@ -1352,6 +1357,7 @@ public class LoopExecutor(
             .Select(line => line.Trim())
             .Where(line => line.StartsWith("-", StringComparison.Ordinal))
             .Select(line => line[1..].Trim())
+            .Select(value => value.StartsWith("#", StringComparison.Ordinal) ? value[1..] : value)
             .Select(value => int.TryParse(value, out var parsed) ? parsed : 0)
             .Where(value => value > 0)
             .Distinct()
