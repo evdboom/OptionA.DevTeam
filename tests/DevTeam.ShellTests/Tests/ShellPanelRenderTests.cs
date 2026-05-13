@@ -12,6 +12,9 @@ internal static class ShellPanelRenderTests
         new("HeaderPanel_PlanningPhase_ContainsPhaseLabel", HeaderPanel_PlanningPhase_ContainsPhaseLabel),
         new("HeaderPanel_ExecutionPhase_Running_ContainsRunningLabel", HeaderPanel_ExecutionPhase_Running_ContainsRunningLabel),
         new("HeaderPanel_WithCycleStatus_ShowsRunningAndDone", HeaderPanel_WithCycleStatus_ShowsRunningAndDone),
+        new("HeaderPanel_WithFolderName_ShowsFolderNameInTitle", HeaderPanel_WithFolderName_ShowsFolderNameInTitle),
+        new("HeaderPanel_WithNoFolderName_ShowsDefaultTitle", HeaderPanel_WithNoFolderName_ShowsDefaultTitle),
+        new("HeaderPanel_WithMarkupSensitiveFolderName_EscapesBrackets", HeaderPanel_WithMarkupSensitiveFolderName_EscapesBrackets),
         new("ProgressPanel_NoEvents_ContainsPlaceholder", ProgressPanel_NoEvents_ContainsPlaceholder),
         new("EmptyPanel_ContainsTitle", EmptyPanel_ContainsTitle),
         new("VisibleLength_PlainText_ReturnsCorrectCount", VisibleLength_PlainText_ReturnsCorrectCount),
@@ -71,6 +74,36 @@ internal static class ShellPanelRenderTests
         Assert.That(output.Contains("Orchestrator"), $"Expected orchestrator line but got: {output}");
         Assert.That(output.Contains("issue #4"), $"Expected issue #4 line in header but got: {output}");
         Assert.That(output.Contains("done"), $"Expected completed marker but got: {output}");
+        return Task.CompletedTask;
+    }
+
+    private static Task HeaderPanel_WithFolderName_ShowsFolderNameInTitle()
+    {
+        var console = CreateConsole();
+        console.Write(ShellPanelBuilder.BuildHeader(WorkflowPhase.Planning, isRunning: false, folderName: "my-project"));
+        var output = console.Output;
+        Assert.That(output.Contains("my-project"), $"Expected folder name 'my-project' in header output but got: {output}");
+        Assert.That(output.Contains("DevTeam"), $"Expected 'DevTeam' in header output but got: {output}");
+        return Task.CompletedTask;
+    }
+
+    private static Task HeaderPanel_WithNoFolderName_ShowsDefaultTitle()
+    {
+        var console = CreateConsole();
+        console.Write(ShellPanelBuilder.BuildHeader(WorkflowPhase.Planning, isRunning: false));
+        var output = console.Output;
+        Assert.That(output.Contains("DevTeam"), $"Expected 'DevTeam' in header output but got: {output}");
+        Assert.That(!output.Contains("·"), $"Expected no folder separator when folderName is null but got: {output}");
+        return Task.CompletedTask;
+    }
+
+    private static Task HeaderPanel_WithMarkupSensitiveFolderName_EscapesBrackets()
+    {
+        var console = CreateConsole();
+        console.Write(ShellPanelBuilder.BuildHeader(WorkflowPhase.Planning, isRunning: false, folderName: "project[test]"));
+        var output = console.Output;
+        Assert.That(output.Length > 0, $"Expected header to render without throwing for markup-sensitive folder name");
+        Assert.That(output.Contains("project"), $"Expected folder name content in header output but got: {output}");
         return Task.CompletedTask;
     }
 

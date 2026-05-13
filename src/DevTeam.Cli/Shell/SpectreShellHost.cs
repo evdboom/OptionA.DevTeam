@@ -47,9 +47,17 @@ internal static class SpectreShellHost
         // pre-launch terminal content is hidden and fully restored on exit.
         // This is the same mechanism used by vim, less, htop, etc.
         var useAltScreen = !Console.IsOutputRedirected && !Console.IsInputRedirected;
+        string? previousTitle = null;
         if (useAltScreen)
         {
             Console.Write("\x1b[?1049h"); // enter alternate screen
+            if (OperatingSystem.IsWindows())
+            {
+                // Console.Title can throw IOException on some Windows terminals (e.g. redirected,
+                // dumb, or permission-restricted). Title changes are non-critical: ignore failures.
+                try { previousTitle = Console.Title; } catch (IOException) { }
+                try { Console.Title = $"DevTeam · {shell.ProjectFolderName}"; } catch (IOException) { }
+            }
             TerminalMouseScroll.EnableTracking();
         }
 
@@ -132,6 +140,11 @@ internal static class SpectreShellHost
             {
                 TerminalMouseScroll.DisableTracking();
                 Console.Write("\x1b[?1049l"); // restore original screen
+                if (OperatingSystem.IsWindows() && previousTitle is not null)
+                {
+                    // Restore original title; ignore IOException if the terminal no longer supports it.
+                    try { Console.Title = previousTitle; } catch (IOException) { }
+                }
             }
 
             try
@@ -182,7 +195,7 @@ internal static class SpectreShellHost
     {
         var snapshot = shell.LayoutSnapshot;
 
-        root["Header"].Update(ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning, snapshot.CurrentCycle));
+        root["Header"].Update(ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning, snapshot.CurrentCycle, shell.ProjectFolderName));
         root["Body"].Update(ShellPanelBuilder.BuildProgressPanel(shell.Messages, scrollOffset));
         root["Input"].Update(ShellPanelBuilder.BuildInput(shell.PromptText, activeInput, cursorPosition));
     }
