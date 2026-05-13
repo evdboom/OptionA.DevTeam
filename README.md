@@ -181,7 +181,7 @@ devteam> /run --max-iterations 5 --max-subagents 3
   Budget: 8/25 credits used (2/6 premium)
   ...
   Iteration 5: 3 pipelines completed, 1 question pending
-  Loop finished: waiting-for-input
+  Loop finished: waiting-for-user
 ```
 
 ### Choose the workflow that fits you
@@ -733,10 +733,11 @@ The loop stops each time it hits the iteration cap or runs out of ready work. Wh
 | Final state | Meaning | What to do |
 |---|---|---|
 | `scope-complete` | All planned, pipeline-assigned issues are **Done**. Guardrail drift issues (auditor/reviewer) may still exist, but the original scope is finished. | Use `/export` to archive, or `/run` again to let drift work finish. |
-| `no-ready-work` | Issues exist but none are ready to pick up right now (dependencies pending, questions blocking, etc.). | Check `/questions` for blocking items, or use `/status` to see what is waiting. |
-| `waiting-for-input` | A blocking question is open that requires your answer before the loop can progress. | Use `/questions` to see and answer it. |
-| `iteration-limit` | The loop hit `--max-iterations` before running out of work. | Run `/run` again to continue. |
-| `budget-exhausted` | Credits ran out. All roles are now falling back to free models. | Use `/budget` to increase the cap, or run again knowing free models will be used. |
+| `idle` | No ready work remains, and the loop is not blocked on an approval or a user question. | Use `/status` to inspect the board, or create/refine more issues before running again. |
+| `waiting-for-user` | A blocking question is open that requires your answer before the loop can progress. | Use `/questions` to see and answer it. |
+| `awaiting-plan-approval` | Planning has produced a plan and the loop is waiting for approval before execution can continue. | Review the plan with `/plan`, then approve it. |
+| `awaiting-architect-approval` | Architect planning has produced the detailed execution plan and is waiting for approval. | Review the architect output with `/plan`, then approve it. |
+| `queued` | The loop stopped because it hit `--max-iterations` while work was still queued or ready to continue. | Run `/run` again to keep processing the backlog. |
 
 `scope-complete` is the normal "done" signal for a goal. The loop printing it means agents finished everything in the approved plan; any remaining open issues are guardrail follow-ups (reviewer, auditor) that were added automatically during execution.
 

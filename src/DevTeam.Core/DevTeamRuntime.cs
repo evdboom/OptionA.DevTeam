@@ -366,8 +366,8 @@ public class DevTeamRuntime
 
     /// <summary>
     /// Returns true when all execution issues whose work was planned by the architect (i.e., issues
-    /// that have a pipeline assignment and are not planning, audit, or docs-only drift issues) are Done.
-    /// An open or in-progress guardrail-generated drift issue does not prevent scope-complete.
+    /// that have a pipeline assignment and are not planning issues or repo-audit issues) are Done.
+    /// An open or in-progress repo-audit guardrail issue does not prevent scope-complete.
     /// </summary>
     public static bool IsScopeComplete(WorkspaceState state)
     {
