@@ -71,6 +71,9 @@ internal sealed partial class ShellService(
 
     public string PromptText => IsLoopRunning ? "devteam (running)> " : "devteam> ";
 
+    /// <summary>Current working directory folder name used in TUI title and terminal title.</summary>
+    public string ProjectFolderName { get; } = Path.GetFileName(Environment.CurrentDirectory) ?? "devteam";
+
     /// <summary>Snapshot of data needed by the layout panels. Updated on every state change.</summary>
     public ShellLayoutSnapshot LayoutSnapshot
     {

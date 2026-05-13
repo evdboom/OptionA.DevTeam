@@ -50,6 +50,7 @@ internal static class SpectreShellHost
         if (useAltScreen)
         {
             Console.Write("\x1b[?1049h"); // enter alternate screen
+            Console.Title = $"DevTeam · {shell.ProjectFolderName}";
             TerminalMouseScroll.EnableTracking();
         }
 
@@ -182,7 +183,7 @@ internal static class SpectreShellHost
     {
         var snapshot = shell.LayoutSnapshot;
 
-        root["Header"].Update(ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning, snapshot.CurrentCycle));
+        root["Header"].Update(ShellPanelBuilder.BuildHeader(snapshot.Phase, shell.IsLoopRunning, snapshot.CurrentCycle, shell.ProjectFolderName));
         root["Body"].Update(ShellPanelBuilder.BuildProgressPanel(shell.Messages, scrollOffset));
         root["Input"].Update(ShellPanelBuilder.BuildInput(shell.PromptText, activeInput, cursorPosition));
     }

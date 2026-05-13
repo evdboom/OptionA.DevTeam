@@ -15,7 +15,7 @@ internal static class ShellPanelBuilder
     internal const int HeaderSize = 4;
     internal const int InputSize = 6;
 
-    internal static Panel BuildHeader(WorkflowPhase phase, bool isRunning, IReadOnlyList<CycleSlot>? currentCycle = null)
+    internal static Panel BuildHeader(WorkflowPhase phase, bool isRunning, IReadOnlyList<CycleSlot>? currentCycle = null, string? folderName = null)
     {
         var phaseTag = phase switch
         {
@@ -32,8 +32,12 @@ internal static class ShellPanelBuilder
             FormatHeaderCycleSummary(currentCycle ?? []),
         };
 
+        var title = string.IsNullOrWhiteSpace(folderName)
+            ? "- [teal bold]DevTeam[/] -"
+            : $"- [teal bold]DevTeam[/] · [dim]{Markup.Escape(folderName)}[/] -";
+
         return new Panel(new Markup(string.Join("\n", lines)))
-            .Header("- [teal bold]DevTeam[/] -", Justify.Center)
+            .Header(title, Justify.Center)
             .BorderColor(Color.Purple3)
             .Expand();
     }
