@@ -26,8 +26,8 @@ internal sealed class InitWorkspaceCommandHandler(
             _output.WriteErrorLine("Use --force to reinitialize (this will reset all workspace state).");
             return 1;
         }
-        var totalCap = GetDoubleOption(options, "total-credit-cap", 25);
-        var premiumCap = GetDoubleOption(options, "premium-credit-cap", 6);
+        var totalCap = GetDoubleOption(options, "total-credit-cap", 50);
+        var premiumCap = GetDoubleOption(options, "premium-credit-cap", 25);
         var goal = GoalInputResolver.Resolve(
             GetOption(options, "goal") ?? GetPositionalValue(options),
             GetOption(options, "goal-file"),
