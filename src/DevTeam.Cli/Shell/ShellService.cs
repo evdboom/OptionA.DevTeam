@@ -963,6 +963,11 @@ internal sealed partial class ShellService(
                         AddSystem($"Loop finished — [bold]{waitReport.IterationsExecuted}[/] iteration(s). Final state: [cyan]{Markup.Escape(waitReport.FinalState)}[/]", "loop complete");
                         PrintBudget(current.Budget);
                         if (waitReport.FinalState == "awaiting-architect-approval") TryPrintArchitectSummary(current);
+                        if (waitReport.FinalState == CoreConstants.LoopStates.ScopeComplete)
+                        {
+                            AddEvent("🎉", "[bold green]Scope complete[/] — all planned issues are done. Guardrail drift work may still be queued.", GreenStyle);
+                            AddHint("Use [cyan]/export[/] to archive progress, or [cyan]/run[/] to continue with remaining drift/polish work.");
+                        }
                     }
                     catch (OperationCanceledException)
                     {
@@ -1151,6 +1156,11 @@ internal sealed partial class ShellService(
                     AddHistory($"loop complete — {r.IterationsExecuted} iteration(s), state: {r.FinalState}");
                     PrintBudget(completedState.Budget);
                     if (r.FinalState == "awaiting-architect-approval") TryPrintArchitectSummary(completedState);
+                    if (r.FinalState == CoreConstants.LoopStates.ScopeComplete)
+                    {
+                        AddEvent("🎉", "[bold green]Scope complete[/] — all planned issues are done. Guardrail drift work may still be queued.", GreenStyle);
+                        AddHint("Use [cyan]/export[/] to archive progress, or [cyan]/run[/] to continue with remaining drift/polish work.");
+                    }
                 }
             }
             catch { /* swallow continuation errors */ }

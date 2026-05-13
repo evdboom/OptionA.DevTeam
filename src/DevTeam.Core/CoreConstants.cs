@@ -24,6 +24,7 @@ public static class CoreConstants
     {
         public const string Queued = "queued";
         public const string Idle = "idle";
+        public const string ScopeComplete = "scope-complete";
         public const string WaitingForUser = "waiting-for-user";
         public const string AwaitingPlanApproval = "awaiting-plan-approval";
         public const string AwaitingArchitectApproval = "awaiting-architect-approval";
