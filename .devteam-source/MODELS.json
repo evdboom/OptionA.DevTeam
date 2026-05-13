@@ -16,7 +16,7 @@
     "Description": "Latest flagship Anthropic model. Highest reasoning capability, exceptional at complex system design.",
     "Strengths": ["Architect", "Navigator", "Reviewer", "Lead Engineer"],
     "BestFor": "Mission-critical architecture, large-scale refactors, deep technical reviews, organizational-level decisions",
-    "Cost": 7.5,
+    "Cost": 15,
     "Default": false
   },
   {
@@ -37,6 +37,16 @@
     "Strengths": ["User", "Docs"],
     "BestFor": "Small edits, formatting, lightweight code explanations, quick syntax help",
     "Cost": 0.33,
+    "Default": false
+  },
+  {
+    "Name": "gpt-5.5",
+    "Provider": "OpenAI",
+    "Context": "400K",
+    "Description": "Most capable OpenAI model. Deep reasoning, complex code generation, advanced problem-solving.",
+    "Strengths": ["Architect", "Navigator", "Reviewer", "Lead Engineer"],
+    "BestFor": "Mission-critical decisions, complex multi-file reasoning, large-scale architecture, deep technical reviews",
+    "Cost": 7.5,
     "Default": false
   },
   {
